@@ -61,7 +61,7 @@ def main():
     ap.add_argument("--no-wait", action="store_true")
     args = ap.parse_args()
 
-    cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8"))
+    cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8-sig"))
     pub = cfg["publish"]
 
     rows = load_rows()

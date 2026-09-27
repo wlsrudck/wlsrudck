@@ -1,5 +1,8 @@
 """키워드 + 메모로 네이버 블로그 글(제목/본문/태그)을 생성한다."""
 
+import os
+from pathlib import Path
+
 import anthropic
 from pydantic import BaseModel, Field
 
@@ -43,8 +46,18 @@ SYSTEM = """당신은 네이버 블로그 글을 쓰는 작가입니다.
 - 마크다운 기호(**, ##, - 등)는 쓰지 마세요. 에디터에 그대로 입력됩니다."""
 
 
+def _api_key() -> str | None:
+    """환경변수가 없으면 같은 폴더의 api_key.txt에서 읽는다."""
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return None  # SDK가 환경변수를 알아서 사용
+    key_file = Path(__file__).parent / "api_key.txt"
+    if key_file.exists() and key_file.read_text(encoding="utf-8-sig").strip():
+        return key_file.read_text(encoding="utf-8-sig").strip()
+    raise RuntimeError("api_key.txt 파일에 Claude API 키를 붙여넣어 주세요.")
+
+
 def generate_post(keyword: str, memo: str, cfg: dict) -> Post:
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(api_key=_api_key())
     prompt = (
         f"검색 키워드: {keyword}\n"
         f"작성자 메모: {memo or '(없음)'}\n\n"

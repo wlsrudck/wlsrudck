@@ -7,6 +7,17 @@ Playwright가 네이버 스마트에디터에 입력한 뒤 **임시저장**합�
 > 완전 자동 발행을 켜면 검색 누락, 저품질 판정, 글쓰기 제한, 계정 정지 위험이 있습니다. 본 계정이 아닌
 > 계정으로 먼저 시험하고, 하루 1~2개 이하로 쓰세요.
 
+## 코딩을 모르면 (Windows)
+
+1. [python.org](https://www.python.org/downloads/)에서 Python을 설치합니다. 첫 화면에서 **"Add python.exe to PATH"를 꼭 체크**하세요.
+2. 이 폴더에 `api_key.txt`를 만들고, Claude API 키를 붙여넣은 뒤 저장합니다.
+3. `config.toml`을 메모장으로 열어 `blog_id`를 내 블로그 아이디로 바꿉니다.
+4. 아래 파일을 순서대로 더블클릭합니다.
+   - `1_install.bat`: 필요한 프로그램 설치 (처음 한 번만)
+   - `2_login.bat`: 브라우저가 뜨면 네이버에 로그인하고, 검은 창에서 Enter
+   - `3_test_write_only.bat`: 글만 만들어서 `output` 폴더에 저장 (네이버에는 안 올림)
+   - `4_run_save_draft.bat`: 네이버에 입력하고 임시저장
+
 ## 설치
 
 ```bash

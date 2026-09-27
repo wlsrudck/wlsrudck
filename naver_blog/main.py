@@ -44,7 +44,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict) -> dict:
     folder.mkdir(parents=True, exist_ok=True)
     media = {"stock": {}}
     if cfg.get("thumbnail", True):
-        media["thumbnail"] = images.make_thumbnail(post.title, folder / "thumbnail.jpg", slug)
+        media["thumbnail"] = images.make_thumbnail(post.title, folder / "thumbnail.jpg", slug, post.thumbnail_text)
     if cfg.get("summary_card", True) and post.summary:
         media["summary_card"] = images.make_summary_card(post.title, post.summary, folder / "summary.jpg", slug)
 

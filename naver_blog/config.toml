@@ -7,8 +7,8 @@ blog_id = "여기에_블로그_아이디"   # blog.naver.com/<이 부분>
 # false(기본): 에디터에 입력 후 "임시저장"까지만. 발행 버튼은 직접 누르세요.
 # true: 자동 발행. 네이버 운영정책 위반 소지가 있고 저품질/정지 위험이 있습니다.
 auto_publish = false
-max_posts_per_day = 1        # 하루 최대 처리 개수
-max_posts_per_run = 1        # 한 번 실행할 때 처리 개수
+max_posts_per_day = 5        # 하루 최대 임시저장 개수 (발행은 직접, 하루 3~4개 권장)
+max_posts_per_run = 5        # 한 번 실행할 때 처리 개수
 start_jitter_minutes = [0, 90]    # 실행 시작 전 랜덤 대기(분). cron 시각을 매일 다르게 만드는 용도
 between_posts_minutes = [40, 120] # 글과 글 사이 랜덤 대기(분)
 headless = false             # 처음엔 false로 동작을 눈으로 확인하세요
@@ -24,3 +24,6 @@ model = "claude-opus-5"
 min_chars = 1500
 max_chars = 2500
 tone = "친근한 구어체, 존댓말, 과장 없이 담백하게"
+style = "homefeed"      # "homefeed": 네이버 홈판 노출용 제목/구성, "normal": 일반 정보글
+research = true         # 글 쓰기 전에 웹 검색으로 최신 정보 확인 (글당 비용 조금 증가)
+max_searches = 5        # 글 하나당 최대 검색 횟수

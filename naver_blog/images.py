@@ -58,14 +58,25 @@ def _wrap(draw, text: str, font, max_width: int) -> list[str]:
     return lines
 
 
-def make_thumbnail(title: str, out: Path, seed: str) -> Path:
+def make_thumbnail(title: str, out: Path, seed: str, phrase: list[str] | None = None) -> Path:
+    """phrase(짧은 문구 1~2줄)가 있으면 크게, 없으면 제목을 넣는다.
+    홈 피드에서는 썸네일이 작게 보이므로 짧은 문구를 크게 넣는 편이 잘 읽힌다."""
     bg, accent = random.Random(seed).choice(PALETTES)
     im = Image.new("RGB", (1080, 1080), bg)
     d = ImageDraw.Draw(im)
     d.rectangle([60, 60, 1020, 1020], outline=accent, width=6)
-    font = _font(84)
-    lines = _wrap(d, title, font, 820)[:5]
-    line_h = 118
+    if phrase:
+        lines = phrase[:2]
+        # 문구가 한 줄에 다 들어가는 가장 큰 글자 크기를 고른다
+        size = next((s for s in range(140, 70, -6)
+                     if all(d.textlength(l, font=_font(s)) <= 860 for l in lines)), 70)
+        font = _font(size)
+        lines = [w for l in lines for w in _wrap(d, l, font, 860)]
+        line_h = int(size * 1.35)
+    else:
+        font = _font(84)
+        lines = _wrap(d, title, font, 820)[:5]
+        line_h = 118
     y = 540 - len(lines) * line_h // 2
     for line in lines:
         w = d.textlength(line, font=font)

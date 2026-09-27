@@ -17,6 +17,8 @@ import time
 import tomllib
 from pathlib import Path
 
+import urllib.error
+
 import images
 from generate import Post, find_photos, generate_post
 
@@ -61,14 +63,19 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict) -> dict:
             continue
         try:
             found = images.pixabay_photo(s.stock_query, key, folder, used_ids)
+        except urllib.error.HTTPError as e:
+            # 키가 틀렸거나 접속이 막힌 경우라 다른 검색어도 똑같이 실패한다
+            hint = "pixabay_key 파일의 키를 확인하세요" if e.code in (400, 401) else "Pixabay가 접속을 막았습니다"
+            print(f"  무료 사진 검색 실패: HTTP {e.code} ({hint}). 무료 사진 없이 진행합니다.")
+            break
         except Exception as e:
             print(f"  무료 사진 검색 실패({s.stock_query}): {e}")
             continue
         if found:
             media["stock"][i], photo_id = found
             used_ids.add(photo_id)
-    print(f"  이미지 준비: 썸네일 {'O' if 'thumbnail' in media else 'X'}, "
-          f"요약 카드 {'O' if 'summary_card' in media else 'X'}, 무료 사진 {len(media['stock'])}장")
+    print(f"  이미지 준비: 썸네일 {'만듦' if 'thumbnail' in media else '없음'}, "
+          f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 무료 사진 {len(media['stock'])}장")
     return media
 
 

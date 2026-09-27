@@ -96,20 +96,28 @@ def make_summary_card(title: str, points: list[str], out: Path, seed: str) -> Pa
     return out
 
 
+# 기본 이름표("Python-urllib")로 접속하면 Pixabay가 403으로 막는 경우가 있어 브라우저처럼 보낸다
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) naver-blog-helper/1.0"}
+
+
+def _get(url: str, timeout: int):
+    return urllib.request.urlopen(urllib.request.Request(url, headers=HEADERS), timeout=timeout)
+
+
 def pixabay_photo(query: str, api_key: str, out_dir: Path, exclude: set[int]) -> tuple[Path, int] | None:
     """검색 결과 중 아직 안 쓴 사진 하나를 내려받는다. 없으면 None."""
     url = "https://pixabay.com/api/?" + urllib.parse.urlencode({
         "key": api_key, "q": query, "image_type": "photo",
         "orientation": "horizontal", "safesearch": "true", "per_page": 20,
     })
-    with urllib.request.urlopen(url, timeout=20) as r:
+    with _get(url, 20) as r:
         hits = json.load(r).get("hits", [])
     for hit in hits:
         if hit["id"] in exclude:
             continue
         out = out_dir / f"pixabay_{hit['id']}.jpg"
         if not out.exists():
-            with urllib.request.urlopen(hit["largeImageURL"], timeout=60) as r:
+            with _get(hit["largeImageURL"], 60) as r:
                 out.write_bytes(r.read())
         return out, hit["id"]
     return None

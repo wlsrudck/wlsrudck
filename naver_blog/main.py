@@ -80,8 +80,13 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict) -> dict:
 
 
 def load_rows():
+    """첫 줄의 칸 이름(keyword,memo,status)이 지워져 있어도 읽는다."""
     with KEYWORDS.open(encoding="utf-8-sig", newline="") as f:
-        return list(csv.DictReader(f))
+        lines = [r for r in csv.reader(f) if r and r[0].strip()]
+    if lines and lines[0][0].strip().lower() == "keyword":
+        lines = lines[1:]
+    return [{"keyword": r[0].strip(), "memo": r[1] if len(r) > 1 else "", "status": r[2] if len(r) > 2 else ""}
+            for r in lines]
 
 
 def save_rows(rows):

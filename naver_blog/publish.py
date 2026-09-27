@@ -15,6 +15,8 @@ SELECTORS = {
     "help_close": ".se-help-panel-close-button",
     "title": ".se-documentTitle .se-text-paragraph",
     "body": ".se-component.se-text .se-text-paragraph",
+    "photo_btn": "button.se-image-toolbar-button",       # 상단 툴바의 "사진" 버튼
+    "image": ".se-component.se-image",
     "save_btn": "button[class*='save_btn']",
     "publish_btn": "button[class*='publish_btn']",
     "publish_confirm": "button[class*='confirm_btn']",
@@ -54,11 +56,40 @@ def _type_lines(page: Page, text: str):
         _pause(0.05, 0.25)
 
 
-def post_to_naver(post: Post, blog_id: str, auto_publish: bool, headless: bool, screenshot_dir: Path):
+def _upload_photo(page: Page, editor, photo: Path):
+    images = editor.locator(SELECTORS["image"])
+    before = images.count()
+    with page.expect_file_chooser(timeout=10000) as fc:
+        editor.locator(SELECTORS["photo_btn"]).first.click()
+    fc.value.set_files(str(photo))
+    # 업로드가 끝나 사진이 본문에 들어올 때까지 대기
+    images.nth(before).wait_for(timeout=60000)
+    _pause(1.0, 2.0)
+    # 사진 아래 문단으로 커서 이동
+    editor.locator(SELECTORS["body"]).last.click()
+    page.keyboard.press("End")
+
+
+def _write_blocks(page: Page, editor, blocks):
+    for i, (kind, value) in enumerate(blocks):
+        if kind == "photo":
+            _upload_photo(page, editor, value)
+            continue
+        if kind == "heading":
+            page.keyboard.press("Control+B")
+            page.keyboard.insert_text(value)
+            page.keyboard.press("Control+B")
+        else:
+            _type_lines(page, value)
+        if i < len(blocks) - 1 and blocks[i + 1][0] != "photo":
+            page.keyboard.press("Enter")
+            page.keyboard.press("Enter")
+        _pause(0.2, 0.6)
+
+
+def post_to_naver(post: Post, photos: list[Path], blog_id: str, auto_publish: bool, headless: bool, screenshot_dir: Path):
     if not STATE_PATH.exists():
         raise LoginRequired("auth/state.json이 없습니다. 먼저 `python login.py`를 실행하세요.")
-
-    body = post.body_text() + "\n\n" + " ".join(f"#{t}" for t in post.tags)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
@@ -80,7 +111,7 @@ def post_to_naver(post: Post, blog_id: str, auto_publish: bool, headless: bool, 
 
             editor.locator(SELECTORS["body"]).first.click()
             _pause()
-            _type_lines(page, body)
+            _write_blocks(page, editor, post.blocks(photos))
             _pause(1.5, 3.0)
 
             if auto_publish:

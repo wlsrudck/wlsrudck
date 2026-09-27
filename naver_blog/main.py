@@ -4,6 +4,7 @@
     python main.py                # 설정대로 실행 (기본: 임시저장까지만)
     python main.py --dry-run      # 글 생성만 하고 output/에 저장, 네이버에는 안 올림
     python main.py --no-wait      # 시작 전 랜덤 대기 생략 (수동 실행할 때)
+    python main.py --make-folders # 키워드별 사진 폴더(photos/키워드)만 만들고 종료
 """
 
 import argparse
@@ -16,12 +17,22 @@ import time
 import tomllib
 from pathlib import Path
 
-from generate import generate_post
+from generate import find_photos, generate_post
 
 ROOT = Path(__file__).parent
 KEYWORDS = ROOT / "keywords.csv"
 OUTPUT = ROOT / "output"
 STATE = ROOT / "state.json"
+PHOTOS = ROOT / "photos"
+
+
+def slugify(keyword: str) -> str:
+    return re.sub(r"[^\w가-힣]+", "_", keyword).strip("_")
+
+
+def make_photo_folders(rows) -> None:
+    for r in rows:
+        (PHOTOS / slugify(r["keyword"])).mkdir(parents=True, exist_ok=True)
 
 
 def load_rows():
@@ -59,6 +70,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-wait", action="store_true")
+    ap.add_argument("--make-folders", action="store_true")
     args = ap.parse_args()
 
     cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8-sig"))
@@ -68,6 +80,13 @@ def main():
     pending = [r for r in rows if not (r.get("status") or "").strip()]
     if not pending:
         print("처리할 키워드가 없습니다. keywords.csv에 추가하세요.")
+        return
+
+    make_photo_folders(pending)
+    if args.make_folders:
+        print(f"사진 폴더를 만들었습니다: {PHOTOS}")
+        for r in pending:
+            print(f"  photos\\{slugify(r['keyword'])}")
         return
 
     budget = min(pub["max_posts_per_run"], pub["max_posts_per_day"] - posted_today())
@@ -88,21 +107,22 @@ def main():
             sleep_minutes(pub["between_posts_minutes"], "다음 글까지 대기")
 
         keyword = row["keyword"]
-        print(f"[생성] {keyword}")
-        post = generate_post(keyword, row.get("memo", ""), cfg["writing"])
+        slug = slugify(keyword)
+        photos = find_photos(PHOTOS / slug)
+        print(f"[생성] {keyword} (사진 {len(photos)}장)")
+        post = generate_post(keyword, row.get("memo", ""), photos, cfg["writing"])
 
         OUTPUT.mkdir(exist_ok=True)
-        slug = re.sub(r"[^\w가-힣]+", "_", keyword).strip("_")
-        md_path = OUTPUT / f"{dt.date.today()}_{slug}.md"
-        md_path.write_text(post.to_markdown(), encoding="utf-8")
-        print(f"  원고 저장: {md_path} ({len(post.body_text())}자)")
+        preview = OUTPUT / f"{dt.date.today()}_{slug}.html"
+        preview.write_text(post.to_html(photos, OUTPUT), encoding="utf-8")
+        print(f"  미리보기 저장: {preview} ({len(post.body_text())}자)")
 
         if args.dry_run:
             continue
 
         from publish import post_to_naver  # dry-run에서는 playwright 없이도 동작하도록
 
-        post_to_naver(post, cfg["naver"]["blog_id"], pub["auto_publish"], pub["headless"], OUTPUT)
+        post_to_naver(post, photos, cfg["naver"]["blog_id"], pub["auto_publish"], pub["headless"], OUTPUT)
         row["status"] = f"{'published' if pub['auto_publish'] else 'draft'} {dt.datetime.now():%Y-%m-%d %H:%M}"
         save_rows(rows)
         bump_today()

@@ -87,7 +87,7 @@ def _write_blocks(page: Page, editor, blocks):
         _pause(0.2, 0.6)
 
 
-def post_to_naver(post: Post, photos: list[Path], blog_id: str, auto_publish: bool, headless: bool, screenshot_dir: Path):
+def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, auto_publish: bool, headless: bool, screenshot_dir: Path):
     if not STATE_PATH.exists():
         raise LoginRequired("auth/state.json이 없습니다. 먼저 `python login.py`를 실행하세요.")
 
@@ -111,7 +111,7 @@ def post_to_naver(post: Post, photos: list[Path], blog_id: str, auto_publish: bo
 
             editor.locator(SELECTORS["body"]).first.click()
             _pause()
-            _write_blocks(page, editor, post.blocks(photos))
+            _write_blocks(page, editor, post.blocks(photos, media))
             _pause(1.5, 3.0)
 
             if auto_publish:

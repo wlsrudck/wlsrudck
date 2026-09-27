@@ -12,6 +12,8 @@ Playwright가 네이버 스마트에디터에 입력한 뒤 **임시저장**합�
 1. [python.org](https://www.python.org/downloads/)에서 Python을 설치합니다. 첫 화면에서 **"Add python.exe to PATH"를 꼭 체크**하세요.
 2. 이 폴더에 `api_key.txt`를 만들고, Claude API 키를 붙여넣은 뒤 저장합니다.
 3. `config.toml`을 메모장으로 열어 `blog_id`를 내 블로그 아이디로 바꿉니다.
+   (선택) 무료 사진을 자동으로 넣으려면 [pixabay.com](https://pixabay.com/api/docs/)에 가입해 API 키를 받아
+   이 폴더의 `pixabay_key.txt`에 붙여넣습니다. 없으면 무료 사진만 빠지고 썸네일/요약 카드는 그대로 만들어집니다.
 4. 아래 파일을 순서대로 더블클릭합니다.
    - `1_install.bat`: 필요한 프로그램 설치 (처음 한 번만)
    - `2_login.bat`: 브라우저가 뜨면 네이버에 로그인하고, 검은 창에서 Enter

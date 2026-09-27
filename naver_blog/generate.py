@@ -16,6 +16,7 @@ PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 class Section(BaseModel):
     heading: str = Field(description="소제목 (없으면 빈 문자열)")
     photo: int | None = Field(description="이 소제목 바로 아래에 넣을 사진 번호(1부터). 없으면 null")
+    stock_query: str = Field(description="photo가 null일 때 무료 사진 사이트에서 찾을 영어 검색어 2~4단어. 필요 없으면 빈 문자열")
     paragraphs: list[str] = Field(description="문단 목록. 한 문단은 2~4문장")
 
 
@@ -23,6 +24,7 @@ class Post(BaseModel):
     title: str
     sections: list[Section]
     tags: list[str] = Field(description="해시태그 5~10개, '#' 없이")
+    summary: list[str] = Field(description="글 핵심 요약 3~4개. 각 20자 이내")
 
     def body_text(self) -> str:
         parts = []
@@ -32,26 +34,38 @@ class Post(BaseModel):
             parts.extend(s.paragraphs)
         return "\n\n".join(parts)
 
-    def blocks(self, photos: list[Path]):
+    def blocks(self, photos: list[Path], media: dict | None = None):
         """에디터에 넣을 순서대로 ("heading"|"text"|"photo", 값)을 돌려준다.
-        배치되지 않은 사진은 맨 끝에 붙인다."""
+
+        media: {"thumbnail": Path, "summary_card": Path, "stock": {섹션번호: Path}} (images.py가 만든 것)
+        배치되지 않은 직접 찍은 사진은 맨 끝에 붙인다."""
+        media = media or {}
+        stock = media.get("stock", {})
         used = set()
         out = []
-        for s in self.sections:
+        if media.get("thumbnail"):
+            out.append(("photo", media["thumbnail"]))
+        for i, s in enumerate(self.sections):
             if s.heading:
                 out.append(("heading", s.heading))
             if s.photo and 1 <= s.photo <= len(photos) and s.photo not in used:
                 used.add(s.photo)
                 out.append(("photo", photos[s.photo - 1]))
+            elif i in stock:
+                out.append(("photo", stock[i]))
             out.extend(("text", p) for p in s.paragraphs)
         out.extend(("photo", p) for i, p in enumerate(photos, 1) if i not in used)
+        if media.get("summary_card"):
+            out.append(("photo", media["summary_card"]))
+        if stock:
+            out.append(("text", "사진 출처: Pixabay"))
         out.append(("text", " ".join(f"#{t}" for t in self.tags)))
         return out
 
-    def to_html(self, photos: list[Path], out_dir: Path) -> str:
+    def to_html(self, photos: list[Path], out_dir: Path, media: dict | None = None) -> str:
         """미리보기용 HTML. 실제 네이버 글과 비슷한 모양으로 보여준다."""
         body = []
-        for kind, value in self.blocks(photos):
+        for kind, value in self.blocks(photos, media):
             if kind == "heading":
                 body.append(f"<h2>{html.escape(value)}</h2>")
             elif kind == "photo":
@@ -81,6 +95,8 @@ SYSTEM = """당신은 네이버 블로그 글을 쓰는 작가입니다.
   분량이 모자라면 지어내기보다 짧게 쓰세요.
 - 사진이 있으면 각 사진을 가장 잘 어울리는 소제목에 배치하고(photo 필드), 본문에서 사진 내용을 자연스럽게 언급하세요.
   사진에서 확실히 보이지 않는 것은 추측해서 쓰지 마세요.
+- 사진을 배치하지 않은 소제목에는 무료 사진 사이트에서 찾을 영어 검색어(stock_query)를 적으세요.
+  예: "jeju beach", "cold brew coffee". 이 사진은 작성자가 찍은 게 아니므로 본문에서 언급하지 마세요.
 - "오늘은 ~에 대해 알아보겠습니다", "결론적으로", "~하는 것이 중요합니다" 같은 뻔한 AI 문투와 과도한 이모지는 피하세요.
 - 검색 키워드는 제목과 첫 문단에 자연스럽게 한 번씩만 넣고, 반복해서 욱여넣지 마세요.
 - 마크다운 기호(**, ##, - 등)는 쓰지 마세요. 에디터에 그대로 입력됩니다."""

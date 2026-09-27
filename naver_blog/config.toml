@@ -13,6 +13,12 @@ start_jitter_minutes = [0, 90]    # 실행 시작 전 랜덤 대기(분). cron �
 between_posts_minutes = [40, 120] # 글과 글 사이 랜덤 대기(분)
 headless = false             # 처음엔 false로 동작을 눈으로 확인하세요
 
+[images]
+thumbnail = true        # 글 맨 위에 제목 썸네일 카드 자동 생성
+summary_card = true     # 글 끝에 "한눈에 정리" 카드 자동 생성
+stock_photos = true     # 직접 찍은 사진이 없는 소제목에 Pixabay 무료 사진 넣기 (pixabay_key.txt 필요)
+max_stock_photos = 3    # 글 하나에 넣을 무료 사진 최대 개수
+
 [writing]
 model = "claude-opus-5"
 min_chars = 1500

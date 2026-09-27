@@ -17,7 +17,8 @@ import time
 import tomllib
 from pathlib import Path
 
-from generate import find_photos, generate_post
+import images
+from generate import Post, find_photos, generate_post
 
 ROOT = Path(__file__).parent
 KEYWORDS = ROOT / "keywords.csv"
@@ -33,6 +34,42 @@ def slugify(keyword: str) -> str:
 def make_photo_folders(rows) -> None:
     for r in rows:
         (PHOTOS / slugify(r["keyword"])).mkdir(parents=True, exist_ok=True)
+
+
+def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict) -> dict:
+    """썸네일, 요약 카드, 무료 사진을 만들어 output/<slug>_images/에 저장한다."""
+    folder = OUTPUT / f"{slug}_images"
+    folder.mkdir(parents=True, exist_ok=True)
+    media = {"stock": {}}
+    if cfg.get("thumbnail", True):
+        media["thumbnail"] = images.make_thumbnail(post.title, folder / "thumbnail.jpg", slug)
+    if cfg.get("summary_card", True) and post.summary:
+        media["summary_card"] = images.make_summary_card(post.title, post.summary, folder / "summary.jpg", slug)
+
+    if not cfg.get("stock_photos", True):
+        return media
+    key_file = ROOT / "pixabay_key.txt"
+    key = key_file.read_text(encoding="utf-8-sig").strip() if key_file.exists() else ""
+    if not key:
+        print("  (pixabay_key.txt가 없어 무료 사진은 건너뜁니다)")
+        return media
+    used_ids: set[int] = set()
+    for i, s in enumerate(post.sections):
+        if len(media["stock"]) >= cfg.get("max_stock_photos", 3):
+            break
+        if s.photo or not s.stock_query.strip():
+            continue
+        try:
+            found = images.pixabay_photo(s.stock_query, key, folder, used_ids)
+        except Exception as e:
+            print(f"  무료 사진 검색 실패({s.stock_query}): {e}")
+            continue
+        if found:
+            media["stock"][i], photo_id = found
+            used_ids.add(photo_id)
+    print(f"  이미지 준비: 썸네일 {'O' if 'thumbnail' in media else 'X'}, "
+          f"요약 카드 {'O' if 'summary_card' in media else 'X'}, 무료 사진 {len(media['stock'])}장")
+    return media
 
 
 def load_rows():
@@ -113,8 +150,9 @@ def main():
         post = generate_post(keyword, row.get("memo", ""), photos, cfg["writing"])
 
         OUTPUT.mkdir(exist_ok=True)
+        media = prepare_media(post, slug, photos, cfg.get("images", {}))
         preview = OUTPUT / f"{dt.date.today()}_{slug}.html"
-        preview.write_text(post.to_html(photos, OUTPUT), encoding="utf-8")
+        preview.write_text(post.to_html(photos, OUTPUT, media), encoding="utf-8")
         print(f"  미리보기 저장: {preview} ({len(post.body_text())}자)")
 
         if args.dry_run:
@@ -122,7 +160,7 @@ def main():
 
         from publish import post_to_naver  # dry-run에서는 playwright 없이도 동작하도록
 
-        post_to_naver(post, photos, cfg["naver"]["blog_id"], pub["auto_publish"], pub["headless"], OUTPUT)
+        post_to_naver(post, photos, media, cfg["naver"]["blog_id"], pub["auto_publish"], pub["headless"], OUTPUT)
         row["status"] = f"{'published' if pub['auto_publish'] else 'draft'} {dt.datetime.now():%Y-%m-%d %H:%M}"
         save_rows(rows)
         bump_today()

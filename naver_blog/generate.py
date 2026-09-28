@@ -177,6 +177,33 @@ SEARCH = """
 - 검색 의도를 충족하는 정보 구조를 우선합니다: 핵심 답 → 조건·절차 → 주의점 → Q&A."""
 
 
+def find_photos(folder: Path) -> list[Path]:
+    if not folder.is_dir():
+        return []
+    return sorted(p for p in folder.iterdir() if p.suffix.lower() in PHOTO_EXTS)
+
+
+def _image_block(path: Path) -> dict:
+    """휴대폰 사진은 커서 API 한도를 넘으므로 줄여서 보낸다. (네이버에는 원본이 올라감)"""
+    with Image.open(path) as im:
+        im = ImageOps.exif_transpose(im).convert("RGB")
+        im.thumbnail((1568, 1568))
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=85)
+    data = base64.standard_b64encode(buf.getvalue()).decode()
+    return {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}}
+
+
+def _api_key() -> str | None:
+    """환경변수가 없으면 같은 폴더의 api_key.txt에서 읽는다."""
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return None  # SDK가 환경변수를 알아서 사용
+    key_file = Path(__file__).parent / "api_key.txt"
+    if key_file.exists() and key_file.read_text(encoding="utf-8-sig").strip():
+        return key_file.read_text(encoding="utf-8-sig").strip()
+    raise RuntimeError("api_key.txt 파일에 Claude API 키를 붙여넣어 주세요.")
+
+
 RESEARCH_PROMPT = """네이버 블로그 글을 쓰기 전에 사실 확인용 자료를 조사해 주세요.
 주제: {keyword}
 작성자 메모: {memo}

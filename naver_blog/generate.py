@@ -4,6 +4,7 @@ import base64
 import html
 import io
 import os
+import urllib.parse
 import re
 from pathlib import Path
 
@@ -77,7 +78,7 @@ class Post(BaseModel):
                 rel = os.path.relpath(value, out_dir).replace(os.sep, "/")
                 body.append(f'<img src="{html.escape(rel)}">')
             else:
-                body.append(f"<p>{html.escape(value)}</p>")
+                body.append("<p>" + html.escape(value).replace("\n", "<br>") + "</p>")
         return f"""<!doctype html><meta charset="utf-8"><title>{html.escape(self.title)}</title>
 <style>
 body{{max-width:720px;margin:40px auto;padding:0 16px;font-family:'Malgun Gothic',sans-serif;line-height:1.8;color:#222}}
@@ -193,17 +194,33 @@ def research(client: anthropic.Anthropic, keyword: str, memo: str, cfg: dict) ->
     texts = [b for b in blocks if b.type == "text"]
     notes = "\n".join(b.text for b in texts).strip()
 
-    # 출처: 실제로 인용된 URL → 본문에 적힌 URL → 검색 결과 URL 순서로 모은다
-    urls = [c.url for b in texts for c in (b.citations or []) if getattr(c, "url", None)]
-    urls += re.findall(r"https?://[^\s)\]>\"']+", notes)
-    urls += [r.url for b in blocks if b.type == "web_search_tool_result" and isinstance(b.content, list)
-             for r in b.content if getattr(r, "url", None)]
-    return notes, list(dict.fromkeys(u.rstrip(".,") for u in urls))
+    # 출처: 실제로 인용된 URL → 본문에 적힌 URL → 검색 결과 URL 순서로 모은다. {URL: 페이지 제목}
+    found = [(c.url, getattr(c, "title", None)) for b in texts for c in (b.citations or []) if getattr(c, "url", None)]
+    found += [(u.rstrip(".,"), None) for u in re.findall(r"https?://[^\s)\]>\"']+", notes)]
+    found += [(r.url, getattr(r, "title", None)) for b in blocks
+              if b.type == "web_search_tool_result" and isinstance(b.content, list)
+              for r in b.content if getattr(r, "url", None)]
+    sources: dict[str, str | None] = {}
+    for url, title in found:
+        if not sources.get(url):
+            sources[url] = title
+    return notes, sources
+
+
+def source_line(url: str, title: str | None) -> str:
+    """"페이지 제목 - 주소" 한 줄. 주소 속 %ED%9B%84 같은 한글 암호는 읽을 수 있게 되돌린다."""
+    readable = urllib.parse.unquote(url)
+    if re.search(r"\s", readable):  # 되돌렸더니 공백이 생기면 링크가 끊기므로 원래 주소 사용
+        readable = url
+    name = (title or urllib.parse.urlparse(url).netloc).strip()
+    if len(name) > 40:
+        name = name[:40] + "…"
+    return f"{name} - {readable}"
 
 
 def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Post:
     client = anthropic.Anthropic(api_key=_api_key())
-    notes, urls = research(client, keyword, memo, cfg) if cfg.get("research", True) else ("", [])
+    notes, found = research(client, keyword, memo, cfg) if cfg.get("research", True) else ("", {})
     system = SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else "")
     content = []
     for i, path in enumerate(photos, 1):
@@ -231,7 +248,8 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Pos
     if response.stop_reason == "max_tokens" or response.parsed_output is None:
         raise RuntimeError(f"글 생성 결과가 불완전합니다: {keyword}")
     post = response.parsed_output
-    if urls:
+    if found:
         # 글쓴이가 지어낸 링크는 빼고, 실제 검색에서 나온 링크만 남긴다. 비어 있으면 검색 출처로 채운다.
-        post.sources = [u for u in post.sources if u in urls] or urls[:4]
+        urls = [u for u in post.sources if u in found] or list(found)
+        post.sources = [source_line(u, found[u]) for u in urls[:3]]
     return post

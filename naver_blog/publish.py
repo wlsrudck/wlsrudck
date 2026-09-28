@@ -101,7 +101,8 @@ def _write_blocks(page: Page, editor, blocks) -> int:
             photos.append((value, anchor))
         else:
             anchor = value.split("\n")[-1].strip() or anchor
-    first_line = next(v.split("\n")[0].strip() for _, v in texts)
+    # 맨 앞 사진(썸네일)은 첫 글 덩어리(세 줄 도입) 바로 뒤에 넣는다
+    first_line = next(v.split("\n")[-1].strip() for _, v in texts)
 
     for i, (kind, value) in enumerate(texts):
         if kind == "heading":

@@ -22,21 +22,38 @@ class Section(BaseModel):
     paragraphs: list[str] = Field(description="문단 목록. 한 문단은 2~4문장")
 
 
+class QA(BaseModel):
+    question: str
+    answer: str
+
+
 class Post(BaseModel):
     title: str
+    intro: list[str] = Field(description="세 줄 도입. 정확히 3개: 궁금증과 맞닿은 장면/질문, 확인 가능한 핵심 사실, 이 글에서 얻을 답")
     thumbnail_text: list[str] = Field(description="썸네일에 크게 넣을 짧은 문구 1~2줄. 각 줄 12자 이내")
     sections: list[Section]
     tags: list[str] = Field(description="해시태그 5~10개, '#' 없이")
     summary: list[str] = Field(description="글 핵심 요약 3~4개. 각 20자 이내")
+    qa: list[QA] = Field(description="독자가 실제로 궁금해할 Q&A 2~4개")
     sources: list[str] = Field(description="참고한 출처 URL. 조사 자료에 있는 URL만, 없으면 빈 목록")
 
     def body_text(self) -> str:
-        parts = []
+        parts = list(self.intro)
         for s in self.sections:
             if s.heading:
                 parts.append(s.heading)
             parts.extend(s.paragraphs)
+        for q in self.qa:
+            parts += [q.question, q.answer]
         return "\n\n".join(parts)
+
+    def toc(self) -> str:
+        items = [s.heading for s in self.sections if s.heading] + (["자주 묻는 질문"] if self.qa else [])
+        return "목차\n" + "\n".join(f"{i}. {h}" for i, h in enumerate(items, 1)) if items else ""
+
+    def all_text(self) -> str:
+        """금지 표현 점검용: 제목, 이미지 문구, 본문, 태그 전부"""
+        return "\n".join([self.title, *self.thumbnail_text, *self.summary, self.body_text(), *self.tags])
 
     def blocks(self, photos: list[Path], media: dict | None = None):
         """에디터에 넣을 순서대로 ("heading"|"text"|"photo", 값)을 돌려준다.
@@ -49,6 +66,10 @@ class Post(BaseModel):
         out = []
         if media.get("thumbnail"):
             out.append(("photo", media["thumbnail"]))
+        if self.intro:
+            out.append(("text", "\n".join(self.intro)))
+        if self.toc():
+            out.append(("text", self.toc()))
         for i, s in enumerate(self.sections):
             if s.heading:
                 out.append(("heading", s.heading))
@@ -58,6 +79,10 @@ class Post(BaseModel):
             elif i in stock:
                 out.append(("photo", stock[i]))
             out.extend(("text", p) for p in s.paragraphs)
+        if self.qa:
+            out.append(("heading", "자주 묻는 질문"))
+            for q in self.qa:
+                out.append(("text", f"Q. {q.question}\nA. {q.answer}"))
         out.extend(("photo", p) for i, p in enumerate(photos, 1) if i not in used)
         if media.get("summary_card"):
             out.append(("photo", media["summary_card"]))
@@ -93,68 +118,63 @@ p:last-child{{color:#2d7be5}}
 """
 
 
-SYSTEM = """당신은 네이버 블로그 글을 쓰는 작가입니다.
+# 금지 표현: 광고·과장처럼 보이는 단어 (네이버 공식 금칙어 목록은 아니고, 광고성 글로 보이지 않게 하려는 자체 기준)
+BANNED_WORDS = ["최고", "100%", "강추", "특별", "만족", "이벤트", "추천", "무료", "1등", "1위"]
 
-- 네이버 블로그 독자가 편하게 읽을 수 있게, 짧은 문단과 소제목으로 구성하세요.
-- 작성자의 경험("저희는 ~했어요", "~해보니 좋았어요", "잘한 선택이었어요")은 메모와 사진에 있는 내용만 쓰세요.
-  메모에 없는 행동, 일정, 가격, 장소, 느낌을 작성자의 경험처럼 쓰면 안 됩니다. 이 글은 실제 후기로 올라갑니다.
-  메모가 부족하면 경험담을 늘리지 말고, 일반적인 정보와 팁을 "~하면 좋아요", "~를 추천해요"처럼 조언 형태로 쓰세요.
-  분량이 모자라면 지어내기보다 짧게 쓰세요.
-- 사진이 있으면 각 사진을 가장 잘 어울리는 소제목에 배치하고(photo 필드), 본문에서 사진 내용을 자연스럽게 언급하세요.
-  사진에서 확실히 보이지 않는 것은 추측해서 쓰지 마세요.
-- 사진을 배치하지 않은 소제목에는 무료 사진 사이트에서 찾을 영어 검색어(stock_query)를 적으세요.
-  소제목 내용을 눈으로 보여주는 구체적인 사물이나 장면을 적으세요. 예: 월세 → "apartment keys rent", 대출 → "bank loan documents",
-  세금 → "calculator tax form", 여행 → "jeju beach".
-  나이, 조건, 기간, 절차처럼 사진으로 표현하기 어려운 소제목은 빈 문자열로 두세요. 엉뚱한 사진보다 사진이 없는 편이 낫습니다.
-  이 사진은 작성자가 찍은 게 아니므로 본문에서 언급하지 마세요.
-- "오늘은 ~에 대해 알아보겠습니다", "결론적으로", "~하는 것이 중요합니다" 같은 뻔한 AI 문투와 과도한 이모지는 피하세요.
-- 검색 키워드는 제목과 첫 문단에 자연스럽게 한 번씩만 넣고, 반복해서 욱여넣지 마세요.
-- 마크다운 기호(**, ##, - 등)는 쓰지 마세요. 에디터에 그대로 입력됩니다.
-- 조사 자료가 주어지면 숫자, 날짜, 금액, 조건, 신청 방법은 조사 자료에 있는 것만 쓰세요. 기억에 의존해 추측하지 마세요.
-  조사 자료에 없거나 확실하지 않으면 "공식 홈페이지에서 확인하세요"처럼 안내하세요.
-  사용한 자료의 URL은 sources에 넣으세요."""
+SYSTEM = """당신은 네이버 블로그 글을 쓰는 작가입니다. 자연스러운 후기형·정보형 문체로 씁니다.
 
-# 네이버 홈판(메인 피드) 노출용 글쓰기 규칙
+[사실과 경험]
+- 작성자 메모와 사진, 조사 자료를 가장 우선합니다.
+- 작성자의 경험("저희는 ~했어요", "~해보니 좋았어요")은 메모와 사진에 있는 내용만 씁니다. 사용·방문·촬영 경험이
+  주어지지 않았다면 1인칭 체험을 지어내지 말고, 관찰 가능한 상황이나 독자의 선택 장면을 구체적으로 설명합니다.
+- 금융·지원금·건강·가격·제도처럼 변하는 정보는 조사 자료에 있는 것만 쓰고, "2026년 9월 기준"처럼 기준일을 밝힙니다.
+  확인되지 않은 수치나 단정적인 전망은 만들지 않습니다. 조사 자료에도 없으면 "공식 홈페이지에서 확인하세요"라고 안내합니다.
+- 검증 가능한 지표(금액, 기간, 비율, 날짜, 조건 등)를 최소 하나 포함합니다. 확인할 수 없으면 임의로 채우지 말고
+  어떤 지표를 확인해야 하는지 적습니다.
+- 사용한 조사 자료의 URL은 sources에 넣습니다.
+
+[구성]
+- intro: 인사말·잡담 없이 정확히 세 줄. 첫 줄은 제목의 궁금증과 맞닿은 장면이나 질문, 둘째 줄은 확인 가능한 핵심 사실
+  또는 체감, 셋째 줄은 이 글에서 얻을 답. 첫 화면에서 답을 지나치게 감추지 않습니다.
+- 목차는 프로그램이 소제목으로 자동으로 만드니 본문에 따로 쓰지 않습니다.
+- 주요 비교나 판단 포인트를 앞쪽 소제목에 배치하고, 소제목마다 새 정보를 줍니다.
+- 소제목과 문장 길이를 다양하게 씁니다. 같은 접속어, 같은 문장 끝맺음, "첫째/둘째/셋째" 식 나열을 반복하지 않습니다.
+- 핵심 정보는 한눈에 보이게 짧게 정리합니다. 문단은 1~3문장.
+- qa: 주제에 맞는 실질적인 질문과 답. 마지막 소제목은 독자가 취할 다음 행동이나 판단 기준으로 마칩니다.
+- tags: 관련 태그 5~10개.
+
+[표현]
+- 광고·판매 유도처럼 보이는 단어를 제목, 본문, 소제목, 썸네일 문구, 요약, 태그 어디에도 쓰지 않습니다:
+  최고, 100%, 강추, 특별, 만족, 이벤트, 추천, 무료, 1등, 1위 및 비슷한 과장 표현.
+  대신 객관적 비교, 가격·조건·사용 장면 같은 구체적 사실로 씁니다.
+  공식 명칭이나 정확한 인용에 꼭 필요한 경우에만 사실 그대로 씁니다.
+- 가벼운 감상은 사실에 맞을 때만 씁니다. 과장된 감정은 쓰지 않습니다.
+- "오늘은 ~에 대해 알아보겠습니다", "결론적으로" 같은 뻔한 AI 문투, 과도한 이모지, 마크다운 기호(**, ##, -)는 쓰지 않습니다.
+
+[사진]
+- 사진이 있으면 가장 어울리는 소제목에 배치하고(photo 필드), 본문에서 자연스럽게 언급합니다.
+  사진에서 확실히 보이지 않는 것은 추측하지 않습니다. 사진이 없는데 있는 것처럼 쓰지 않습니다.
+- 사진을 배치하지 않은 소제목에는 무료 사진 사이트에서 찾을 영어 검색어(stock_query)를 적습니다.
+  소제목 내용을 눈으로 보여주는 구체적인 사물이나 장면으로. 예: 월세 → "apartment keys rent", 세금 → "calculator tax form".
+  나이, 조건, 기간, 절차처럼 사진으로 표현하기 어려운 소제목은 빈 문자열. 엉뚱한 사진보다 없는 편이 낫습니다.
+  이 사진은 작성자가 찍은 게 아니므로 본문에서 언급하지 않습니다."""
+
+# 네이버 홈판(메인 피드) 노출용
 HOMEFEED = """
-[홈판용 글쓰기]
-이 글은 네이버 홈 피드에 노출되는 것을 목표로 합니다. 피드에서는 제목과 썸네일만 보고 누를지 결정합니다.
-- 제목: 25~40자. 독자가 "어? 나도 해당되나?", "그래서 결과가 뭔데?" 하고 궁금해지게 쓰세요.
-  예시(이 블로그의 기존 제목): "로또판매점 아무나 되는 줄 알았는데, 조건 봤더니 다들 놀랐다는데",
-  "자녀 용돈은 괜찮은 줄 알았는데, 며느리는 아니었다", "국립극장 아트인커피 후기, 주차 못하면 못 들어간다는 말 진짜였어요"
-  단, 본문에 없는 내용을 암시하거나 부풀리는 낚시 제목은 금지입니다. 제목이 던진 궁금증에 본문이 반드시 답해야 합니다.
-- thumbnail_text: 제목과 다른, 한눈에 들어오는 짧은 문구. 예: ["로또판매점", "아무나 못 한다?"]
-- 첫 문단 2~3문장 안에 독자가 공감할 상황이나 질문을 던져 계속 읽게 만드세요.
-- 소제목은 4~6개, 각 소제목도 궁금증을 주는 짧은 문장으로.
-- 문단은 1~3문장으로 짧게. 모바일에서 읽기 편하게.
-- 마지막은 핵심 정리와 함께 독자에게 가벼운 질문을 던져 댓글을 유도하세요.
-"""
 
+[홈판용 제목과 썸네일]
+- 제목: 25~40자. 핵심 키워드와, 독자가 궁금해할 구체적인 변화·비교·체감 포인트를 한 문장에 담습니다.
+  의외성, 비교, 후기 관점 중 주제에 맞는 하나를 고릅니다. 본문에서 바로 답할 수 있는 궁금증만 던집니다.
+  "놓치면 손해", "큰일 난다" 같은 과장된 손해·공포 표현과 "~했더니 ~더라" 같은 후기형 문구의 반복은 피합니다.
+- thumbnail_text: 제목과 다른, 한눈에 들어오는 짧은 문구 1~2줄.
+- 홈판 독자가 끝까지 읽을 이유가 생기도록, 가장 궁금한 답의 실마리를 앞쪽 소제목에서 줍니다."""
 
-def find_photos(folder: Path) -> list[Path]:
-    if not folder.is_dir():
-        return []
-    return sorted(p for p in folder.iterdir() if p.suffix.lower() in PHOTO_EXTS)
+# 검색 유입용 (티스토리·네이버 검색)
+SEARCH = """
 
-
-def _image_block(path: Path) -> dict:
-    """휴대폰 사진은 커서 API 한도를 넘으므로 줄여서 보낸다. (네이버에는 원본이 올라감)"""
-    with Image.open(path) as im:
-        im = ImageOps.exif_transpose(im).convert("RGB")
-        im.thumbnail((1568, 1568))
-        buf = io.BytesIO()
-        im.save(buf, format="JPEG", quality=85)
-    data = base64.standard_b64encode(buf.getvalue()).decode()
-    return {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}}
-
-
-def _api_key() -> str | None:
-    """환경변수가 없으면 같은 폴더의 api_key.txt에서 읽는다."""
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return None  # SDK가 환경변수를 알아서 사용
-    key_file = Path(__file__).parent / "api_key.txt"
-    if key_file.exists() and key_file.read_text(encoding="utf-8-sig").strip():
-        return key_file.read_text(encoding="utf-8-sig").strip()
-    raise RuntimeError("api_key.txt 파일에 Claude API 키를 붙여넣어 주세요.")
+[검색용 제목]
+- 제목: 검색 키워드를 앞쪽에 명확히 넣고, 글에서 얻을 답(조건, 방법, 비교 등)을 드러냅니다.
+- 검색 의도를 충족하는 정보 구조를 우선합니다: 핵심 답 → 조건·절차 → 주의점 → Q&A."""
 
 
 RESEARCH_PROMPT = """네이버 블로그 글을 쓰기 전에 사실 확인용 자료를 조사해 주세요.
@@ -243,10 +263,15 @@ def source_name(url: str, title: str | None) -> str:
     return urllib.parse.urlparse(url).netloc.removeprefix("www.")
 
 
+def banned_in(post: "Post") -> list[str]:
+    text = post.all_text()
+    return [w for w in BANNED_WORDS if w in text]
+
+
 def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Post:
     client = anthropic.Anthropic(api_key=_api_key())
     notes, found = research(client, keyword, memo, cfg) if cfg.get("research", True) else ("", {})
-    system = SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else "")
+    system = SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else SEARCH)
     content = []
     for i, path in enumerate(photos, 1):
         content.append({"type": "text", "text": f"사진 {i}:"})
@@ -273,6 +298,31 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Pos
     if response.stop_reason == "max_tokens" or response.parsed_output is None:
         raise RuntimeError(f"글 생성 결과가 불완전합니다: {keyword}")
     post = response.parsed_output
+
+    # 금지 표현이 남아 있으면 한 번만 고쳐 쓰게 한다 (공식 명칭 등 꼭 필요한 경우는 남을 수 있다)
+    hits = banned_in(post)
+    if hits:
+        print(f"  금지 표현 발견({', '.join(hits)}) → 고쳐 쓰는 중")
+        fixed = client.beta.messages.parse(
+            model=cfg["model"],
+            max_tokens=16000,
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+            system=system,
+            messages=[
+                {"role": "user", "content": content},
+                {"role": "assistant", "content": post.model_dump_json()},
+                {"role": "user", "content": f"다음 표현이 남아 있습니다: {', '.join(hits)}. 공식 명칭이나 정확한 인용이 아니라면 "
+                                            "구체적인 사실 표현으로 바꿔서 같은 형식으로 다시 주세요. 나머지 내용은 유지하세요."},
+            ],
+            output_format=Post,
+        )
+        if fixed.stop_reason == "end_turn" and fixed.parsed_output is not None:
+            post = fixed.parsed_output
+        left = banned_in(post)
+        if left:
+            print(f"  ⚠ 금지 표현이 남아 있어요({', '.join(left)}). 발행 전에 확인하세요.")
+
     if found:
         # 글쓴이가 지어낸 링크는 빼고, 실제 검색에서 나온 링크만 남긴다. 비어 있으면 검색 출처로 채운다.
         urls = [u for u in post.sources if u in found] or list(found)

@@ -56,35 +56,80 @@ def _type_lines(page: Page, text: str):
         _pause(0.05, 0.25)
 
 
-def _upload_photo(page: Page, editor, photo: Path):
+# 문단 끝에 커서를 두는 스크립트. 네이버 에디터는 한 줄(Enter)마다 문단 하나를 만든다.
+_CARET_TO_END_OF = """([sel, text]) => {
+    const ps = [...document.querySelectorAll(sel)];
+    const p = ps.find(e => e.innerText.trim() === text) || ps.find(e => e.innerText.includes(text));
+    if (!p) return false;
+    p.scrollIntoView({block: "center"});
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    range.collapse(false);
+    const s = window.getSelection();
+    s.removeAllRanges();
+    s.addRange(range);
+    return true;
+}"""
+
+
+def _insert_photo_after(page: Page, editor, photo: Path, anchor: str):
+    """anchor 문단 끝에 커서를 두고 사진을 올린다. (사진은 커서 위치 다음에 들어간다)"""
+    para = editor.locator(SELECTORS["body"]).filter(has_text=anchor[-40:]).first
+    para.click()
+    if not editor.evaluate(_CARET_TO_END_OF, [SELECTORS["body"], anchor]):
+        raise RuntimeError(f"사진 넣을 위치를 찾지 못함: {anchor[:20]}")
+    page.keyboard.press("End")
+    _pause(0.3, 0.8)
+
     images = editor.locator(SELECTORS["image"])
     before = images.count()
     with page.expect_file_chooser(timeout=10000) as fc:
         editor.locator(SELECTORS["photo_btn"]).first.click()
     fc.value.set_files(str(photo))
-    # 업로드가 끝나 사진이 본문에 들어올 때까지 대기
-    images.nth(before).wait_for(timeout=60000)
+    images.nth(before).wait_for(timeout=60000)  # 업로드가 끝나 본문에 들어올 때까지
     _pause(1.0, 2.0)
-    # 사진 아래 문단으로 커서 이동
-    editor.locator(SELECTORS["body"]).last.click()
-    page.keyboard.press("End")
 
 
-def _write_blocks(page: Page, editor, blocks):
-    for i, (kind, value) in enumerate(blocks):
+def _write_blocks(page: Page, editor, blocks) -> int:
+    """글자를 전부 먼저 입력하고, 그다음 사진을 제자리에 끼워 넣는다.
+    사진을 올린 뒤 커서를 다시 글 칸으로 옮기는 동작이 불안정해서 이렇게 나눴다.
+    실패한 사진은 건너뛰고, 넣은 사진 수를 돌려준다."""
+    texts = [(k, v) for k, v in blocks if k != "photo"]
+    photos, anchor = [], None
+    for kind, value in blocks:
         if kind == "photo":
-            _upload_photo(page, editor, value)
-            continue
+            photos.append((value, anchor))
+        else:
+            anchor = value.split("\n")[-1].strip() or anchor
+    first_line = next(v.split("\n")[0].strip() for _, v in texts)
+
+    for i, (kind, value) in enumerate(texts):
         if kind == "heading":
             page.keyboard.press("Control+B")
             page.keyboard.insert_text(value)
             page.keyboard.press("Control+B")
         else:
             _type_lines(page, value)
-        if i < len(blocks) - 1 and blocks[i + 1][0] != "photo":
+        if i < len(texts) - 1:
             page.keyboard.press("Enter")
             page.keyboard.press("Enter")
         _pause(0.2, 0.6)
+
+    typed = editor.evaluate("sel => [...document.querySelectorAll(sel)].map(e => e.innerText).join('').length",
+                            SELECTORS["body"])
+    expected = sum(len(v.replace("\n", "")) for _, v in texts)
+    if typed < expected * 0.8:
+        raise RuntimeError(f"본문 입력 실패: {expected}자 중 {typed}자만 들어감")
+
+    # 뒤에서부터 넣어야 같은 자리에 들어가는 사진끼리 순서가 뒤집히지 않는다
+    done = 0
+    for photo, anchor in reversed(photos):
+        try:
+            _insert_photo_after(page, editor, photo, anchor or first_line)
+            done += 1
+        except Exception as e:
+            print(f"  사진 넣기 실패, 건너뜀 ({photo.name}): {e}")
+    return done
 
 
 def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, auto_publish: bool, headless: bool, screenshot_dir: Path):
@@ -111,8 +156,13 @@ def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, aut
 
             editor.locator(SELECTORS["body"]).first.click()
             _pause()
-            _write_blocks(page, editor, post.blocks(photos, media))
+            blocks = post.blocks(photos, media)
+            done = _write_blocks(page, editor, blocks)
+            total = sum(1 for k, _ in blocks if k == "photo")
+            print(f"  네이버 입력: 본문 완료, 사진 {done}/{total}장")
             _pause(1.5, 3.0)
+            # 문제가 생겼을 때 원인을 볼 수 있게 마지막 화면을 남겨둔다
+            page.screenshot(path=str(screenshot_dir / "last_editor.png"), full_page=True)
 
             if auto_publish:
                 editor.locator(SELECTORS["publish_btn"]).first.click()

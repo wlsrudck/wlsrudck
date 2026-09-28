@@ -35,6 +35,8 @@ class Post(BaseModel):
     tags: list[str] = Field(description="해시태그 5~10개, '#' 없이")
     summary: list[str] = Field(description="글 핵심 요약 3~4개. 각 20자 이내")
     qa: list[QA] = Field(description="독자가 실제로 궁금해할 Q&A 2~4개")
+    answer_found: bool = Field(description="제목이 약속한 핵심 답(예: 실제 일정, 금액, 조건)을 조사 자료에서 찾아 본문에 담았으면 true")
+    missing: str = Field(description="answer_found가 false면 무엇을 못 찾았는지 한 문장. true면 빈 문자열")
     sources: list[str] = Field(description="참고한 출처 URL. 조사 자료에 있는 URL만, 없으면 빈 목록")
 
     def body_text(self) -> str:
@@ -105,6 +107,9 @@ class Post(BaseModel):
                 body.append(f'<img src="{html.escape(rel)}">')
             else:
                 body.append("<p>" + html.escape(value).replace("\n", "<br>") + "</p>")
+        warn = ("" if self.answer_found else
+                f'<p style="background:#fff3cd;border:1px solid #e0b000;padding:12px;border-radius:6px">'
+                f'⚠ 핵심 정보를 찾지 못했어요: {html.escape(self.missing)}<br>이대로 발행하는 건 추천하지 않아요.</p>')
         return f"""<!doctype html><meta charset="utf-8"><title>{html.escape(self.title)}</title>
 <style>
 body{{max-width:720px;margin:40px auto;padding:0 16px;font-family:'Malgun Gothic',sans-serif;line-height:1.8;color:#222}}
@@ -113,7 +118,7 @@ h2{{font-size:21px;margin-top:40px}}
 img{{max-width:100%;border-radius:4px;margin:8px 0}}
 p:last-child{{color:#2d7be5}}
 </style>
-<h1>{html.escape(self.title)}</h1>
+{warn}<h1>{html.escape(self.title)}</h1>
 {chr(10).join(body)}
 """
 
@@ -127,6 +132,8 @@ SYSTEM = """당신은 네이버 블로그 글을 쓰는 작가입니다. 자연�
 - 작성자 메모와 사진, 조사 자료를 가장 우선합니다.
 - 작성자의 경험("저희는 ~했어요", "~해보니 좋았어요")은 메모와 사진에 있는 내용만 씁니다. 사용·방문·촬영 경험이
   주어지지 않았다면 1인칭 체험을 지어내지 말고, 관찰 가능한 상황이나 독자의 선택 장면을 구체적으로 설명합니다.
+- 조사 자료가 주어지면, 인물의 과거 성적·경력·수상, 날짜, 숫자, 순위 등 모든 사실은 조사 자료에 있는 것만 씁니다.
+  기억에 의존한 사실은 틀릴 수 있으므로 조사 자료에 없으면 쓰지 않습니다.
 - 금융·지원금·건강·가격·제도처럼 변하는 정보는 조사 자료에 있는 것만 쓰고, "2026년 9월 기준"처럼 기준일을 밝힙니다.
   확인되지 않은 수치나 단정적인 전망은 만들지 않습니다. 조사 자료에도 없으면 "공식 홈페이지에서 확인하세요"라고 안내합니다.
 - 검증 가능한 지표(금액, 기간, 비율, 날짜, 조건 등)를 최소 하나 포함합니다. 확인할 수 없으면 임의로 채우지 말고
@@ -142,6 +149,8 @@ SYSTEM = """당신은 네이버 블로그 글을 쓰는 작가입니다. 자연�
 - 핵심 정보는 한눈에 보이게 짧게 정리합니다. 문단은 1~3문장.
 - qa: 주제에 맞는 실질적인 질문과 답. 마지막 소제목은 독자가 취할 다음 행동이나 판단 기준으로 마칩니다.
 - tags: 관련 태그 5~10개.
+- answer_found: 제목이 약속한 핵심 답을 조사 자료로 확인해 본문에 담았는지 정직하게 표시합니다.
+  찾지 못했다면 false로 하고 missing에 무엇이 없는지 적습니다. 이 경우 제목도 답을 약속하지 않게 씁니다.
 
 [표현]
 - 광고·판매 유도처럼 보이는 단어를 제목, 본문, 소제목, 썸네일 문구, 요약, 태그 어디에도 쓰지 않습니다:
@@ -156,7 +165,8 @@ SYSTEM = """당신은 네이버 블로그 글을 쓰는 작가입니다. 자연�
   사진에서 확실히 보이지 않는 것은 추측하지 않습니다. 사진이 없는데 있는 것처럼 쓰지 않습니다.
 - 사진을 배치하지 않은 소제목에는 무료 사진 사이트에서 찾을 영어 검색어(stock_query)를 적습니다.
   소제목 내용을 눈으로 보여주는 구체적인 사물이나 장면으로. 예: 월세 → "apartment keys rent", 세금 → "calculator tax form".
-  나이, 조건, 기간, 절차처럼 사진으로 표현하기 어려운 소제목은 빈 문자열. 엉뚱한 사진보다 없는 편이 낫습니다.
+  사람이 나오는 장면(선수, 인물의 동작)은 검색하지 않습니다. 글의 주인공으로 오해받을 수 있으니 물건·장소 위주로.
+  나이, 조건, 기간, 절차, 인물 소개처럼 사진으로 표현하기 어려운 소제목은 빈 문자열. 엉뚱한 사진보다 없는 편이 낫습니다.
   이 사진은 작성자가 찍은 게 아니므로 본문에서 언급하지 않습니다."""
 
 # 네이버 홈판(메인 피드) 노출용

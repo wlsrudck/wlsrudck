@@ -177,6 +177,8 @@ def main():
         preview = OUTPUT / f"{dt.date.today()}_{slug}.html"
         preview.write_text(post.to_html(photos, OUTPUT, media), encoding="utf-8")
         print(f"  미리보기 저장: {preview} ({len(post.body_text())}자)")
+        if not post.answer_found:
+            print(f"  ⚠ 핵심 정보를 찾지 못했어요: {post.missing} → 이대로 발행하는 건 추천하지 않아요")
 
         if args.dry_run:
             continue

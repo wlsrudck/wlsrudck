@@ -158,6 +158,8 @@ SYSTEM = """당신은 네이버 블로그 글을 쓰는 작가입니다. 자연�
   대신 객관적 비교, 가격·조건·사용 장면 같은 구체적 사실로 씁니다.
   공식 명칭이나 정확한 인용에 꼭 필요한 경우에만 사실 그대로 씁니다.
 - 가벼운 감상은 사실에 맞을 때만 씁니다. 과장된 감정은 쓰지 않습니다.
+- 조사 과정, 검색, 자료 조사, 도구, AI에 대한 언급("이번 조사에서는", "검색 도구 제한으로")은 본문에 절대 쓰지 않습니다.
+  모르는 정보는 "공식 발표 전이에요", "○○에서 확인할 수 있어요"처럼 독자 입장에서 씁니다.
 - "오늘은 ~에 대해 알아보겠습니다", "결론적으로" 같은 뻔한 AI 문투, 과도한 이모지, 마크다운 기호(**, ##, -)는 쓰지 않습니다.
 
 [사진]
@@ -223,10 +225,16 @@ RESEARCH_PROMPT = """네이버 블로그 글을 쓰기 전에 사실 확인용 �
 - 정부/공공기관, 공식 홈페이지, 주요 언론을 우선하세요.
 - 날짜가 오래된 정보는 몇 년 몇 월 기준인지 적으세요.
 - 출처끼리 내용이 다르면 둘 다 적고 다르다고 표시하세요.
-- 마지막에 "출처 목록"으로 사용한 URL을 한 줄에 하나씩 적으세요."""
+- 마지막에 "출처 목록"으로 사용한 URL을 한 줄에 하나씩 적으세요.
+- 맨 마지막 줄에는 이 주제로 글을 쓸 때 독자가 가장 알고 싶어 할 핵심 답(예: 일정 날짜, 금액, 신청 조건)을
+  찾았는지 딱 한 줄로 적으세요. 형식은 [핵심답: 찾음] 또는 [핵심답: 못찾음 - 무엇이 없는지] 입니다."""
 
 
-def research(client: anthropic.Anthropic, keyword: str, memo: str, cfg: dict) -> tuple[str, list[str]]:
+class NotEnoughInfo(Exception):
+    """검색으로 핵심 답을 찾지 못해 글을 쓰지 않고 건너뛸 때"""
+
+
+def research(client: anthropic.Anthropic, keyword: str, memo: str, cfg: dict) -> tuple[str, dict]:
     """웹 검색으로 최신 사실을 조사해 (정리한 메모, 출처 URL 목록)을 돌려준다."""
     messages = [{"role": "user", "content": RESEARCH_PROMPT.format(keyword=keyword, memo=memo or "(없음)")}]
     tools = [{
@@ -282,7 +290,8 @@ SITE_NAMES = {
     "nts.go.kr": "국세청", "hometax.go.kr": "홈택스", "nps.or.kr": "국민연금공단", "nhis.or.kr": "국민건강보험공단",
     "work24.go.kr": "고용24", "youthcenter.go.kr": "온통청년", "applyhome.co.kr": "청약홈", "fss.or.kr": "금융감독원",
     "fsc.go.kr": "금융위원회", "bok.or.kr": "한국은행", "kosis.kr": "국가통계포털", "kdic.or.kr": "예금보험공사",
-    "yna.co.kr": "연합뉴스", "news.naver.com": "네이버 뉴스",
+    "yna.co.kr": "연합뉴스", "news.naver.com": "네이버 뉴스", "wikipedia.org": "위키백과",
+    "olympics.com": "올림픽 공식 홈페이지", "worldathletics.org": "월드아슬레틱스", "kaaf.or.kr": "대한육상연맹",
 }
 
 
@@ -292,7 +301,7 @@ def source_name(url: str, title: str | None) -> str:
     for domain, name in SITE_NAMES.items():
         if host == domain or host.endswith("." + domain):
             return name
-    for sep in (" | ", " - ", " :: ", " : "):
+    for sep in (" | ", " :: "):
         if title and sep in title:
             name = title.rsplit(sep, 1)[1].strip()
             if 0 < len(name) <= 15:
@@ -308,6 +317,11 @@ def banned_in(post: "Post") -> list[str]:
 def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Post:
     client = anthropic.Anthropic(api_key=_api_key())
     notes, found = research(client, keyword, memo, cfg) if cfg.get("research", True) else ("", {})
+    miss = re.search(r"\[핵심답:\s*못찾음\s*-?\s*(.*?)\]", notes)
+    if miss and cfg.get("skip_if_no_answer", True):
+        # 발행할 수 없는 글에 글쓰기 비용을 쓰지 않는다
+        raise NotEnoughInfo(miss.group(1).strip() or "핵심 정보")
+    notes = re.sub(r"\[핵심답:[^\]]*\]", "", notes).strip()
     system = SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else SEARCH)
     content = []
     for i, path in enumerate(photos, 1):

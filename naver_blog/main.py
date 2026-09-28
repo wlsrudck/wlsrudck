@@ -20,7 +20,7 @@ from pathlib import Path
 import urllib.error
 
 import images
-from generate import Post, find_photos, generate_post
+from generate import NotEnoughInfo, Post, find_photos, generate_post
 
 ROOT = Path(__file__).parent
 KEYWORDS = ROOT / "keywords.csv"
@@ -162,15 +162,25 @@ def main():
     if not args.no_wait and not args.dry_run:
         sleep_minutes(pub["start_jitter_minutes"], "시작 전 랜덤 대기")
 
-    for i, row in enumerate(pending[:budget]):
-        if i > 0 and not args.dry_run:
+    made = 0
+    for row in pending:
+        if made >= budget:
+            break
+        if made > 0 and not args.dry_run:
             sleep_minutes(pub["between_posts_minutes"], "다음 글까지 대기")
 
         keyword = row["keyword"]
         slug = slugify(keyword)
         photos = find_photos(PHOTOS / slug)
         print(f"[생성] {keyword} (사진 {len(photos)}장)")
-        post = generate_post(keyword, row.get("memo", ""), photos, cfg["writing"])
+        try:
+            post = generate_post(keyword, row.get("memo", ""), photos, cfg["writing"])
+        except NotEnoughInfo as e:
+            print(f"  ⏭ 건너뜀: 검색으로 핵심 정보를 찾지 못했어요 ({e}). 글쓰기 비용은 쓰지 않았어요.")
+            if not args.dry_run:
+                mark_done(keyword, f"skip 정보부족 {dt.datetime.now():%Y-%m-%d}")
+            continue
+        made += 1
 
         OUTPUT.mkdir(exist_ok=True)
         media = prepare_media(post, slug, photos, cfg.get("images", {}))

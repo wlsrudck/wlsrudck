@@ -89,6 +89,17 @@ def load_rows():
             for r in lines]
 
 
+def mark_done(keyword: str, status: str) -> None:
+    """파일을 다시 읽어서 그 키워드 줄에만 상태를 적는다.
+    실행 도중 메모장으로 추가한 키워드가 덮어써져 사라지지 않게 하려는 것."""
+    rows = load_rows()
+    for r in rows:
+        if r["keyword"] == keyword and not r["status"].strip():
+            r["status"] = status
+            break
+    save_rows(rows)
+
+
 def save_rows(rows):
     with KEYWORDS.open("w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["keyword", "memo", "status"])
@@ -173,8 +184,7 @@ def main():
         from publish import post_to_naver  # dry-run에서는 playwright 없이도 동작하도록
 
         post_to_naver(post, photos, media, cfg["naver"]["blog_id"], pub["auto_publish"], pub["headless"], OUTPUT)
-        row["status"] = f"{'published' if pub['auto_publish'] else 'draft'} {dt.datetime.now():%Y-%m-%d %H:%M}"
-        save_rows(rows)
+        mark_done(keyword, f"{'published' if pub['auto_publish'] else 'draft'} {dt.datetime.now():%Y-%m-%d %H:%M}")
         bump_today()
         print(f"  {'발행' if pub['auto_publish'] else '임시저장'} 완료")
 

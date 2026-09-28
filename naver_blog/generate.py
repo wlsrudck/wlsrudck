@@ -62,7 +62,8 @@ class Post(BaseModel):
         if media.get("summary_card"):
             out.append(("photo", media["summary_card"]))
         if self.sources:
-            out.append(("text", "참고 자료\n" + "\n".join(self.sources)))
+            has_links = any("http" in s for s in self.sources)
+            out.append(("text", ("참고 자료\n" if has_links else "") + "\n".join(self.sources)))
         if stock:
             out.append(("text", "사진 출처: Pixabay"))
         out.append(("text", " ".join(f"#{t}" for t in self.tags)))
@@ -218,6 +219,30 @@ def source_line(url: str, title: str | None) -> str:
     return f"{name} - {readable}"
 
 
+SITE_NAMES = {
+    "bokjiro.go.kr": "복지로", "gov.kr": "정부24", "korea.kr": "정책브리핑", "molit.go.kr": "국토교통부",
+    "mohw.go.kr": "보건복지부", "moel.go.kr": "고용노동부", "mois.go.kr": "행정안전부", "moef.go.kr": "기획재정부",
+    "nts.go.kr": "국세청", "hometax.go.kr": "홈택스", "nps.or.kr": "국민연금공단", "nhis.or.kr": "국민건강보험공단",
+    "work24.go.kr": "고용24", "youthcenter.go.kr": "온통청년", "applyhome.co.kr": "청약홈", "fss.or.kr": "금융감독원",
+    "fsc.go.kr": "금융위원회", "bok.or.kr": "한국은행", "kosis.kr": "국가통계포털", "kdic.or.kr": "예금보험공사",
+    "yna.co.kr": "연합뉴스", "news.naver.com": "네이버 뉴스",
+}
+
+
+def source_name(url: str, title: str | None) -> str:
+    """"청년월세 특별지원 | 복지로" 같은 제목에서 사이트 이름만 뽑는다. 없으면 도메인."""
+    host = urllib.parse.urlparse(url).netloc.removeprefix("www.")
+    for domain, name in SITE_NAMES.items():
+        if host == domain or host.endswith("." + domain):
+            return name
+    for sep in (" | ", " - ", " :: ", " : "):
+        if title and sep in title:
+            name = title.rsplit(sep, 1)[1].strip()
+            if 0 < len(name) <= 15:
+                return name
+    return urllib.parse.urlparse(url).netloc.removeprefix("www.")
+
+
 def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Post:
     client = anthropic.Anthropic(api_key=_api_key())
     notes, found = research(client, keyword, memo, cfg) if cfg.get("research", True) else ("", {})
@@ -251,5 +276,10 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Pos
     if found:
         # 글쓴이가 지어낸 링크는 빼고, 실제 검색에서 나온 링크만 남긴다. 비어 있으면 검색 출처로 채운다.
         urls = [u for u in post.sources if u in found] or list(found)
-        post.sources = [source_line(u, found[u]) for u in urls[:3]]
+        # 홈판 글은 외부 링크가 있으면 노출에 불리하므로 기본값은 링크 없이 출처 이름만
+        if cfg.get("source_links", cfg.get("style", "homefeed") != "homefeed"):
+            post.sources = [source_line(u, found[u]) for u in urls[:3]]
+        else:
+            names = list(dict.fromkeys(source_name(u, found[u]) for u in urls[:4]))
+            post.sources = ["출처: " + ", ".join(names)]
     return post

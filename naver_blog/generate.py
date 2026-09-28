@@ -4,6 +4,7 @@ import base64
 import html
 import io
 import os
+import re
 from pathlib import Path
 
 import anthropic
@@ -166,13 +167,14 @@ RESEARCH_PROMPT = """네이버 블로그 글을 쓰기 전에 사실 확인용 �
 - 마지막에 "출처 목록"으로 사용한 URL을 한 줄에 하나씩 적으세요."""
 
 
-def research(client: anthropic.Anthropic, keyword: str, memo: str, cfg: dict) -> str:
-    """웹 검색으로 최신 사실을 조사해 정리한 메모를 돌려준다."""
+def research(client: anthropic.Anthropic, keyword: str, memo: str, cfg: dict) -> tuple[str, list[str]]:
+    """웹 검색으로 최신 사실을 조사해 (정리한 메모, 출처 URL 목록)을 돌려준다."""
     messages = [{"role": "user", "content": RESEARCH_PROMPT.format(keyword=keyword, memo=memo or "(없음)")}]
     tools = [{
         "type": "web_search_20260209", "name": "web_search", "max_uses": cfg.get("max_searches", 5),
         "user_location": {"type": "approximate", "country": "KR", "timezone": "Asia/Seoul"},
     }]
+    blocks = []
     for _ in range(5):  # 검색이 길어지면 pause_turn으로 끊기므로 이어서 요청
         response = client.beta.messages.create(
             model=cfg["model"],
@@ -182,17 +184,26 @@ def research(client: anthropic.Anthropic, keyword: str, memo: str, cfg: dict) ->
             tools=tools,
             messages=messages,
         )
+        blocks.extend(response.content)
         if response.stop_reason != "pause_turn":
             break
-        messages = messages[:1] + [{"role": "assistant", "content": response.content}]
+        messages = messages[:1] + [{"role": "assistant", "content": blocks}]
     if response.stop_reason == "refusal":
         raise RuntimeError(f"자료 조사가 거절되었습니다: {keyword}")
-    return "\n".join(b.text for b in response.content if b.type == "text").strip()
+    texts = [b for b in blocks if b.type == "text"]
+    notes = "\n".join(b.text for b in texts).strip()
+
+    # 출처: 실제로 인용된 URL → 본문에 적힌 URL → 검색 결과 URL 순서로 모은다
+    urls = [c.url for b in texts for c in (b.citations or []) if getattr(c, "url", None)]
+    urls += re.findall(r"https?://[^\s)\]>\"']+", notes)
+    urls += [r.url for b in blocks if b.type == "web_search_tool_result" and isinstance(b.content, list)
+             for r in b.content if getattr(r, "url", None)]
+    return notes, list(dict.fromkeys(u.rstrip(".,") for u in urls))
 
 
 def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Post:
     client = anthropic.Anthropic(api_key=_api_key())
-    notes = research(client, keyword, memo, cfg) if cfg.get("research", True) else ""
+    notes, urls = research(client, keyword, memo, cfg) if cfg.get("research", True) else ("", [])
     system = SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else "")
     content = []
     for i, path in enumerate(photos, 1):
@@ -219,4 +230,8 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Pos
         raise RuntimeError(f"글 생성이 거절되었습니다: {keyword}")
     if response.stop_reason == "max_tokens" or response.parsed_output is None:
         raise RuntimeError(f"글 생성 결과가 불완전합니다: {keyword}")
-    return response.parsed_output
+    post = response.parsed_output
+    if urls:
+        # 글쓴이가 지어낸 링크는 빼고, 실제 검색에서 나온 링크만 남긴다. 비어 있으면 검색 출처로 채운다.
+        post.sources = [u for u in post.sources if u in urls] or urls[:4]
+    return post

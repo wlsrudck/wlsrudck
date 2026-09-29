@@ -45,6 +45,8 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict) -> dict:
     media = {"stock": {}}
     if cfg.get("thumbnail", True):
         media["thumbnail"] = images.make_thumbnail(post.title, folder / "thumbnail.jpg", slug, post.thumbnail_text)
+    if cfg.get("metrics_card", True) and post.metrics:
+        media["metrics_card"] = images.make_metrics_card(post.metrics, post.metrics_basis, folder / "metrics.jpg", slug)
     if cfg.get("summary_card", True) and post.summary:
         media["summary_card"] = images.make_summary_card(post.title, post.summary, folder / "summary.jpg", slug)
 
@@ -75,6 +77,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict) -> dict:
             media["stock"][i], photo_id = found
             used_ids.add(photo_id)
     print(f"  이미지 준비: 썸네일 {'만듦' if 'thumbnail' in media else '없음'}, "
+          f"지표 카드 {'만듦' if 'metrics_card' in media else '없음'}, "
           f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 무료 사진 {len(media['stock'])}장")
     return media
 

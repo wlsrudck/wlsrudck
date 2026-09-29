@@ -87,6 +87,45 @@ def make_thumbnail(title: str, out: Path, seed: str, phrase: list[str] | None = 
     return out
 
 
+def make_metrics_card(metrics: list, basis: str, out: Path, seed: str) -> Path:
+    """핵심 지표 카드: 타일마다 이름 / 큰 숫자 / 기준·출처 한 줄. 최대 4개를 2x2로.
+    숫자는 색이 아니라 진한 글자색으로 쓴다 (색은 위쪽 강조선에만)."""
+    bg, accent = random.Random(seed).choice(PALETTES)
+    ink, sub, muted = "#1f2328", "#4a525c", "#7a828c"
+    im = Image.new("RGB", (1080, 1080), "#f4f5f2")
+    d = ImageDraw.Draw(im)
+    d.rectangle([0, 0, 1080, 170], fill=bg)
+    d.text((70, 85), "핵심 지표", font=_font(56), fill="white", anchor="lm")
+    if basis:
+        d.text((1010, 85), basis, font=_font(30), fill=accent, anchor="rm")
+
+    metrics = metrics[:4]
+    cols = 2 if len(metrics) in (2, 4) else 1  # 3개면 빈칸이 생기지 않게 한 줄에 하나씩
+    rows = (len(metrics) + cols - 1) // cols
+    gap, top, left = 30, 210, 60
+    tw = (1080 - left * 2 - gap * (cols - 1)) // cols
+    th = (1080 - top - 60 - gap * (rows - 1)) // rows
+    pad = 36
+    # 숫자 크기는 모든 타일에서 같게: 가장 긴 숫자가 칸에 들어가는 크기
+    max_size = min(120, int(th * 0.34))
+    size = next((sz for sz in range(max_size, 40, -6)
+                 if all(d.textlength(m.value, font=_font(sz)) <= tw - pad * 2 for m in metrics)), 40)
+    for i, m in enumerate(metrics):
+        x = left + (i % cols) * (tw + gap)
+        y = top + (i // cols) * (th + gap)
+        d.rounded_rectangle([x, y, x + tw, y + th], radius=18, fill="white")
+        d.rounded_rectangle([x, y, x + tw, y + 10], radius=4, fill=bg)
+        label_font = _font(36)
+        d.text((x + pad, y + 60), _wrap(d, m.label, label_font, tw - pad * 2)[0], font=label_font, fill=sub, anchor="lm")
+        d.text((x + pad, y + th / 2 + 5), m.value, font=_font(size), fill=ink, anchor="lm")
+        note_font = _font(28)
+        notes = _wrap(d, m.note, note_font, tw - pad * 2)[:2]
+        for j, line in enumerate(notes):
+            d.text((x + pad, y + th - 40 - (len(notes) - 1 - j) * 36), line, font=note_font, fill=muted, anchor="lm")
+    im.save(out, quality=92)
+    return out
+
+
 def make_summary_card(title: str, points: list[str], out: Path, seed: str) -> Path:
     bg, accent = random.Random(seed).choice(PALETTES)
     im = Image.new("RGB", (1080, 1080), "#fafaf7")

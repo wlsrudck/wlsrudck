@@ -225,21 +225,34 @@ def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None =
     return done
 
 
-# 인용구 종류 목록을 여는 작은 화살표(인용구 버튼 옆)를 찾아 표시한다
-_MARK_QUOTE_OPENER = """() => {
+# 인용구·구분선 종류 목록을 여는 작은 화살표(버튼 옆 ▾)를 찾아 표시한다. 찾으면 지금 보이는 버튼들을 기억해 둔다
+_MARK_MENU_OPENER = """([label, clsre]) => {
     document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
     const vis = e => e.getClientRects().length > 0;
     const txt = e => (e.textContent || "").replace(/\\s+/g, " ").trim();
+    const re = new RegExp(clsre, "i");
     const btns = [...document.querySelectorAll("button")].filter(vis);
-    let el = btns.find(e => txt(e).includes("인용구 선택") || (e.getAttribute("title") || "").includes("인용구 선택"))
-        || btns.find(e => /quotation/i.test(e.className) && /(select|arrow|more|option|drop)/i.test(e.className));
+    let el = btns.find(e => txt(e).includes(label + " 선택") || (e.getAttribute("title") || "").includes(label + " 선택"))
+        || btns.find(e => re.test(e.className) && /(select|arrow|more|option|drop)/i.test(e.className));
     if (!el) {
-        const main = btns.find(e => txt(e).includes("인용구") || /quotation/i.test(e.className));
+        const main = btns.find(e => txt(e).includes(label) || re.test(e.className));
         if (main && main.nextElementSibling && main.nextElementSibling.tagName === "BUTTON") el = main.nextElementSibling;
     }
     if (!el) return "";
+    window.__nbSeen = new Set(btns);
     el.setAttribute("data-nb-pick", "1");
     return (el.className || "button") + " | " + txt(el).slice(0, 15);
+}"""
+
+# 목록을 연 뒤 새로 보이는 버튼 중 n번째(1부터)를 표시한다 (구분선처럼 글자 없는 목록용)
+_MARK_NEW_NTH = """(n) => {
+    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const seen = window.__nbSeen || new Set();
+    const fresh = [...document.querySelectorAll("button")].filter(e => e.getClientRects().length > 0 && !seen.has(e));
+    const el = fresh[n - 1];
+    if (!el) return "";
+    el.setAttribute("data-nb-pick", "1");
+    return (el.className || "button") + " | " + fresh.length + "개 중 " + n + "번째";
 }"""
 
 # 열린 목록에서 글자가 딱 맞는 항목(예: 포스트잇)을 표시한다
@@ -259,49 +272,68 @@ _TEXT_IN_COMPONENT = """(text) => [...document.querySelectorAll('.se-component:n
     .some(c => (c.innerText || '').includes(text))"""
 
 
-def _insert_quote_after(page: Page, editor, text: str, anchor: str, style: dict | None, screenshot_dir: Path | None) -> str:
-    """anchor 문단 뒤에 포스트잇 인용구를 넣고 text를 쓴다. 안 되면 굵은 글씨 한 줄로 대신 넣는다. 결과를 글로 돌려준다."""
-    kind = (style or {}).get("quote_style", TEXT_STYLE.get("quote_style", "포스트잇"))
+def _caret_after(page: Page, editor, anchor: str):
     sel = SELECTORS["body"]
+    editor.locator(sel).filter(has_text=anchor[-40:]).last.click()
+    if not editor.evaluate(_CARET_TO_END_OF, [sel, anchor]):
+        raise RuntimeError(f"위치를 찾지 못함: {anchor[:20]}")
+    page.keyboard.press("End")
+    _pause(0.3, 0.6)
+
+
+def _insert_component(page: Page, editor, anchor: str, label: str, clsre: str, option, log: list) -> bool:
+    """anchor 문단 뒤에 인용구/구분선 같은 부품을 넣는다. option은 목록 항목 글자(str) 또는 순번(int)"""
+    _caret_after(page, editor, anchor)
+    before = editor.evaluate(_COMPONENT_COUNT)
+    opener = editor.evaluate(_MARK_MENU_OPENER, [label, clsre])
+    if not opener:
+        log.append(f"{label} 목록 버튼 못 찾음")
+        return False
+    editor.locator("[data-nb-pick]").first.click(timeout=5000)
+    _pause(0.4, 0.8)
+    picked = editor.evaluate(_MARK_BY_TEXT, option) if isinstance(option, str) else editor.evaluate(_MARK_NEW_NTH, option)
+    if not picked:
+        log.append(f"{label} 목록 버튼: {opener} / 항목 {option} 못 찾음")
+        page.keyboard.press("Escape")
+        return False
+    editor.locator("[data-nb-pick]").first.click(timeout=5000)
+    _pause(0.6, 1.0)
+    if editor.evaluate(_COMPONENT_COUNT) <= before:
+        log.append(f"{label} 항목({picked})을 눌렀지만 들어가지 않음")
+        return False
+    return True
+
+
+def _write_in_component(page: Page, editor, text: str, log: list) -> bool:
+    """방금 넣은 인용구 안에 글자를 쓴다. 안 들어가면 되돌린다"""
+    page.keyboard.insert_text(text)
+    _pause(0.3, 0.6)
+    if editor.evaluate(_TEXT_IN_COMPONENT, text):
+        return True
+    log.append("인용구는 생겼지만 글자가 안 들어감 → 되돌림")
+    page.keyboard.press("Control+Z")
+    _pause(0.3, 0.6)
+    return False
+
+
+def _save_log(editor, screenshot_dir: Path | None, name: str, log: list):
+    if screenshot_dir and log:
+        (screenshot_dir / name).write_text("\n".join(log) + "\n\n" + editor.evaluate(_DUMP_BUTTONS), encoding="utf-8")
+
+
+def _insert_quote_after(page: Page, editor, text: str, anchor: str, style: dict | None, screenshot_dir: Path | None) -> str:
+    """anchor 문단 뒤에 인용구(기본 포스트잇)를 넣고 text를 쓴다. 안 되면 굵은 글씨 한 줄로 대신 넣는다."""
+    kind = {**TEXT_STYLE, **(style or {})}["quote_style"]
     log = []
     try:
-        para = editor.locator(sel).filter(has_text=anchor[-40:]).last
-        para.click()
-        if not editor.evaluate(_CARET_TO_END_OF, [sel, anchor]):
-            raise RuntimeError("넣을 위치를 찾지 못함")
-        page.keyboard.press("End")
-        _pause(0.3, 0.6)
-        before = editor.evaluate(_COMPONENT_COUNT)
-        opener = editor.evaluate(_MARK_QUOTE_OPENER)
-        log.append(f"인용구 목록 버튼: {opener or '못 찾음'}")
-        if opener:
-            editor.locator("[data-nb-pick]").first.click(timeout=5000)
-            _pause(0.4, 0.8)
-            option = editor.evaluate(_MARK_BY_TEXT, kind)
-            log.append(f"{kind} 항목: {option or '못 찾음'}")
-            if option:
-                editor.locator("[data-nb-pick]").first.click(timeout=5000)
-            else:
-                page.keyboard.press("Escape")
-        _pause(0.6, 1.0)
-        if editor.evaluate(_COMPONENT_COUNT) > before:
-            page.keyboard.insert_text(text)
-            _pause(0.3, 0.6)
-            if editor.evaluate(_TEXT_IN_COMPONENT, text):
-                return f"{kind} 인용구로 넣음"
-            log.append("인용구는 생겼지만 글자가 안 들어감 → 되돌림")
-            page.keyboard.press("Control+Z")
-            _pause(0.3, 0.6)
+        if _insert_component(page, editor, anchor, "인용구", "quotation", kind, log) and _write_in_component(page, editor, text, log):
+            return f"{kind} 인용구로 넣음"
     except Exception as e:
         log.append(f"오류: {str(e).splitlines()[0]}")
         page.keyboard.press("Escape")
-    if screenshot_dir:
-        (screenshot_dir / "editor_quote.txt").write_text("\n".join(log) + "\n\n" + editor.evaluate(_DUMP_BUTTONS), encoding="utf-8")
-    # 대신 도입 뒤에 굵은 글씨 한 줄로
+    _save_log(editor, screenshot_dir, "editor_quote.txt", log)
     try:
-        editor.locator(sel).filter(has_text=anchor[-40:]).last.click()
-        editor.evaluate(_CARET_TO_END_OF, [sel, anchor])
-        page.keyboard.press("End")
+        _caret_after(page, editor, anchor)
         page.keyboard.press("Enter")
         page.keyboard.press("Control+B")
         page.keyboard.insert_text(f"“{text}”")
@@ -309,6 +341,97 @@ def _insert_quote_after(page: Page, editor, text: str, anchor: str, style: dict 
         return "인용구를 못 넣어 굵은 글씨로 넣음 (output/editor_quote.txt 참고)"
     except Exception as e:
         return f"넣지 못함: {str(e).splitlines()[0]}"
+
+
+# 소제목 자리 표시: 글을 칠 때 이 표시를 먼저 적어 두고, 사진·구분선·소제목 상자를 그 자리에 넣은 뒤 지운다
+def _with_placeholders(blocks, st: dict):
+    """소제목 블록을 표시 글자로 바꾼다. (새 블록 목록, [(번호, 소제목)])"""
+    divider, box = int(st.get("divider_style") or 0), (st.get("heading_box") or "").strip()
+    if not divider and not box:
+        return blocks, []
+    out, heads, n = [], [], 0
+    for kind, value in blocks:
+        if kind != "heading":
+            out.append((kind, value))
+            continue
+        n += 1
+        heads.append((n, value))
+        marks = ([f"§D{n}§"] if divider else []) + ([f"§H{n}§"] if box else [])
+        out.append(("text", "\n".join(marks)))
+        if not box:
+            out.append((kind, value))
+    return out, heads
+
+
+def _clear_mark(page: Page, editor, mark: str, replace_with: str = "") -> bool:
+    """표시 글자를 지우거나(빈 줄로) 다른 글자로 바꾼다"""
+    if not _select_line(page, editor, mark):
+        return False
+    if replace_with:
+        page.keyboard.insert_text(replace_with)
+    else:
+        page.keyboard.press("Backspace")
+    _pause(0.2, 0.4)
+    return True
+
+
+def _insert_heading_parts(page: Page, editor, heads, st: dict, screenshot_dir: Path | None) -> list[str]:
+    """소제목 위 구분선, 소제목 상자(버티컬 라인 인용구)를 넣는다. 상자로 못 넣은 소제목은 굵은 글씨로 되돌리고 그 목록을 돌려준다."""
+    divider, box = int(st.get("divider_style") or 0), (st.get("heading_box") or "").strip()
+    log, fallback = [], []
+    ok_div = ok_box = 0
+    fails = {"div": 0, "box": 0}
+    for n, heading in heads:
+        if divider:
+            mark = f"§D{n}§"
+            try:
+                if fails["div"] < 2 and _insert_component(page, editor, mark, "구분선", "horizontal", divider, log):
+                    ok_div += 1
+                else:
+                    fails["div"] += 1
+            except Exception as e:
+                fails["div"] += 1
+                log.append(f"구분선 오류: {str(e).splitlines()[0]}")
+                page.keyboard.press("Escape")
+            _clear_mark(page, editor, mark)
+        if box:
+            mark = f"§H{n}§"
+            boxed = False
+            try:
+                if fails["box"] < 2 and _insert_component(page, editor, mark, "인용구", "quotation", box, log) \
+                        and _write_in_component(page, editor, heading, log):
+                    boxed = True
+                    ok_box += 1
+                    # 상자 안 소제목도 크기·색을 맞춘다 (방금 친 글자를 Shift+← 로 선택)
+                    for _ in range(len(heading)):
+                        page.keyboard.press("Shift+ArrowLeft")
+                    _pick(page, editor, SELECTORS["font_size_btn"], _MARK_SIZE_OPTION, st["heading_size"], log)
+                    page.keyboard.press("End")
+                    for _ in range(len(heading)):
+                        page.keyboard.press("Shift+ArrowLeft")
+                    _pick(page, editor, SELECTORS["font_color_btn"], _MARK_COLOR_OPTION, st["heading_color"], log)
+                    page.keyboard.press("End")
+                else:
+                    fails["box"] += 1
+            except Exception as e:
+                fails["box"] += 1
+                log.append(f"소제목 상자 오류: {str(e).splitlines()[0]}")
+                page.keyboard.press("Escape")
+            if boxed:
+                _clear_mark(page, editor, mark)
+            else:  # 상자를 못 넣으면 표시 자리에 소제목을 굵게 적는다 (뒤의 글자 꾸미기에서 크기·색이 들어간다)
+                if _clear_mark(page, editor, mark, heading):
+                    _select_line(page, editor, heading)
+                    page.keyboard.press("Control+B")
+                    page.keyboard.press("End")
+                fallback.append(heading)
+    if divider:
+        print(f"  구분선: {ok_div}/{len(heads)}개")
+    if box:
+        print(f"  소제목 상자({box}): {ok_box}/{len(heads)}개")
+    if ok_div < len(heads) * bool(divider) or ok_box < len(heads) * bool(box):
+        _save_log(editor, screenshot_dir, "editor_heading.txt", log)
+    return fallback
 
 
 def _insert_photo_after(page: Page, editor, photo: Path, anchor: str):
@@ -333,6 +456,8 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screens
     """글자를 전부 먼저 입력하고, 그다음 사진을 제자리에 끼워 넣는다.
     사진을 올린 뒤 커서를 다시 글 칸으로 옮기는 동작이 불안정해서 이렇게 나눴다.
     실패한 사진은 건너뛰고, 넣은 사진 수를 돌려준다."""
+    st = {**TEXT_STYLE, **(style or {})}
+    blocks, heads = _with_placeholders(blocks, st)
     texts = [(k, v) for k, v in blocks if k not in ("photo", "quote")]
     photos, quotes, anchor = [], [], None
     for kind, value in blocks:
@@ -363,13 +488,6 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screens
     if typed < expected * 0.8:
         raise RuntimeError(f"본문 입력 실패: {expected}자 중 {typed}자만 들어감")
 
-    targets = _style_targets(blocks, style)
-    if targets:
-        n = _style_paragraphs(page, editor, targets, screenshot_dir)
-        print(f"  글자 꾸미기: {n}/{len(targets)}줄 (도입 회색 굵게, 소제목 크기·색, Q&A 색)")
-        if n < len(targets) and screenshot_dir and (screenshot_dir / "editor_toolbar.txt").exists():
-            print("  (꾸미기가 덜 된 경우 output 폴더의 editor_toolbar.txt 를 메모장으로 열어 캡처해 보내주세요)")
-
     # 인용구를 먼저 넣고 사진을 넣는다. 같은 줄 뒤에 둘 다 붙으면 사진이 위, 인용구가 아래가 된다(썸네일 → 핵심 한 줄)
     for text, q_anchor in quotes:
         how = _insert_quote_after(page, editor, text, q_anchor or first_line, style, screenshot_dir)
@@ -386,6 +504,16 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screens
             done += 1
         except Exception as e:
             print(f"  사진 넣기 실패, 건너뜀 ({photo.name}): {e}")
+
+    # 사진 다음에 넣어야 같은 자리에서 구분선 → 소제목 → 사진 순서가 된다
+    fallback = _insert_heading_parts(page, editor, heads, st, screenshot_dir) if heads else []
+
+    targets = _style_targets(blocks + [("heading", h) for h in fallback], style)
+    if targets:
+        n = _style_paragraphs(page, editor, targets, screenshot_dir)
+        print(f"  글자 꾸미기: {n}/{len(targets)}줄 (도입 회색 굵게, 소제목 크기·색, Q&A 색)")
+        if n < len(targets) and screenshot_dir and (screenshot_dir / "editor_toolbar.txt").exists():
+            print("  (꾸미기가 덜 된 경우 output 폴더의 editor_toolbar.txt 를 메모장으로 열어 캡처해 보내주세요)")
     return done
 
 

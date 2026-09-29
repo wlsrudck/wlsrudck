@@ -59,7 +59,8 @@ def _type_lines(page: Page, text: str):
 # 문단 끝에 커서를 두는 스크립트. 네이버 에디터는 한 줄(Enter)마다 문단 하나를 만든다.
 _CARET_TO_END_OF = """([sel, text]) => {
     const ps = [...document.querySelectorAll(sel)];
-    const p = ps.find(e => e.innerText.trim() === text) || ps.find(e => e.innerText.includes(text));
+    // 목차 줄과 본문 소제목이 같은 글자일 수 있어 뒤쪽(본문)을 고른다
+    const p = ps.filter(e => e.innerText.trim() === text).pop() || ps.filter(e => e.innerText.includes(text)).pop();
     if (!p) return false;
     p.scrollIntoView({block: "center"});
     const range = document.createRange();
@@ -74,7 +75,7 @@ _CARET_TO_END_OF = """([sel, text]) => {
 
 def _insert_photo_after(page: Page, editor, photo: Path, anchor: str):
     """anchor 문단 끝에 커서를 두고 사진을 올린다. (사진은 커서 위치 다음에 들어간다)"""
-    para = editor.locator(SELECTORS["body"]).filter(has_text=anchor[-40:]).first
+    para = editor.locator(SELECTORS["body"]).filter(has_text=anchor[-40:]).last
     para.click()
     if not editor.evaluate(_CARET_TO_END_OF, [SELECTORS["body"], anchor]):
         raise RuntimeError(f"사진 넣을 위치를 찾지 못함: {anchor[:20]}")

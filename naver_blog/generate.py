@@ -40,6 +40,7 @@ class QA(BaseModel):
 class Post(BaseModel):
     title: str
     intro: list[str] = Field(description="세 줄 도입. 정확히 3개: 궁금증과 맞닿은 장면/질문, 확인 가능한 핵심 사실, 이 글에서 얻을 답")
+    pull_quote: str = Field(description="짧은 호흡 문체에서 도입 뒤에 크게 뽑아 보여줄 한 줄(20자 안팎). 정리형 문체면 빈 문자열")
     thumbnail_text: list[str] = Field(description="썸네일에 크게 넣을 짧은 문구 1~2줄. 각 줄 12자 이내")
     thumbnail_query: str = Field(description="썸네일 배경 사진을 찾을 영어 검색어 2~4단어. 주제를 한눈에 보여주는 장소·사물. 사람·로고 제외")
     sections: list[Section]
@@ -64,7 +65,8 @@ class Post(BaseModel):
 
     def toc(self) -> str:
         items = [s.heading for s in self.sections if s.heading] + (["자주 묻는 질문"] if self.qa else [])
-        return "목차\n" + "\n".join(f"{i}. {h}" for i, h in enumerate(items, 1)) if items else ""
+        lines = [h if re.match(r"\d+\.\s", h) else f"{i}. {h}" for i, h in enumerate(items, 1)]
+        return "목차\n" + "\n".join(lines) if items else ""
 
     def all_text(self) -> str:
         """금지 표현 점검용: 제목, 이미지 문구, 본문, 태그 전부"""
@@ -83,6 +85,8 @@ class Post(BaseModel):
             out.append(("photo", media["thumbnail"]))
         if self.intro:
             out.append(("text", "\n".join(self.intro)))
+        if self.pull_quote.strip():
+            out.append(("heading", f"“{self.pull_quote.strip()}”"))
         if self.toc():
             out.append(("text", self.toc()))
         if media.get("metrics_card"):
@@ -205,6 +209,21 @@ HOMEFEED = """
   "놓치면 손해", "큰일 난다" 같은 과장된 손해·공포 표현과 "~했더니 ~더라" 같은 후기형 문구의 반복은 피합니다.
 - thumbnail_text: 제목과 다른, 한눈에 들어오는 짧은 문구 1~2줄.
 - 홈판 독자가 끝까지 읽을 이유가 생기도록, 가장 궁금한 답의 실마리를 앞쪽 소제목에서 줍니다."""
+
+# 짧은 호흡 문체: 옆 사람이 얘기해주듯 짧게 끊어 쓰는 방식
+SHORT_VOICE = """
+
+[짧은 호흡 문체]
+- 한 줄에 짧은 문장 하나. 한 줄은 25자 안팎을 넘기지 않습니다.
+- paragraphs의 한 항목은 생각 하나입니다. 그 안에서 줄을 바꿀 때는 줄바꿈(\\n)을 쓰고, 한 항목은 1~3줄로 씁니다.
+  항목과 항목 사이에는 프로그램이 빈 줄을 넣습니다.
+- 소제목은 번호 없이 짧게 씁니다(프로그램이 1. 2. 3. 번호를 붙입니다). 10~15자 안팎.
+- 도입 세 줄도 짧게 끊어 씁니다. 인사말은 쓰지 않습니다.
+- pull_quote: 글의 핵심을 한 줄로 뽑은 강조 문장. 도입 바로 뒤에 크게 들어갑니다.
+- 딱딱한 설명이 이어지면 사이에 가벼운 한마디(짧은 감탄, 되묻기)를 한두 번 넣어 쉬어 가게 합니다.
+  억지 유머, 유행어, 특정 블로거의 말버릇 흉내는 쓰지 않습니다.
+- 대화체(누가 누구에게 말하는 장면)는 작성자 메모에 실제 대화가 있을 때만 씁니다. 없는 대화를 만들지 않습니다.
+- 숫자는 지표 카드와 본문에 짧게. 한 줄에 숫자 하나씩."""
 
 # 검색 유입용 (티스토리·네이버 검색)
 SEARCH = """
@@ -356,7 +375,8 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Pos
         # 발행할 수 없는 글에 글쓰기 비용을 쓰지 않는다
         raise NotEnoughInfo(miss.group(1).strip() or "핵심 정보")
     notes = re.sub(r"\[핵심답:[^\]]*\]", "", notes).strip()
-    system = SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else SEARCH)
+    short = cfg.get("voice", "short") == "short"
+    system = SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else SEARCH) + (SHORT_VOICE if short else "")
     content = []
     for i, path in enumerate(photos, 1):
         content.append({"type": "text", "text": f"사진 {i}:"})
@@ -383,6 +403,8 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Pos
     if response.stop_reason == "max_tokens" or response.parsed_output is None:
         raise RuntimeError(f"글 생성 결과가 불완전합니다: {keyword}")
     post = response.parsed_output
+    if not short:
+        post.pull_quote = ""
 
     # 금지 표현이 남아 있으면 한 번만 고쳐 쓰게 한다 (공식 명칭 등 꼭 필요한 경우는 남을 수 있다)
     hits = banned_in(post)
@@ -407,6 +429,15 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Pos
         left = banned_in(post)
         if left:
             print(f"  ⚠ 금지 표현이 남아 있어요({', '.join(left)}). 발행 전에 확인하세요.")
+
+    if short:
+        # 짧은 호흡 문체는 소제목 앞에 1. 2. 3. 번호
+        n = 0
+        for sec in post.sections:
+            if sec.heading.strip():
+                n += 1
+                plain = re.sub(r"^\d+[.)]\s*", "", sec.heading.strip())
+                sec.heading = f"{n}. {plain}"
 
     if found:
         # 글쓴이가 지어낸 링크는 빼고, 실제 검색에서 나온 링크만 남긴다. 비어 있으면 검색 출처로 채운다.

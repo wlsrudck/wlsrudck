@@ -24,6 +24,7 @@ model = "claude-opus-5"
 min_chars = 1500
 max_chars = 2500
 tone = "친근한 구어체, 존댓말, 과장 없이 담백하게"
+voice = "short"         # "short": 짧은 호흡(한 줄 한 문장, 1. 2. 3. 번호), "standard": 정리형 문단
 style = "homefeed"      # "homefeed": 네이버 홈판 노출용 제목/구성, "normal": 일반 정보글
 research = true         # 글 쓰기 전에 웹 검색으로 최신 정보 확인 (글당 비용 조금 증가)
 max_searches = 5        # 글 하나당 최대 검색 횟수

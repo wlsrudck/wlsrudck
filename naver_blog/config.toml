@@ -28,3 +28,9 @@ voice = "short"         # "short": 짧은 호흡(한 줄 한 문장, 1. 2. 3. �
 style = "homefeed"      # "homefeed": 네이버 홈판 노출용 제목/구성, "normal": 일반 정보글
 research = true         # 글 쓰기 전에 웹 검색으로 최신 정보 확인 (글당 비용 조금 증가)
 max_searches = 5        # 글 하나당 최대 검색 횟수
+
+[style]
+heading_size = 24          # 소제목 글자 크기 (본문은 네이버 기본 19)
+heading_color = "#1565c0"  # 소제목 색 (파랑)
+q_color = "#1565c0"        # Q&A 질문 색
+a_color = "#666666"        # Q&A 답변 색 (회색)

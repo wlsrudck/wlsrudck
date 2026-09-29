@@ -23,6 +23,14 @@ class Section(BaseModel):
     paragraphs: list[str] = Field(description="문단 목록. 한 문단은 2~4문장")
 
 
+# 소제목·Q&A 글자 꾸미기 기본값. config.toml의 [style]에서 바꿀 수 있다
+TEXT_STYLE = {"heading_size": 24, "heading_color": "#1565c0", "q_color": "#1565c0", "a_color": "#666666"}
+
+
+def is_qa(text: str) -> bool:
+    return text.startswith("Q. ") and "\nA. " in text
+
+
 class Metric(BaseModel):
     label: str = Field(description="지표 이름. 예: 누적 관객, 분배율(최근 1년)")
     value: str = Field(description="숫자와 단위만 짧게(12자 이내). 예: 163만 3616명, 13.81%, 4~6배. 조건·설명은 note에. 조사로 확인 못 했으면 정확히 \"확인 필요\"")
@@ -116,15 +124,20 @@ class Post(BaseModel):
         out.append(("text", " ".join(f"#{t}" for t in self.tags)))
         return out
 
-    def to_html(self, photos: list[Path], out_dir: Path, media: dict | None = None) -> str:
+    def to_html(self, photos: list[Path], out_dir: Path, media: dict | None = None, style: dict | None = None) -> str:
         """미리보기용 HTML. 실제 네이버 글과 비슷한 모양으로 보여준다."""
+        st = {**TEXT_STYLE, **(style or {})}
         body = []
         for kind, value in self.blocks(photos, media):
             if kind == "heading":
-                body.append(f"<h2>{html.escape(value)}</h2>")
+                body.append(f'<h2 style="font-size:{st["heading_size"]}px;color:{st["heading_color"]}">{html.escape(value)}</h2>')
             elif kind == "photo":
                 rel = os.path.relpath(value, out_dir).replace(os.sep, "/")
                 body.append(f'<img src="{html.escape(rel)}">')
+            elif is_qa(value):
+                q, a = value.split("\n", 1)
+                body.append(f'<p><b style="color:{st["q_color"]}">{html.escape(q)}</b><br>'
+                            f'<span style="color:{st["a_color"]}">{html.escape(a).replace(chr(10), "<br>")}</span></p>')
             else:
                 body.append("<p>" + html.escape(value).replace("\n", "<br>") + "</p>")
         if not any(not m.pending for m in self.metrics):

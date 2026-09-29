@@ -6,7 +6,7 @@ from pathlib import Path
 
 from playwright.sync_api import Frame, Page, sync_playwright
 
-from generate import Post
+from generate import TEXT_STYLE, Post, is_qa
 from login import STATE_PATH
 
 # 네이버가 에디터를 개편하면 여기만 고치면 된다. (클래스명 뒤 해시가 바뀌므로 부분 일치 사용)
@@ -73,6 +73,77 @@ _CARET_TO_END_OF = """([sel, text]) => {
 }"""
 
 
+# 문단 하나를 통째로 선택한다. 같은 글자의 문단이 여럿이면(목차 줄 등) 뒤쪽(본문)을 고른다
+_SELECT_PARAGRAPH = """([sel, text]) => {
+    const p = [...document.querySelectorAll(sel)].filter(e => e.innerText.trim() === text).pop();
+    if (!p) return false;
+    p.scrollIntoView({block: "center"});
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    const s = window.getSelection();
+    s.removeAllRanges();
+    s.addRange(range);
+    return true;
+}"""
+
+# 선택한 글자 위에 꾸민 글자(HTML)를 붙여넣는다. 복사-붙여넣기와 같은 경로라 에디터가 크기·색을 받아들인다
+_PASTE_HTML = """([html, text]) => {
+    const dt = new DataTransfer();
+    dt.setData("text/html", html);
+    dt.setData("text/plain", text);
+    const ev = new ClipboardEvent("paste", {clipboardData: dt, bubbles: true, cancelable: true});
+    const s = window.getSelection();
+    const node = s.anchorNode && (s.anchorNode.nodeType === 1 ? s.anchorNode : s.anchorNode.parentElement);
+    (node || document.activeElement || document.body).dispatchEvent(ev);
+    return ev.defaultPrevented;
+}"""
+
+_COUNT_EXACT = "([sel, text]) => [...document.querySelectorAll(sel)].filter(e => e.innerText.trim() === text).length"
+
+
+def _style_targets(blocks, style: dict) -> list[tuple[str, str]]:
+    """(문단 글자, 꾸민 HTML) 목록: 소제목은 크게+색, Q&A는 질문·답을 다른 색으로"""
+    st = {**TEXT_STYLE, **(style or {})}
+    esc = lambda t: t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    out = []
+    for kind, value in blocks:
+        if kind == "heading":
+            out.append((value, f'<span style="font-size:{st["heading_size"]}px;color:{st["heading_color"]}">'
+                               f'<b>{esc(value)}</b></span>'))
+        elif kind == "text" and is_qa(value):
+            for line in value.split("\n"):
+                if line.startswith("Q. "):
+                    out.append((line, f'<span style="color:{st["q_color"]}"><b>{esc(line)}</b></span>'))
+                elif line.strip():
+                    out.append((line, f'<span style="color:{st["a_color"]}">{esc(line)}</span>'))
+    return out
+
+
+def _style_paragraphs(page: Page, editor, targets) -> int:
+    """이미 입력한 문단을 꾸민 글자로 바꿔 넣는다. 에디터가 받아주지 않으면 그대로 두고(굵은 글씨만), 꾸민 개수를 돌려준다."""
+    sel = SELECTORS["body"]
+    done = 0
+    for text, markup in targets:
+        text = text.strip()
+        try:
+            before = editor.evaluate(_COUNT_EXACT, [sel, text])
+            if not before or not editor.evaluate(_SELECT_PARAGRAPH, [sel, text]):
+                continue
+            _pause(0.1, 0.3)
+            handled = editor.evaluate(_PASTE_HTML, [markup, text])
+            _pause(0.2, 0.5)
+            if not handled:
+                continue  # 에디터가 붙여넣기를 받지 않음 → 원래 글자 그대로
+            if editor.evaluate(_COUNT_EXACT, [sel, text]) != before:
+                page.keyboard.press("Control+Z")  # 글자가 두 번 들어가거나 사라졌으면 되돌린다
+                _pause(0.3, 0.6)
+                continue
+            done += 1
+        except Exception as e:
+            print(f"  글자 꾸미기 건너뜀 ({text[:15]}): {e}")
+    return done
+
+
 def _insert_photo_after(page: Page, editor, photo: Path, anchor: str):
     """anchor 문단 끝에 커서를 두고 사진을 올린다. (사진은 커서 위치 다음에 들어간다)"""
     para = editor.locator(SELECTORS["body"]).filter(has_text=anchor[-40:]).last
@@ -91,7 +162,7 @@ def _insert_photo_after(page: Page, editor, photo: Path, anchor: str):
     _pause(1.0, 2.0)
 
 
-def _write_blocks(page: Page, editor, blocks) -> int:
+def _write_blocks(page: Page, editor, blocks, style: dict | None = None) -> int:
     """글자를 전부 먼저 입력하고, 그다음 사진을 제자리에 끼워 넣는다.
     사진을 올린 뒤 커서를 다시 글 칸으로 옮기는 동작이 불안정해서 이렇게 나눴다.
     실패한 사진은 건너뛰고, 넣은 사진 수를 돌려준다."""
@@ -123,6 +194,10 @@ def _write_blocks(page: Page, editor, blocks) -> int:
     if typed < expected * 0.8:
         raise RuntimeError(f"본문 입력 실패: {expected}자 중 {typed}자만 들어감")
 
+    targets = _style_targets(blocks, style)
+    if targets:
+        print(f"  글자 꾸미기: {_style_paragraphs(page, editor, targets)}/{len(targets)}줄 (소제목 크기·색, Q&A 색)")
+
     # 뒤에서부터 넣어야 같은 자리에 들어가는 사진끼리 순서가 뒤집히지 않는다.
     # 단, 네이버는 처음 올린 사진을 대표 사진으로 잡으므로 맨 앞 사진(썸네일)만 먼저 올린다.
     # (썸네일은 도입 끝줄에 붙고 다른 사진과 자리가 겹치지 않아 순서가 꼬이지 않는다)
@@ -137,7 +212,8 @@ def _write_blocks(page: Page, editor, blocks) -> int:
     return done
 
 
-def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, auto_publish: bool, headless: bool, screenshot_dir: Path):
+def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, auto_publish: bool, headless: bool,
+                  screenshot_dir: Path, style: dict | None = None):
     if not STATE_PATH.exists():
         raise LoginRequired("auth/state.json이 없습니다. 먼저 `python login.py`를 실행하세요.")
 
@@ -162,7 +238,7 @@ def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, aut
             editor.locator(SELECTORS["body"]).first.click()
             _pause()
             blocks = post.blocks(photos, media)
-            done = _write_blocks(page, editor, blocks)
+            done = _write_blocks(page, editor, blocks, style)
             total = sum(1 for k, _ in blocks if k == "photo")
             print(f"  네이버 입력: 본문 완료, 사진 {done}/{total}장")
             _pause(1.5, 3.0)

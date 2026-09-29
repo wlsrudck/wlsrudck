@@ -230,7 +230,7 @@ def main():
         OUTPUT.mkdir(exist_ok=True)
         media = prepare_media(post, slug, photos, cfg.get("images", {}), cfg["naver"].get("blog_name", ""))
         preview = OUTPUT / f"{dt.date.today()}_{slug}.html"
-        preview.write_text(post.to_html(photos, OUTPUT, media), encoding="utf-8")
+        preview.write_text(post.to_html(photos, OUTPUT, media, cfg.get("style")), encoding="utf-8")
         print(f"  미리보기 저장: {preview} ({len(post.body_text())}자)")
         confirmed = [m for m in post.metrics if not m.pending]
         if not confirmed:
@@ -245,7 +245,8 @@ def main():
 
         from publish import post_to_naver  # dry-run에서는 playwright 없이도 동작하도록
 
-        post_to_naver(post, photos, media, cfg["naver"]["blog_id"], pub["auto_publish"], pub["headless"], OUTPUT)
+        post_to_naver(post, photos, media, cfg["naver"]["blog_id"], pub["auto_publish"], pub["headless"], OUTPUT,
+                      cfg.get("style"))
         mark_done(keyword, f"{'published' if pub['auto_publish'] else 'draft'} {dt.datetime.now():%Y-%m-%d %H:%M}")
         bump_today()
         print(f"  {'발행' if pub['auto_publish'] else '임시저장'} 완료")

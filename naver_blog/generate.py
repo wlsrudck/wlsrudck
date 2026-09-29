@@ -25,7 +25,7 @@ class Section(BaseModel):
 
 # 소제목·Q&A 글자 꾸미기 기본값. config.toml의 [style]에서 바꿀 수 있다
 TEXT_STYLE = {"heading_size": 24, "heading_color": "#00756a", "q_color": "#00756a", "a_color": "#666666",
-              "intro_color": "#777777", "intro_bold": True}
+              "intro_color": "#777777", "intro_bold": True, "quote_style": "포스트잇"}
 
 
 def is_qa(text: str) -> bool:
@@ -96,7 +96,7 @@ class Post(BaseModel):
         if self.intro:
             out.append(("text", "\n".join(self.intro)))
         if self.pull_quote.strip():
-            out.append(("heading", f"“{self.pull_quote.strip()}”"))
+            out.append(("quote", self.pull_quote.strip()))  # 네이버 인용구(포스트잇)로 들어간다
         if self.toc():
             out.append(("text", self.toc()))
         if media.get("metrics_card"):
@@ -137,7 +137,10 @@ class Post(BaseModel):
                 body.append(f'<p style="color:{st["intro_color"]};font-weight:{weight}">'
                             + html.escape(value).replace("\n", "<br>") + "</p>")
                 continue
-            if kind == "heading":
+            if kind == "quote":
+                body.append('<p style="background:#fff8c4;border:1px solid #e8dc8c;padding:18px 22px;margin:24px 40px;'
+                            f'text-align:center;box-shadow:3px 3px 0 #e8dc8c">{html.escape(value)}</p>')
+            elif kind == "heading":
                 body.append(f'<h2 style="font-size:{st["heading_size"]}px;color:{st["heading_color"]}">{html.escape(value)}</h2>')
             elif kind == "photo":
                 rel = os.path.relpath(value, out_dir).replace(os.sep, "/")

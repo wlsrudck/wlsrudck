@@ -225,6 +225,92 @@ def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None =
     return done
 
 
+# 인용구 종류 목록을 여는 작은 화살표(인용구 버튼 옆)를 찾아 표시한다
+_MARK_QUOTE_OPENER = """() => {
+    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const vis = e => e.getClientRects().length > 0;
+    const txt = e => (e.textContent || "").replace(/\\s+/g, " ").trim();
+    const btns = [...document.querySelectorAll("button")].filter(vis);
+    let el = btns.find(e => txt(e).includes("인용구 선택") || (e.getAttribute("title") || "").includes("인용구 선택"))
+        || btns.find(e => /quotation/i.test(e.className) && /(select|arrow|more|option|drop)/i.test(e.className));
+    if (!el) {
+        const main = btns.find(e => txt(e).includes("인용구") || /quotation/i.test(e.className));
+        if (main && main.nextElementSibling && main.nextElementSibling.tagName === "BUTTON") el = main.nextElementSibling;
+    }
+    if (!el) return "";
+    el.setAttribute("data-nb-pick", "1");
+    return (el.className || "button") + " | " + txt(el).slice(0, 15);
+}"""
+
+# 열린 목록에서 글자가 딱 맞는 항목(예: 포스트잇)을 표시한다
+_MARK_BY_TEXT = """(word) => {
+    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const vis = e => e.getClientRects().length > 0;
+    const txt = e => (e.textContent || "").replace(/\\s+/g, " ").trim();
+    const hit = [...document.querySelectorAll("button, li, a, span, div")].filter(vis).find(e => txt(e) === word);
+    if (!hit) return "";
+    const el = hit.closest("button, li, a") || hit;
+    el.setAttribute("data-nb-pick", "1");
+    return (el.className || el.tagName) + " | " + txt(el);
+}"""
+
+_COMPONENT_COUNT = "() => document.querySelectorAll('.se-component').length"
+_TEXT_IN_COMPONENT = """(text) => [...document.querySelectorAll('.se-component:not(.se-text)')]
+    .some(c => (c.innerText || '').includes(text))"""
+
+
+def _insert_quote_after(page: Page, editor, text: str, anchor: str, style: dict | None, screenshot_dir: Path | None) -> str:
+    """anchor 문단 뒤에 포스트잇 인용구를 넣고 text를 쓴다. 안 되면 굵은 글씨 한 줄로 대신 넣는다. 결과를 글로 돌려준다."""
+    kind = (style or {}).get("quote_style", TEXT_STYLE.get("quote_style", "포스트잇"))
+    sel = SELECTORS["body"]
+    log = []
+    try:
+        para = editor.locator(sel).filter(has_text=anchor[-40:]).last
+        para.click()
+        if not editor.evaluate(_CARET_TO_END_OF, [sel, anchor]):
+            raise RuntimeError("넣을 위치를 찾지 못함")
+        page.keyboard.press("End")
+        _pause(0.3, 0.6)
+        before = editor.evaluate(_COMPONENT_COUNT)
+        opener = editor.evaluate(_MARK_QUOTE_OPENER)
+        log.append(f"인용구 목록 버튼: {opener or '못 찾음'}")
+        if opener:
+            editor.locator("[data-nb-pick]").first.click(timeout=5000)
+            _pause(0.4, 0.8)
+            option = editor.evaluate(_MARK_BY_TEXT, kind)
+            log.append(f"{kind} 항목: {option or '못 찾음'}")
+            if option:
+                editor.locator("[data-nb-pick]").first.click(timeout=5000)
+            else:
+                page.keyboard.press("Escape")
+        _pause(0.6, 1.0)
+        if editor.evaluate(_COMPONENT_COUNT) > before:
+            page.keyboard.insert_text(text)
+            _pause(0.3, 0.6)
+            if editor.evaluate(_TEXT_IN_COMPONENT, text):
+                return f"{kind} 인용구로 넣음"
+            log.append("인용구는 생겼지만 글자가 안 들어감 → 되돌림")
+            page.keyboard.press("Control+Z")
+            _pause(0.3, 0.6)
+    except Exception as e:
+        log.append(f"오류: {str(e).splitlines()[0]}")
+        page.keyboard.press("Escape")
+    if screenshot_dir:
+        (screenshot_dir / "editor_quote.txt").write_text("\n".join(log) + "\n\n" + editor.evaluate(_DUMP_BUTTONS), encoding="utf-8")
+    # 대신 도입 뒤에 굵은 글씨 한 줄로
+    try:
+        editor.locator(sel).filter(has_text=anchor[-40:]).last.click()
+        editor.evaluate(_CARET_TO_END_OF, [sel, anchor])
+        page.keyboard.press("End")
+        page.keyboard.press("Enter")
+        page.keyboard.press("Control+B")
+        page.keyboard.insert_text(f"“{text}”")
+        page.keyboard.press("Control+B")
+        return "인용구를 못 넣어 굵은 글씨로 넣음 (output/editor_quote.txt 참고)"
+    except Exception as e:
+        return f"넣지 못함: {str(e).splitlines()[0]}"
+
+
 def _insert_photo_after(page: Page, editor, photo: Path, anchor: str):
     """anchor 문단 끝에 커서를 두고 사진을 올린다. (사진은 커서 위치 다음에 들어간다)"""
     para = editor.locator(SELECTORS["body"]).filter(has_text=anchor[-40:]).last
@@ -247,11 +333,13 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screens
     """글자를 전부 먼저 입력하고, 그다음 사진을 제자리에 끼워 넣는다.
     사진을 올린 뒤 커서를 다시 글 칸으로 옮기는 동작이 불안정해서 이렇게 나눴다.
     실패한 사진은 건너뛰고, 넣은 사진 수를 돌려준다."""
-    texts = [(k, v) for k, v in blocks if k != "photo"]
-    photos, anchor = [], None
+    texts = [(k, v) for k, v in blocks if k not in ("photo", "quote")]
+    photos, quotes, anchor = [], [], None
     for kind, value in blocks:
         if kind == "photo":
             photos.append((value, anchor))
+        elif kind == "quote":
+            quotes.append((value, anchor))  # 인용구는 글자를 다 친 뒤 제자리에 끼워 넣는다
         else:
             anchor = value.split("\n")[-1].strip() or anchor
     # 맨 앞 사진(썸네일)은 첫 글 덩어리(세 줄 도입) 바로 뒤에 넣는다
@@ -281,6 +369,11 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screens
         print(f"  글자 꾸미기: {n}/{len(targets)}줄 (도입 회색 굵게, 소제목 크기·색, Q&A 색)")
         if n < len(targets) and screenshot_dir and (screenshot_dir / "editor_toolbar.txt").exists():
             print("  (꾸미기가 덜 된 경우 output 폴더의 editor_toolbar.txt 를 메모장으로 열어 캡처해 보내주세요)")
+
+    # 인용구를 먼저 넣고 사진을 넣는다. 같은 줄 뒤에 둘 다 붙으면 사진이 위, 인용구가 아래가 된다(썸네일 → 핵심 한 줄)
+    for text, q_anchor in quotes:
+        how = _insert_quote_after(page, editor, text, q_anchor or first_line, style, screenshot_dir)
+        print(f"  핵심 한 줄: {how}")
 
     # 뒤에서부터 넣어야 같은 자리에 들어가는 사진끼리 순서가 뒤집히지 않는다.
     # 단, 네이버는 처음 올린 사진을 대표 사진으로 잡으므로 맨 앞 사진(썸네일)만 먼저 올린다.

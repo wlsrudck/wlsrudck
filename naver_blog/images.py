@@ -160,22 +160,34 @@ def make_metrics_card(metrics: list, basis: str, out: Path, seed: str) -> Path:
     return out
 
 
-def make_summary_card(title: str, points: list[str], out: Path, seed: str) -> Path:
-    bg, accent = random.Random(seed).choice(PALETTES)
-    im = Image.new("RGB", (1080, 1080), "#fafaf7")
+def make_summary_card(title: str, points: list[str], out: Path, seed: str, brand: str = "") -> Path:
+    """"한눈에 정리" 카드. 매거진형 썸네일과 같은 톤(미색 배경, 굵은 검정 글자, 같은 형광펜 색)."""
+    marker = random.Random(seed).choice(MARKERS)  # 같은 글의 썸네일과 같은 색
+    ink, muted, rule = "#16181b", "#8a8d93", "#d9d5cc"
+    im = Image.new("RGB", (1080, 1080), "#f6f4ef")
     d = ImageDraw.Draw(im)
-    d.rectangle([0, 0, 1080, 200], fill=bg)
-    head = _font(58)
-    d.text((80, 100), "한눈에 정리", font=head, fill=accent, anchor="lm")
-    body = _font(46)
+
+    head = _font(76)
+    hw = d.textlength("한눈에 정리", font=head)
+    d.rectangle([72, 150 + 76 * 0.55, 88 + hw, 150 + 76 * 1.08], fill=marker)
+    d.text((80, 150), "한눈에 정리", font=head, fill=ink)
+
     points = points[:5]
-    y = 200 + (880 - len(points) * 150) // 2 + 15  # 제목 띠 아래 공간에서 세로 가운데
-    for i, p in enumerate(points, 1):
-        d.ellipse([80, y, 140, y + 60], fill=bg)
-        d.text((110, y + 30), str(i), font=_font(36), fill="white", anchor="mm")
-        for j, line in enumerate(_wrap(d, p, body, 820)[:2]):
-            d.text((170, y + 30 + j * 62), line, font=body, fill="#222", anchor="lm")
-        y += 150
+    body = _font(46)
+    wrapped = [_wrap(d, p, body, 800)[:2] for p in points]
+    heights = [70 + 58 * len(w) for w in wrapped]
+    y = 330 + max(0, (620 - sum(heights)) // 2)  # 제목 아래 공간에서 세로 가운데
+    for i, (lines, h) in enumerate(zip(wrapped, heights), 1):
+        d.text((80, y + 8), f"{i:02d}", font=_font(40), fill=muted)
+        for j, line in enumerate(lines):
+            d.text((180, y + j * 58), line, font=body, fill=ink)
+        y += h
+        if i < len(points):
+            d.line([80, y - 32, 1000, y - 32], fill=rule, width=2)
+
+    d.line([80, 960, 1000, 960], fill=rule, width=2)
+    if brand:
+        d.text((80, 1000), brand, font=_font(32), fill="#6b6f76", anchor="lm")
     im.save(out, quality=92)
     return out
 

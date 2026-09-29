@@ -46,7 +46,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     if cfg.get("metrics_card", True) and post.metrics:
         media["metrics_card"] = images.make_metrics_card(post.metrics, post.metrics_basis, folder / "metrics.jpg", slug)
     if cfg.get("summary_card", True) and post.summary:
-        media["summary_card"] = images.make_summary_card(post.title, post.summary, folder / "summary.jpg", slug)
+        media["summary_card"] = images.make_summary_card(post.title, post.summary, folder / "summary.jpg", slug, brand)
 
     key_file = ROOT / "pixabay_key.txt"
     key = key_file.read_text(encoding="utf-8-sig").strip() if key_file.exists() else ""

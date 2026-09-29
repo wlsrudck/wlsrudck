@@ -343,12 +343,19 @@ def _write_in_component(page: Page, editor, text: str, log: list) -> bool:
     """방금 넣은 인용구 안에 글자를 쓴다. 커서가 상자 밖에 있을 수 있어 새 상자의 글 칸을 직접 누른 뒤 쓴다.
     안 들어가면 한 번 더 시도하고, 그래도 안 되면 빈 상자를 지운다(빈 상자가 글에 남지 않게)."""
     for attempt in (1, 2):
-        _pause(0.5, 0.9)  # 상자가 화면에 다 그려질 때까지
-        target = editor.evaluate(_MARK_NEW_COMPONENT_TEXT)
-        log.append(f"새 상자 글 칸({attempt}차): {target or '못 찾음(커서 위치에 바로 씀)'}")
-        if target:
-            editor.locator("[data-nb-pick]").first.click(timeout=5000)
-            _pause(0.2, 0.4)
+        # 새 상자의 글 칸이 화면에 생길 때까지 최대 3초 기다린다.
+        # 못 찾으면 절대 그냥 치지 않는다 (커서가 앞 상자에 남아 있으면 앞 소제목 뒤에 붙어 버린다)
+        target = ""
+        for _ in range(10):
+            _pause(0.25, 0.35)
+            target = editor.evaluate(_MARK_NEW_COMPONENT_TEXT)
+            if target:
+                break
+        log.append(f"새 상자 글 칸({attempt}차): {target or '못 찾음'}")
+        if not target:
+            break
+        editor.locator("[data-nb-pick]").first.click(timeout=5000)
+        _pause(0.2, 0.4)
         length = editor.evaluate(_DOC_LENGTH)
         page.keyboard.insert_text(text)
         _pause(0.4, 0.7)

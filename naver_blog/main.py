@@ -20,7 +20,7 @@ from pathlib import Path
 import urllib.error
 
 import images
-from generate import NotEnoughInfo, Post, find_photos, generate_post
+from generate import NotEnoughInfo, Post, SearchFailed, find_photos, generate_post
 
 ROOT = Path(__file__).parent
 KEYWORDS = ROOT / "keywords.csv"
@@ -216,6 +216,10 @@ def main():
         print(f"[생성] {keyword} (사진 {len(photos)}장)")
         try:
             post = generate_post(keyword, row.get("memo", ""), photos, cfg["writing"])
+        except SearchFailed as e:
+            # 주제 탓이 아니므로 건너뜀 표시를 하지 않고 다음 실행 때 다시 쓴다
+            print(f"  ⏸ 웹 검색 도구 오류({e})로 조사를 못 했어요. 이 키워드는 그대로 두고 다음 실행 때 다시 씁니다.")
+            break
         except NotEnoughInfo as e:
             print(f"  ⏭ 건너뜀: 검색으로 핵심 정보를 찾지 못했어요 ({e}). 글쓰기 비용은 쓰지 않았어요.")
             if not args.dry_run:

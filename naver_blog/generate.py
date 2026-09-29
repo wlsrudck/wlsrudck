@@ -6,6 +6,7 @@ import io
 import os
 import urllib.parse
 import re
+import time
 from pathlib import Path
 
 import anthropic
@@ -270,6 +271,7 @@ RESEARCH_PROMPT = """네이버 블로그 글을 쓰기 전에 사실 확인용 �
 - 날짜가 오래된 정보는 몇 년 몇 월 기준인지 적으세요.
 - 출처끼리 내용이 다르면 둘 다 적고 다르다고 표시하세요.
 - 마지막에 "출처 목록"으로 사용한 URL을 한 줄에 하나씩 적으세요.
+- 검색은 최대 {max_searches}번까지만 할 수 있습니다. 여러 검색을 한꺼번에 돌리지 말고, 가장 중요한 것부터 하나씩 하세요.
 - 맨 마지막 줄에는 이 주제로 글을 쓸 때 독자가 가장 알고 싶어 할 핵심 답(예: 일정 날짜, 금액, 신청 조건)을
   찾았는지 딱 한 줄로 적으세요. 형식은 [핵심답: 찾음] 또는 [핵심답: 못찾음 - 무엇이 없는지] 입니다."""
 
@@ -278,9 +280,14 @@ class NotEnoughInfo(Exception):
     """검색으로 핵심 답을 찾지 못해 글을 쓰지 않고 건너뛸 때"""
 
 
+class SearchFailed(Exception):
+    """웹 검색 도구 자체가 오류를 내서 조사를 못 했을 때 (주제 문제가 아니라 다음에 다시 하면 됨)"""
+
+
 def research(client: anthropic.Anthropic, keyword: str, memo: str, cfg: dict) -> tuple[str, dict]:
     """웹 검색으로 최신 사실을 조사해 (정리한 메모, 출처 URL 목록)을 돌려준다."""
-    messages = [{"role": "user", "content": RESEARCH_PROMPT.format(keyword=keyword, memo=memo or "(없음)")}]
+    messages = [{"role": "user", "content": RESEARCH_PROMPT.format(
+        keyword=keyword, memo=memo or "(없음)", max_searches=cfg.get("max_searches", 5))}]
     tools = [{
         "type": "web_search_20260209", "name": "web_search", "max_uses": cfg.get("max_searches", 5),
         "user_location": {"type": "approximate", "country": "KR", "timezone": "Asia/Seoul"},
@@ -301,6 +308,11 @@ def research(client: anthropic.Anthropic, keyword: str, memo: str, cfg: dict) ->
         messages = messages[:1] + [{"role": "assistant", "content": blocks}]
     if response.stop_reason == "refusal":
         raise RuntimeError(f"자료 조사가 거절되었습니다: {keyword}")
+    # 검색 오류는 예외가 아니라 결과 칸에 오류 코드로 온다. 결과가 하나도 없고 오류만 있으면 도구 문제다
+    results = [b.content for b in blocks if b.type == "web_search_tool_result"]
+    errors = [getattr(c, "error_code", "unknown") for c in results if not isinstance(c, list)]
+    if errors and not any(isinstance(c, list) and c for c in results):
+        raise SearchFailed(", ".join(dict.fromkeys(errors)))
     texts = [b for b in blocks if b.type == "text"]
     notes = "\n".join(b.text for b in texts).strip()
 
@@ -369,7 +381,14 @@ def banned_in(post: "Post") -> list[str]:
 
 def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Post:
     client = anthropic.Anthropic(api_key=_api_key())
-    notes, found = research(client, keyword, memo, cfg) if cfg.get("research", True) else ("", {})
+    notes, found = "", {}
+    if cfg.get("research", True):
+        try:
+            notes, found = research(client, keyword, memo, cfg)
+        except SearchFailed as e:
+            print(f"  검색 도구 오류({e}), 1분 뒤 한 번 더 시도합니다")
+            time.sleep(60)
+            notes, found = research(client, keyword, memo, cfg)
     miss = re.search(r"\[핵심답:\s*못찾음\s*-?\s*(.*?)\]", notes)
     if miss and cfg.get("skip_if_no_answer", True):
         # 발행할 수 없는 글에 글쓰기 비용을 쓰지 않는다

@@ -329,20 +329,48 @@ def _insert_component(page: Page, editor, anchor: str, label: str, clsre: str, o
     return True
 
 
+_NEW_COMPONENT_HAS_TEXT = """(text) => {
+    const old = window.__nbComps || new Set();
+    return [...document.querySelectorAll(".se-component")].filter(c => !old.has(c))
+        .some(c => (c.innerText || "").includes(text));
+}"""
+_DOC_LENGTH = "() => document.body.innerText.length"
+_NEW_COMPONENT_COUNT = """() => { const old = window.__nbComps || new Set();
+    return [...document.querySelectorAll(".se-component")].filter(c => !old.has(c)).length; }"""
+
+
 def _write_in_component(page: Page, editor, text: str, log: list) -> bool:
-    """방금 넣은 인용구 안에 글자를 쓴다. 커서가 상자 밖에 있을 수 있어 새 상자의 글 칸을 직접 누른 뒤 쓴다"""
-    target = editor.evaluate(_MARK_NEW_COMPONENT_TEXT)
-    log.append(f"새 상자 글 칸: {target or '못 찾음(커서 위치에 바로 씀)'}")
-    if target:
-        editor.locator("[data-nb-pick]").first.click(timeout=5000)
-        _pause(0.2, 0.4)
-    page.keyboard.insert_text(text)
-    _pause(0.3, 0.6)
-    if editor.evaluate(_TEXT_IN_COMPONENT, text):
-        return True
-    log.append("인용구는 생겼지만 글자가 안 들어감 → 되돌림")
-    page.keyboard.press("Control+Z")
-    _pause(0.3, 0.6)
+    """방금 넣은 인용구 안에 글자를 쓴다. 커서가 상자 밖에 있을 수 있어 새 상자의 글 칸을 직접 누른 뒤 쓴다.
+    안 들어가면 한 번 더 시도하고, 그래도 안 되면 빈 상자를 지운다(빈 상자가 글에 남지 않게)."""
+    for attempt in (1, 2):
+        _pause(0.5, 0.9)  # 상자가 화면에 다 그려질 때까지
+        target = editor.evaluate(_MARK_NEW_COMPONENT_TEXT)
+        log.append(f"새 상자 글 칸({attempt}차): {target or '못 찾음(커서 위치에 바로 씀)'}")
+        if target:
+            editor.locator("[data-nb-pick]").first.click(timeout=5000)
+            _pause(0.2, 0.4)
+        length = editor.evaluate(_DOC_LENGTH)
+        page.keyboard.insert_text(text)
+        _pause(0.4, 0.7)
+        if editor.evaluate(_NEW_COMPONENT_HAS_TEXT, text):
+            return True
+        if editor.evaluate(_DOC_LENGTH) > length:  # 글자가 다른 곳에 들어갔을 때만 되돌린다 (아니면 앞의 작업이 지워진다)
+            log.append(f"상자에 글자가 안 들어가고 다른 곳에 들어감({attempt}차) → 되돌림")
+            page.keyboard.press("Control+Z")
+            _pause(0.3, 0.6)
+        else:
+            log.append(f"상자에 글자가 안 들어감({attempt}차)")
+    # 빈 상자 지우기: 상자 글 칸에서 Backspace (빈 인용구는 Backspace로 없어진다)
+    for _ in range(2):
+        if not editor.evaluate(_NEW_COMPONENT_COUNT):
+            break
+        if editor.evaluate(_MARK_NEW_COMPONENT_TEXT):
+            editor.locator("[data-nb-pick]").first.click(timeout=5000)
+            page.keyboard.press("Backspace")
+            _pause(0.3, 0.6)
+    if editor.evaluate(_NEW_COMPONENT_COUNT):
+        log.append("빈 상자를 지우지 못함")
+        print("  ⚠ 빈 인용구 상자가 1개 남았을 수 있어요. 발행 전에 확인해 지워 주세요.")
     return False
 
 

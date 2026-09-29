@@ -44,7 +44,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     folder.mkdir(parents=True, exist_ok=True)
     media = {"stock": {}}
     if cfg.get("metrics_card", True) and post.metrics:
-        media["metrics_card"] = images.make_metrics_card(post.metrics, post.metrics_basis, folder / "metrics.jpg", slug)
+        media["metrics_card"] = images.make_metrics_card(post.metrics, post.metrics_basis, folder / "metrics.jpg", slug, brand)
     if cfg.get("summary_card", True) and post.summary:
         media["summary_card"] = images.make_summary_card(post.title, post.summary, folder / "summary.jpg", slug, brand)
 

@@ -119,43 +119,49 @@ def _thumb_magazine(lines, out, marker: str, brand: str) -> Path:
     return out
 
 
-def make_metrics_card(metrics: list, basis: str, out: Path, seed: str) -> Path:
-    """핵심 지표 카드: 타일마다 이름 / 큰 숫자 / 기준·출처 한 줄. 최대 4개를 2x2로.
-    숫자는 색이 아니라 진한 글자색으로 쓴다 (색은 위쪽 강조선에만)."""
-    bg, accent = random.Random(seed).choice(PALETTES)
-    ink, sub, muted = "#1f2328", "#4a525c", "#7a828c"
-    im = Image.new("RGB", (1080, 1080), "#f4f5f2")
+def make_metrics_card(metrics: list, basis: str, out: Path, seed: str, brand: str = "") -> Path:
+    """핵심 지표 카드: 타일마다 이름 / 큰 숫자 / 기준·출처 한 줄. 4개면 2x2, 1~3개면 넓은 타일을 한 줄에 하나씩.
+    매거진형 썸네일·요약 카드와 같은 톤. 숫자는 진한 글자색, 확인 못 한 값("확인 필요")은 흐린 색."""
+    marker = random.Random(seed).choice(MARKERS)  # 같은 글의 썸네일과 같은 색
+    ink, sub, muted, rule = "#16181b", "#4a4e55", "#8a8d93", "#d9d5cc"
+    im = Image.new("RGB", (1080, 1080), "#f6f4ef")
     d = ImageDraw.Draw(im)
-    d.rectangle([0, 0, 1080, 170], fill=bg)
-    d.text((70, 85), "핵심 지표", font=_font(56), fill="white", anchor="lm")
+
+    head = _font(76)
+    hw = d.textlength("핵심 지표", font=head)
+    d.rectangle([72, 110 + 76 * 0.55, 88 + hw, 110 + 76 * 1.08], fill=marker)
+    d.text((80, 110), "핵심 지표", font=head, fill=ink)
     if basis:
-        d.text((1010, 85), basis, font=_font(30), fill=accent, anchor="rm")
+        d.text((1000, 110 + 76 * 0.8), basis, font=_font(30), fill=muted, anchor="rm")
 
     metrics = metrics[:4]
-    cols = 2 if len(metrics) == 4 else 1  # 4개만 2x2, 나머지는 가로로 넓은 타일을 한 줄에 하나씩
+    cols = 2 if len(metrics) == 4 else 1
     rows = (len(metrics) + cols - 1) // cols
-    gap, top, left = 30, 210, 60
+    gap, top, bottom, left = 28, 260, 150, 80
     tw = (1080 - left * 2 - gap * (cols - 1)) // cols
-    th = min(300, (1080 - top - 60 - gap * (rows - 1)) // rows)
-    top += (1080 - 60 - top - (th * rows + gap * (rows - 1))) // 2  # 타일 묶음을 세로 가운데로
+    th = min(280, (1080 - top - bottom - gap * (rows - 1)) // rows)
+    top += (1080 - bottom - top - (th * rows + gap * (rows - 1))) // 2  # 타일 묶음을 세로 가운데로
     pad = 36
     # 숫자 크기는 모든 타일에서 같게: 가장 긴 숫자가 칸에 들어가는 크기
-    max_size = min(120, int(th * 0.34))
-    size = next((sz for sz in range(max_size, 40, -6)
+    max_size = min(112, int(th * 0.36))
+    size = next((sz for sz in range(max_size, 40, -4)
                  if all(d.textlength(m.value, font=_font(sz)) <= tw - pad * 2 for m in metrics)), 40)
     for i, m in enumerate(metrics):
         x = left + (i % cols) * (tw + gap)
         y = top + (i // cols) * (th + gap)
-        d.rounded_rectangle([x, y, x + tw, y + th], radius=18, fill="white")
-        d.rounded_rectangle([x, y, x + tw, y + 10], radius=4, fill=bg)
-        label_font = _font(36)
-        d.text((x + pad, y + 60), _wrap(d, m.label, label_font, tw - pad * 2)[0], font=label_font, fill=sub, anchor="lm")
-        pending = m.value.strip() == "확인 필요"  # 빈자리: 흐린 색으로 "확인 필요"
-        d.text((x + pad, y + th / 2 + 5), m.value, font=_font(size), fill=muted if pending else ink, anchor="lm")
-        note_font = _font(28)
+        d.rounded_rectangle([x, y, x + tw, y + th], radius=16, fill="white", outline=rule, width=2)
+        label_font = _font(34)
+        d.text((x + pad, y + 50), _wrap(d, m.label, label_font, tw - pad * 2)[0], font=label_font, fill=sub, anchor="lm")
+        pending = m.value.strip() == "확인 필요"
+        d.text((x + pad, y + th / 2 + 8), m.value, font=_font(size), fill=muted if pending else ink, anchor="lm")
+        note_font = _font(27)
         notes = _wrap(d, m.note, note_font, tw - pad * 2)[:2]
         for j, line in enumerate(notes):
-            d.text((x + pad, y + th - 40 - (len(notes) - 1 - j) * 36), line, font=note_font, fill=muted, anchor="lm")
+            d.text((x + pad, y + th - 38 - (len(notes) - 1 - j) * 34), line, font=note_font, fill=muted, anchor="lm")
+
+    d.line([80, 960, 1000, 960], fill=rule, width=2)
+    if brand:
+        d.text((80, 1000), brand, font=_font(32), fill="#6b6f76", anchor="lm")
     im.save(out, quality=92)
     return out
 
@@ -169,14 +175,14 @@ def make_summary_card(title: str, points: list[str], out: Path, seed: str, brand
 
     head = _font(76)
     hw = d.textlength("한눈에 정리", font=head)
-    d.rectangle([72, 150 + 76 * 0.55, 88 + hw, 150 + 76 * 1.08], fill=marker)
-    d.text((80, 150), "한눈에 정리", font=head, fill=ink)
+    d.rectangle([72, 110 + 76 * 0.55, 88 + hw, 110 + 76 * 1.08], fill=marker)
+    d.text((80, 110), "한눈에 정리", font=head, fill=ink)
 
     points = points[:5]
     body = _font(46)
     wrapped = [_wrap(d, p, body, 800)[:2] for p in points]
     heights = [70 + 58 * len(w) for w in wrapped]
-    y = 330 + max(0, (620 - sum(heights)) // 2)  # 제목 아래 공간에서 세로 가운데
+    y = 290 + max(0, (640 - sum(heights)) // 2)  # 제목 아래 공간에서 세로 가운데
     for i, (lines, h) in enumerate(zip(wrapped, heights), 1):
         d.text((80, y + 8), f"{i:02d}", font=_font(40), fill=muted)
         for j, line in enumerate(lines):

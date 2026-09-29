@@ -390,8 +390,12 @@ def source_name(url: str, title: str | None) -> str:
     return urllib.parse.urlparse(url).netloc.removeprefix("www.")
 
 
+# 금지어가 들어 있어도 광고 표현이 아닌 용어는 허용 (예: 주가 "최고가", 대부업 "최고금리")
+BANNED_OK = re.compile(r"최고(가|치|점|금리|세율|한도|경영자|기온|위원|법원)")
+
+
 def banned_in(post: "Post") -> list[str]:
-    text = post.all_text()
+    text = BANNED_OK.sub("", post.all_text())
     return [w for w in BANNED_WORDS if w in text]
 
 

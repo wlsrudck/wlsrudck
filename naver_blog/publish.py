@@ -17,6 +17,8 @@ SELECTORS = {
     "body": ".se-component.se-text .se-text-paragraph",
     "photo_btn": "button.se-image-toolbar-button",       # 상단 툴바의 "사진" 버튼
     "image": ".se-component.se-image",
+    "font_size_btn": "button[class*='font-size'][class*='toolbar-button']",   # 글자 크기 (19 ▾)
+    "font_color_btn": "button[class*='font-color'][class*='toolbar-button']", # 글자 색
     "save_btn": "button[class*='save_btn']",
     "publish_btn": "button[class*='publish_btn']",
     "publish_confirm": "button[class*='confirm_btn']",
@@ -86,61 +88,99 @@ _SELECT_PARAGRAPH = """([sel, text]) => {
     return true;
 }"""
 
-# 선택한 글자 위에 꾸민 글자(HTML)를 붙여넣는다. 복사-붙여넣기와 같은 경로라 에디터가 크기·색을 받아들인다
-_PASTE_HTML = """([html, text]) => {
-    const dt = new DataTransfer();
-    dt.setData("text/html", html);
-    dt.setData("text/plain", text);
-    const ev = new ClipboardEvent("paste", {clipboardData: dt, bubbles: true, cancelable: true});
-    const s = window.getSelection();
-    const node = s.anchorNode && (s.anchorNode.nodeType === 1 ? s.anchorNode : s.anchorNode.parentElement);
-    (node || document.activeElement || document.body).dispatchEvent(ev);
-    return ev.defaultPrevented;
+# 툴바에서 고를 항목을 찾아 표시해 둔다(클릭은 Playwright가 진짜 마우스로). 네이버가 이름을 바꿔도 버티도록 여러 단서로 찾는다
+_MARK_SIZE_OPTION = """(size) => {
+    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const vis = e => e.getClientRects().length > 0;
+    const cands = [...document.querySelectorAll("button, li, a")].filter(vis);
+    const el = cands.find(e => [...e.classList].some(c => c.includes("fs" + size)))
+        || cands.find(e => (e.innerText || "").trim() === String(size) && !e.closest(".se-component"));
+    if (!el) return false;
+    el.setAttribute("data-nb-pick", "1");
+    return true;
 }"""
 
-_COUNT_EXACT = "([sel, text]) => [...document.querySelectorAll(sel)].filter(e => e.innerText.trim() === text).length"
+_MARK_COLOR_OPTION = """(hex) => {
+    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const vis = e => e.getClientRects().length > 0;
+    const rgb = h => { h = h.replace("#", ""); return [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16)); };
+    const want = rgb(hex);
+    let best = null, bestD = 1e9;
+    for (const e of [...document.querySelectorAll("[data-color]")].filter(vis)) {
+        const c = (e.getAttribute("data-color") || "").trim();
+        if (!/^#[0-9a-fA-F]{6}$/.test(c)) continue;
+        const d = rgb(c).reduce((s, v, i) => s + (v - want[i]) ** 2, 0);
+        if (d < bestD) { bestD = d; best = e; }
+    }
+    if (!best) return false;
+    best.setAttribute("data-nb-pick", "1");
+    return best.getAttribute("data-color");
+}"""
+
+# 버튼을 못 찾았을 때 고칠 수 있게 보이는 버튼 이름을 파일로 남긴다
+_DUMP_BUTTONS = """() => [...document.querySelectorAll("button")].filter(e => e.getClientRects().length > 0)
+    .map(e => (e.className || "") + " | " + (e.innerText || "").trim().slice(0, 20)
+         + (e.getAttribute("data-color") ? " | " + e.getAttribute("data-color") : "")).join("\\n")"""
+
+_PARAGRAPH_HTML = "([sel, text]) => { const p = [...document.querySelectorAll(sel)].filter(e => e.innerText.trim() === text).pop(); return p ? p.innerHTML : ''; }"
 
 
-def _style_targets(blocks, style: dict) -> list[tuple[str, str]]:
-    """(문단 글자, 꾸민 HTML) 목록: 소제목은 크게+색, Q&A는 질문·답을 다른 색으로"""
+def _style_targets(blocks, style: dict) -> list[tuple[str, int | None, str]]:
+    """(문단 글자, 글자 크기 또는 None, 색) 목록: 소제목은 크게+색, Q&A는 질문·답을 다른 색으로"""
     st = {**TEXT_STYLE, **(style or {})}
-    esc = lambda t: t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     out = []
     for kind, value in blocks:
         if kind == "heading":
-            out.append((value, f'<span style="font-size:{st["heading_size"]}px;color:{st["heading_color"]}">'
-                               f'<b>{esc(value)}</b></span>'))
+            out.append((value.strip(), st["heading_size"], st["heading_color"]))
         elif kind == "text" and is_qa(value):
             for line in value.split("\n"):
-                if line.startswith("Q. "):
-                    out.append((line, f'<span style="color:{st["q_color"]}"><b>{esc(line)}</b></span>'))
-                elif line.strip():
-                    out.append((line, f'<span style="color:{st["a_color"]}">{esc(line)}</span>'))
+                if line.strip():
+                    out.append((line.strip(), None, st["q_color"] if line.startswith("Q. ") else st["a_color"]))
     return out
 
 
-def _style_paragraphs(page: Page, editor, targets) -> int:
-    """이미 입력한 문단을 꾸민 글자로 바꿔 넣는다. 에디터가 받아주지 않으면 그대로 두고(굵은 글씨만), 꾸민 개수를 돌려준다."""
+def _pick(page: Page, editor, button_css: str, mark_js: str, arg) -> bool:
+    """툴바 버튼을 눌러 목록을 열고, 표시해 둔 항목을 클릭한다"""
+    btn = editor.locator(button_css).first
+    if not btn.count():
+        return False
+    btn.click()
+    _pause(0.3, 0.6)
+    if not editor.evaluate(mark_js, arg):
+        page.keyboard.press("Escape")
+        return False
+    editor.locator("[data-nb-pick]").first.click()
+    _pause(0.2, 0.5)
+    return True
+
+
+def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None = None) -> int:
+    """이미 입력한 문단을 골라 툴바로 글자 크기·색을 바꾼다. 못 하면 그대로 두고(굵은 글씨만), 바꾼 줄 수를 돌려준다."""
     sel = SELECTORS["body"]
-    done = 0
-    for text, markup in targets:
-        text = text.strip()
+    done, dumped = 0, False
+    for text, size, color in targets:
         try:
-            before = editor.evaluate(_COUNT_EXACT, [sel, text])
-            if not before or not editor.evaluate(_SELECT_PARAGRAPH, [sel, text]):
+            para = editor.locator(sel).filter(has_text=text).last
+            if not para.count():
                 continue
-            _pause(0.1, 0.3)
-            handled = editor.evaluate(_PASTE_HTML, [markup, text])
-            _pause(0.2, 0.5)
-            if not handled:
-                continue  # 에디터가 붙여넣기를 받지 않음 → 원래 글자 그대로
-            if editor.evaluate(_COUNT_EXACT, [sel, text]) != before:
-                page.keyboard.press("Control+Z")  # 글자가 두 번 들어가거나 사라졌으면 되돌린다
-                _pause(0.3, 0.6)
+            para.click()
+            if not editor.evaluate(_SELECT_PARAGRAPH, [sel, text]):
                 continue
-            done += 1
+            _pause(0.2, 0.4)
+            ok_size = size is None or _pick(page, editor, SELECTORS["font_size_btn"], _MARK_SIZE_OPTION, size)
+            if size is not None and ok_size:
+                editor.evaluate(_SELECT_PARAGRAPH, [sel, text])  # 목록을 닫으며 선택이 풀렸을 수 있어 다시 선택
+                _pause(0.1, 0.3)
+            ok_color = _pick(page, editor, SELECTORS["font_color_btn"], _MARK_COLOR_OPTION, color)
+            if ok_size and ok_color:
+                done += 1
+            elif not dumped and screenshot_dir:
+                dumped = True
+                (screenshot_dir / "editor_toolbar.txt").write_text(editor.evaluate(_DUMP_BUTTONS), encoding="utf-8")
+                page.screenshot(path=str(screenshot_dir / "editor_toolbar.png"))
         except Exception as e:
             print(f"  글자 꾸미기 건너뜀 ({text[:15]}): {e}")
+            page.keyboard.press("Escape")
     return done
 
 
@@ -162,7 +202,7 @@ def _insert_photo_after(page: Page, editor, photo: Path, anchor: str):
     _pause(1.0, 2.0)
 
 
-def _write_blocks(page: Page, editor, blocks, style: dict | None = None) -> int:
+def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screenshot_dir: Path | None = None) -> int:
     """글자를 전부 먼저 입력하고, 그다음 사진을 제자리에 끼워 넣는다.
     사진을 올린 뒤 커서를 다시 글 칸으로 옮기는 동작이 불안정해서 이렇게 나눴다.
     실패한 사진은 건너뛰고, 넣은 사진 수를 돌려준다."""
@@ -196,7 +236,10 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None) -> int:
 
     targets = _style_targets(blocks, style)
     if targets:
-        print(f"  글자 꾸미기: {_style_paragraphs(page, editor, targets)}/{len(targets)}줄 (소제목 크기·색, Q&A 색)")
+        n = _style_paragraphs(page, editor, targets, screenshot_dir)
+        print(f"  글자 꾸미기: {n}/{len(targets)}줄 (소제목 크기·색, Q&A 색)")
+        if n < len(targets) and screenshot_dir and (screenshot_dir / "editor_toolbar.txt").exists():
+            print("  (꾸미기 버튼을 못 찾은 경우 output 폴더의 editor_toolbar.png / .txt 를 보내주세요)")
 
     # 뒤에서부터 넣어야 같은 자리에 들어가는 사진끼리 순서가 뒤집히지 않는다.
     # 단, 네이버는 처음 올린 사진을 대표 사진으로 잡으므로 맨 앞 사진(썸네일)만 먼저 올린다.
@@ -238,7 +281,7 @@ def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, aut
             editor.locator(SELECTORS["body"]).first.click()
             _pause()
             blocks = post.blocks(photos, media)
-            done = _write_blocks(page, editor, blocks, style)
+            done = _write_blocks(page, editor, blocks, style, screenshot_dir)
             total = sum(1 for k, _ in blocks if k == "photo")
             print(f"  네이버 입력: 본문 완료, 사진 {done}/{total}장")
             _pause(1.5, 3.0)

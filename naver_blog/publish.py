@@ -260,7 +260,10 @@ _MARK_BY_TEXT = """(word) => {
     document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
     const vis = e => e.getClientRects().length > 0;
     const txt = e => (e.textContent || "").replace(/\\s+/g, " ").trim();
-    const hit = [...document.querySelectorAll("button, li, a, span, div")].filter(vis).find(e => txt(e) === word);
+    const all = [...document.querySelectorAll("button, li, a, span, div, p, strong, em")].filter(vis);
+    let hit = all.find(e => txt(e) === word);
+    if (!hit) hit = all.filter(e => txt(e).includes(word) && txt(e).length < word.length + 12)
+                       .sort((a, b) => txt(a).length - txt(b).length)[0];
     if (!hit) return "";
     const el = hit.closest("button, li, a") || hit;
     el.setAttribute("data-nb-pick", "1");
@@ -268,6 +271,22 @@ _MARK_BY_TEXT = """(word) => {
 }"""
 
 _COMPONENT_COUNT = "() => document.querySelectorAll('.se-component').length"
+
+# 부품을 넣기 전 목록을 기억해 두고, 넣은 뒤 새로 생긴 부품의 글 칸을 표시한다
+_REMEMBER_COMPONENTS = "() => { window.__nbComps = new Set(document.querySelectorAll('.se-component')); return true; }"
+_MARK_NEW_COMPONENT_TEXT = """() => {
+    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const old = window.__nbComps || new Set();
+    const fresh = [...document.querySelectorAll(".se-component")].filter(c => !old.has(c));
+    for (const c of fresh) {
+        const p = c.querySelector(".se-text-paragraph, [contenteditable='true'], p");
+        if (p) { p.setAttribute("data-nb-pick", "1"); return (c.className || "") + " | " + (p.className || p.tagName); }
+    }
+    return "";
+}"""
+
+# 인용구 목록의 순서 (글자로 못 찾을 때 순번으로 고른다)
+QUOTE_KINDS = ["따옴표", "버티컬 라인", "말풍선", "라인&따옴표", "포스트잇", "프레임"]
 _TEXT_IN_COMPONENT = """(text) => [...document.querySelectorAll('.se-component:not(.se-text)')]
     .some(c => (c.innerText || '').includes(text))"""
 
@@ -284,18 +303,24 @@ def _caret_after(page: Page, editor, anchor: str):
 def _insert_component(page: Page, editor, anchor: str, label: str, clsre: str, option, log: list) -> bool:
     """anchor 문단 뒤에 인용구/구분선 같은 부품을 넣는다. option은 목록 항목 글자(str) 또는 순번(int)"""
     _caret_after(page, editor, anchor)
+    editor.evaluate(_REMEMBER_COMPONENTS)
     before = editor.evaluate(_COMPONENT_COUNT)
     opener = editor.evaluate(_MARK_MENU_OPENER, [label, clsre])
     if not opener:
         log.append(f"{label} 목록 버튼 못 찾음")
         return False
+    log.append(f"{label} 목록 버튼: {opener}")
     editor.locator("[data-nb-pick]").first.click(timeout=5000)
     _pause(0.4, 0.8)
     picked = editor.evaluate(_MARK_BY_TEXT, option) if isinstance(option, str) else editor.evaluate(_MARK_NEW_NTH, option)
+    if not picked and isinstance(option, str) and option in QUOTE_KINDS:  # 글자로 못 찾으면 목록 순번으로
+        picked = editor.evaluate(_MARK_NEW_NTH, QUOTE_KINDS.index(option) + 1)
+        log.append(f"{label} 항목 '{option}' 글자로 못 찾아 순번으로 고름: {picked or '실패'}")
     if not picked:
         log.append(f"{label} 목록 버튼: {opener} / 항목 {option} 못 찾음")
         page.keyboard.press("Escape")
         return False
+    log.append(f"{label} 항목: {picked}")
     editor.locator("[data-nb-pick]").first.click(timeout=5000)
     _pause(0.6, 1.0)
     if editor.evaluate(_COMPONENT_COUNT) <= before:
@@ -305,7 +330,12 @@ def _insert_component(page: Page, editor, anchor: str, label: str, clsre: str, o
 
 
 def _write_in_component(page: Page, editor, text: str, log: list) -> bool:
-    """방금 넣은 인용구 안에 글자를 쓴다. 안 들어가면 되돌린다"""
+    """방금 넣은 인용구 안에 글자를 쓴다. 커서가 상자 밖에 있을 수 있어 새 상자의 글 칸을 직접 누른 뒤 쓴다"""
+    target = editor.evaluate(_MARK_NEW_COMPONENT_TEXT)
+    log.append(f"새 상자 글 칸: {target or '못 찾음(커서 위치에 바로 씀)'}")
+    if target:
+        editor.locator("[data-nb-pick]").first.click(timeout=5000)
+        _pause(0.2, 0.4)
     page.keyboard.insert_text(text)
     _pause(0.3, 0.6)
     if editor.evaluate(_TEXT_IN_COMPONENT, text):

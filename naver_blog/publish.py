@@ -139,17 +139,19 @@ def _style_targets(blocks, style: dict) -> list[tuple[str, int | None, str]]:
     return out
 
 
-def _pick(page: Page, editor, button_css: str, mark_js: str, arg) -> bool:
-    """툴바 버튼을 눌러 목록을 열고, 표시해 둔 항목을 클릭한다"""
+def _pick(page: Page, editor, button_css: str, mark_js: str, arg, log: list) -> bool:
+    """툴바 버튼을 눌러 목록을 열고, 표시해 둔 항목을 클릭한다. 실패하면 그때 화면의 버튼 목록을 log에 남긴다"""
     btn = editor.locator(button_css).first
     if not btn.count():
+        log.append(f"[버튼 없음] {button_css}\n" + editor.evaluate(_DUMP_BUTTONS))
         return False
-    btn.click()
+    btn.click(timeout=5000)
     _pause(0.3, 0.6)
     if not editor.evaluate(mark_js, arg):
+        log.append(f"[목록에서 {arg} 못 찾음] {button_css} 누른 뒤 화면\n" + editor.evaluate(_DUMP_BUTTONS))
         page.keyboard.press("Escape")
         return False
-    editor.locator("[data-nb-pick]").first.click()
+    editor.locator("[data-nb-pick]").first.click(timeout=5000)
     _pause(0.2, 0.5)
     return True
 
@@ -157,8 +159,10 @@ def _pick(page: Page, editor, button_css: str, mark_js: str, arg) -> bool:
 def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None = None) -> int:
     """이미 입력한 문단을 골라 툴바로 글자 크기·색을 바꾼다. 못 하면 그대로 두고(굵은 글씨만), 바꾼 줄 수를 돌려준다."""
     sel = SELECTORS["body"]
-    done, dumped = 0, False
+    done, log = 0, []
     for text, size, color in targets:
+        if len(log) >= 2:  # 같은 이유로 계속 실패하면 시간만 드니 멈춘다
+            break
         try:
             para = editor.locator(sel).filter(has_text=text).last
             if not para.count():
@@ -167,20 +171,20 @@ def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None =
             if not editor.evaluate(_SELECT_PARAGRAPH, [sel, text]):
                 continue
             _pause(0.2, 0.4)
-            ok_size = size is None or _pick(page, editor, SELECTORS["font_size_btn"], _MARK_SIZE_OPTION, size)
+            ok_size = size is None or _pick(page, editor, SELECTORS["font_size_btn"], _MARK_SIZE_OPTION, size, log)
             if size is not None and ok_size:
                 editor.evaluate(_SELECT_PARAGRAPH, [sel, text])  # 목록을 닫으며 선택이 풀렸을 수 있어 다시 선택
                 _pause(0.1, 0.3)
-            ok_color = _pick(page, editor, SELECTORS["font_color_btn"], _MARK_COLOR_OPTION, color)
+            ok_color = _pick(page, editor, SELECTORS["font_color_btn"], _MARK_COLOR_OPTION, color, log)
             if ok_size and ok_color:
                 done += 1
-            elif not dumped and screenshot_dir:
-                dumped = True
-                (screenshot_dir / "editor_toolbar.txt").write_text(editor.evaluate(_DUMP_BUTTONS), encoding="utf-8")
-                page.screenshot(path=str(screenshot_dir / "editor_toolbar.png"))
         except Exception as e:
-            print(f"  글자 꾸미기 건너뜀 ({text[:15]}): {e}")
+            print(f"  글자 꾸미기 건너뜀 ({text[:15]}): {str(e).splitlines()[0]}")
+            log.append(f"[오류] {e}\n" + editor.evaluate(_DUMP_BUTTONS))
             page.keyboard.press("Escape")
+    if log and screenshot_dir:
+        (screenshot_dir / "editor_toolbar.txt").write_text("\n\n".join(log), encoding="utf-8")
+        page.screenshot(path=str(screenshot_dir / "editor_toolbar.png"))
     return done
 
 

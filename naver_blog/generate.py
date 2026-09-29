@@ -24,7 +24,8 @@ class Section(BaseModel):
 
 
 # 소제목·Q&A 글자 꾸미기 기본값. config.toml의 [style]에서 바꿀 수 있다
-TEXT_STYLE = {"heading_size": 24, "heading_color": "#1565c0", "q_color": "#1565c0", "a_color": "#666666"}
+TEXT_STYLE = {"heading_size": 24, "heading_color": "#00756a", "q_color": "#00756a", "a_color": "#666666",
+              "intro_color": "#777777", "intro_bold": True}
 
 
 def is_qa(text: str) -> bool:
@@ -128,7 +129,14 @@ class Post(BaseModel):
         """미리보기용 HTML. 실제 네이버 글과 비슷한 모양으로 보여준다."""
         st = {**TEXT_STYLE, **(style or {})}
         body = []
+        intro_done = False
         for kind, value in self.blocks(photos, media):
+            if kind == "text" and not intro_done:  # 첫 글 덩어리 = 도입 3줄
+                intro_done = True
+                weight = "bold" if st["intro_bold"] else "normal"
+                body.append(f'<p style="color:{st["intro_color"]};font-weight:{weight}">'
+                            + html.escape(value).replace("\n", "<br>") + "</p>")
+                continue
             if kind == "heading":
                 body.append(f'<h2 style="font-size:{st["heading_size"]}px;color:{st["heading_color"]}">{html.escape(value)}</h2>')
             elif kind == "photo":

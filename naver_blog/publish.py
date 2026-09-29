@@ -126,17 +126,22 @@ _DUMP_BUTTONS = """() => [...document.querySelectorAll("button")].filter(e => e.
 _PARAGRAPH_HTML = "([sel, text]) => { const p = [...document.querySelectorAll(sel)].filter(e => e.innerText.trim() === text).pop(); return p ? p.innerHTML : ''; }"
 
 
-def _style_targets(blocks, style: dict) -> list[tuple[str, int | None, str]]:
-    """(문단 글자, 글자 크기 또는 None, 색) 목록: 소제목은 크게+색, Q&A는 질문·답을 다른 색으로"""
+def _style_targets(blocks, style: dict) -> list[tuple[str, int | None, str, bool]]:
+    """(문단 글자, 글자 크기 또는 None, 색, 굵게 켜기) 목록.
+    도입 3줄은 회색 굵게, 소제목은 크게+색, Q&A는 질문·답을 다른 색으로"""
     st = {**TEXT_STYLE, **(style or {})}
     out = []
+    intro = next((v for k, v in blocks if k == "text"), "")
+    for line in intro.split("\n"):
+        if line.strip():
+            out.append((line.strip(), None, st["intro_color"], bool(st["intro_bold"])))
     for kind, value in blocks:
         if kind == "heading":
-            out.append((value.strip(), st["heading_size"], st["heading_color"]))
+            out.append((value.strip(), st["heading_size"], st["heading_color"], False))
         elif kind == "text" and is_qa(value):
             for line in value.split("\n"):
                 if line.strip():
-                    out.append((line.strip(), None, st["q_color"] if line.startswith("Q. ") else st["a_color"]))
+                    out.append((line.strip(), None, st["q_color"] if line.startswith("Q. ") else st["a_color"], False))
     return out
 
 
@@ -189,7 +194,7 @@ def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None =
     처음 두 줄은 무엇을 눌렀고 결과가 어땠는지 editor_toolbar.txt에 남긴다(네이버 화면이 달라졌을 때 고치는 용도)."""
     sel = SELECTORS["body"]
     done, log, notes = 0, [], []
-    for i, (text, size, color) in enumerate(targets):
+    for i, (text, size, color, bold) in enumerate(targets):
         if len(log) >= 2 or (i >= 2 and done == 0):  # 처음 두 줄이 안 되면 나머지도 안 되니 멈춘다
             break
         try:
@@ -199,6 +204,9 @@ def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None =
             if size is not None and picked_size:
                 _select_line(page, editor, text)  # 목록을 닫으며 선택이 풀렸을 수 있어 다시 선택
             picked_color = _pick(page, editor, SELECTORS["font_color_btn"], _MARK_COLOR_OPTION, color, log)
+            if bold and "<b" not in editor.evaluate(_PARAGRAPH_HTML, [sel, text]).lower():
+                _select_line(page, editor, text)
+                page.keyboard.press("Control+B")
             page.keyboard.press("End")  # 선택 해제
             after = editor.evaluate(_PARAGRAPH_HTML, [sel, text])
             m = re.search(r"#[0-9a-fA-F]{6}", picked_color)
@@ -270,7 +278,7 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screens
     targets = _style_targets(blocks, style)
     if targets:
         n = _style_paragraphs(page, editor, targets, screenshot_dir)
-        print(f"  글자 꾸미기: {n}/{len(targets)}줄 (소제목 크기·색, Q&A 색)")
+        print(f"  글자 꾸미기: {n}/{len(targets)}줄 (도입 회색 굵게, 소제목 크기·색, Q&A 색)")
         if n < len(targets) and screenshot_dir and (screenshot_dir / "editor_toolbar.txt").exists():
             print("  (꾸미기가 덜 된 경우 output 폴더의 editor_toolbar.txt 를 메모장으로 열어 캡처해 보내주세요)")
 

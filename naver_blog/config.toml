@@ -31,6 +31,8 @@ max_searches = 5        # 글 하나당 최대 검색 횟수
 
 [style]
 heading_size = 24          # 소제목 글자 크기 (본문은 네이버 기본 19)
-heading_color = "#1565c0"  # 소제목 색 (파랑)
-q_color = "#1565c0"        # Q&A 질문 색
+heading_color = "#00756a"  # 소제목 색 (청록)
+q_color = "#00756a"        # Q&A 질문 색
 a_color = "#666666"        # Q&A 답변 색 (회색)
+intro_color = "#777777"    # 도입 3줄 색 (회색)
+intro_bold = true          # 도입 3줄 굵게

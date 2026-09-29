@@ -24,8 +24,12 @@ class Section(BaseModel):
 
 class Metric(BaseModel):
     label: str = Field(description="지표 이름. 예: 누적 관객, 분배율(최근 1년)")
-    value: str = Field(description="숫자와 단위. 예: 163만 3616명, 13.81%")
-    note: str = Field(description="기준·출처 한 줄. 예: 9월 28일 영화진흥위원회")
+    value: str = Field(description="숫자와 단위. 예: 163만 3616명, 13.81%. 조사로 확인 못 했으면 정확히 \"확인 필요\"")
+    note: str = Field(description="기준·출처 한 줄. 예: 9월 28일 영화진흥위원회. 확인 필요면 어디서 확인하는지")
+
+    @property
+    def pending(self) -> bool:
+        return self.value.strip() == "확인 필요"
 
 
 class QA(BaseModel):
@@ -41,7 +45,7 @@ class Post(BaseModel):
     tags: list[str] = Field(description="해시태그 5~10개, '#' 없이")
     summary: list[str] = Field(description="글 핵심 요약 3~4개. 각 20자 이내")
     qa: list[QA] = Field(description="독자가 실제로 궁금해할 Q&A 2~4개")
-    metrics: list[Metric] = Field(description="조사 자료에서 확인된 핵심 숫자 2~4개. 확인된 숫자가 없으면 빈 목록")
+    metrics: list[Metric] = Field(description="핵심 지표 1~4개. 최소 1개는 반드시 있어야 함. 확인 못 한 지표는 value를 '확인 필요'로")
     metrics_basis: str = Field(description="지표 기준일. 예: 2026년 9월 28일 기준. 지표가 없으면 빈 문자열")
     answer_found: bool = Field(description="제목이 약속한 핵심 답(예: 실제 일정, 금액, 조건)을 조사 자료에서 찾아 본문에 담았으면 true")
     missing: str = Field(description="answer_found가 false면 무엇을 못 찾았는지 한 문장. true면 빈 문자열")
@@ -117,7 +121,12 @@ class Post(BaseModel):
                 body.append(f'<img src="{html.escape(rel)}">')
             else:
                 body.append("<p>" + html.escape(value).replace("\n", "<br>") + "</p>")
-        warn = ("" if self.answer_found else
+        if not any(not m.pending for m in self.metrics):
+            warn_metric = ('<p style="background:#fff3cd;border:1px solid #e0b000;padding:12px;border-radius:6px">'
+                           '⚠ 확인된 지표가 하나도 없어요. 규칙(검증 가능한 지표 최소 1개)을 채우지 못한 글이에요.</p>')
+        else:
+            warn_metric = ""
+        warn = warn_metric + ("" if self.answer_found else
                 f'<p style="background:#fff3cd;border:1px solid #e0b000;padding:12px;border-radius:6px">'
                 f'⚠ 핵심 정보를 찾지 못했어요: {html.escape(self.missing)}<br>이대로 발행하는 건 추천하지 않아요.</p>')
         return f"""<!doctype html><meta charset="utf-8"><title>{html.escape(self.title)}</title>
@@ -159,8 +168,10 @@ SYSTEM = """당신은 네이버 블로그 글을 쓰는 작가입니다. 자연�
 - 핵심 정보는 한눈에 보이게 짧게 정리합니다. 문단은 1~3문장.
 - qa: 주제에 맞는 실질적인 질문과 답. 마지막 소제목은 독자가 취할 다음 행동이나 판단 기준으로 마칩니다.
 - tags: 관련 태그 5~10개.
-- metrics: 독자가 한눈에 볼 핵심 숫자 2~4개를 조사 자료에서 골라 카드로 보여줍니다(금액, 비율, 날짜, 인원, 점수 등).
-  조사 자료에 없는 숫자, 추정치, 계산해서 만든 숫자는 넣지 않습니다. 본문에도 같은 숫자가 나와야 합니다.
+- metrics: 검증 가능한 지표를 최소 하나 반드시 넣습니다. 독자가 한눈에 볼 핵심 숫자(금액, 비율, 날짜, 인원, 점수 등)
+  1~4개를 조사 자료에서 골라 카드로 보여줍니다. 본문에도 같은 숫자가 나와야 합니다.
+  조사 자료에 없는 숫자, 추정치, 계산해서 만든 숫자는 넣지 않습니다. 확인하지 못한 핵심 지표는 임의로 채우지 말고
+  value를 "확인 필요", note에 어디서 확인할 수 있는지 적어 빈자리를 명시합니다. 본문에서도 그 빈자리를 밝힙니다.
 - answer_found: 제목이 약속한 핵심 답을 조사 자료로 확인해 본문에 담았는지 정직하게 표시합니다.
   찾지 못했다면 false로 하고 missing에 무엇이 없는지 적습니다. 이 경우 제목도 답을 약속하지 않게 씁니다.
 

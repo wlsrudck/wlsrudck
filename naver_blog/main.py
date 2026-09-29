@@ -190,6 +190,11 @@ def main():
         preview = OUTPUT / f"{dt.date.today()}_{slug}.html"
         preview.write_text(post.to_html(photos, OUTPUT, media), encoding="utf-8")
         print(f"  미리보기 저장: {preview} ({len(post.body_text())}자)")
+        confirmed = [m for m in post.metrics if not m.pending]
+        if not confirmed:
+            print("  ⚠ 확인된 지표가 하나도 없어요 (규칙: 검증 가능한 지표 최소 1개)")
+        elif len(confirmed) < len(post.metrics):
+            print(f"  지표 {len(confirmed)}개 확인, {len(post.metrics) - len(confirmed)}개는 '확인 필요'로 표시")
         if not post.answer_found:
             print(f"  ⚠ 핵심 정보를 찾지 못했어요: {post.missing} → 이대로 발행하는 건 추천하지 않아요")
 

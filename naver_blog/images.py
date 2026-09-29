@@ -100,11 +100,12 @@ def make_metrics_card(metrics: list, basis: str, out: Path, seed: str) -> Path:
         d.text((1010, 85), basis, font=_font(30), fill=accent, anchor="rm")
 
     metrics = metrics[:4]
-    cols = 2 if len(metrics) in (2, 4) else 1  # 3개면 빈칸이 생기지 않게 한 줄에 하나씩
+    cols = 2 if len(metrics) == 4 else 1  # 4개만 2x2, 나머지는 가로로 넓은 타일을 한 줄에 하나씩
     rows = (len(metrics) + cols - 1) // cols
     gap, top, left = 30, 210, 60
     tw = (1080 - left * 2 - gap * (cols - 1)) // cols
-    th = (1080 - top - 60 - gap * (rows - 1)) // rows
+    th = min(300, (1080 - top - 60 - gap * (rows - 1)) // rows)
+    top += (1080 - 60 - top - (th * rows + gap * (rows - 1))) // 2  # 타일 묶음을 세로 가운데로
     pad = 36
     # 숫자 크기는 모든 타일에서 같게: 가장 긴 숫자가 칸에 들어가는 크기
     max_size = min(120, int(th * 0.34))
@@ -117,7 +118,8 @@ def make_metrics_card(metrics: list, basis: str, out: Path, seed: str) -> Path:
         d.rounded_rectangle([x, y, x + tw, y + 10], radius=4, fill=bg)
         label_font = _font(36)
         d.text((x + pad, y + 60), _wrap(d, m.label, label_font, tw - pad * 2)[0], font=label_font, fill=sub, anchor="lm")
-        d.text((x + pad, y + th / 2 + 5), m.value, font=_font(size), fill=ink, anchor="lm")
+        pending = m.value.strip() == "확인 필요"  # 빈자리: 흐린 색으로 "확인 필요"
+        d.text((x + pad, y + th / 2 + 5), m.value, font=_font(size), fill=muted if pending else ink, anchor="lm")
         note_font = _font(28)
         notes = _wrap(d, m.note, note_font, tw - pad * 2)[:2]
         for j, line in enumerate(notes):

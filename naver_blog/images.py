@@ -10,7 +10,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 FONT_CANDIDATES = [
     "C:/Windows/Fonts/malgunbd.ttf",   # 맑은 고딕 Bold (Windows 기본)
@@ -58,31 +58,63 @@ def _wrap(draw, text: str, font, max_width: int) -> list[str]:
     return lines
 
 
-def make_thumbnail(title: str, out: Path, seed: str, phrase: list[str] | None = None) -> Path:
-    """phrase(짧은 문구 1~2줄)가 있으면 크게, 없으면 제목을 넣는다.
-    홈 피드에서는 썸네일이 작게 보이므로 짧은 문구를 크게 넣는 편이 잘 읽힌다."""
-    bg, accent = random.Random(seed).choice(PALETTES)
-    im = Image.new("RGB", (1080, 1080), bg)
+MARKERS = ["#ffd84d", "#9fe3c9", "#ffb4a2", "#b9d7ff"]  # 매거진형 형광펜 색
+
+
+def _fit_size(d, lines: list[str], width: int, hi: int, lo: int = 60) -> int:
+    """모든 줄이 width 안에 들어가는 가장 큰 글자 크기"""
+    return next((sz for sz in range(hi, lo, -4) if all(d.textlength(l, font=_font(sz)) <= width for l in lines)), lo)
+
+
+def make_thumbnail(title: str, out: Path, seed: str, phrase: list[str] | None = None,
+                   photo: Path | None = None, brand: str = "") -> Path:
+    """썸네일. 사진이 있으면 사진형(사진 위에 흰 글자), 없으면 매거진형(밝은 배경에 굵은 글자 + 형광펜).
+    홈 피드에서는 썸네일이 작게 보이므로 짧은 문구(phrase)를 크게 넣는다."""
+    lines = [l for l in (phrase or [])[:2] if l.strip()] or [title]
+    rng = random.Random(seed)
+    if photo:
+        return _thumb_photo(lines, out, photo, brand)
+    return _thumb_magazine(lines, out, rng.choice(MARKERS), brand)
+
+
+def _thumb_photo(lines, out, photo: Path, brand: str) -> Path:
+    with Image.open(photo) as src:
+        im = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGB"), (1080, 1080), Image.LANCZOS)
+    # 아래쪽으로 갈수록 어두워지는 그라데이션: 흰 글자가 어떤 사진 위에서도 읽히게
+    shade = Image.new("L", (1, 1080))
+    for y in range(1080):
+        t = max(0.0, (y - 300) / 780)
+        shade.putpixel((0, y), int(40 + 190 * t ** 1.3))
+    im = Image.composite(Image.new("RGB", im.size, "black"), im, shade.resize(im.size))
     d = ImageDraw.Draw(im)
-    d.rectangle([60, 60, 1020, 1020], outline=accent, width=6)
-    if phrase:
-        lines = phrase[:2]
-        # 문구가 한 줄에 다 들어가는 가장 큰 글자 크기를 고른다
-        size = next((s for s in range(140, 70, -6)
-                     if all(d.textlength(l, font=_font(s)) <= 860 for l in lines)), 70)
-        font = _font(size)
-        lines = [w for l in lines for w in _wrap(d, l, font, 860)]
-        line_h = int(size * 1.35)
-    else:
-        font = _font(84)
-        lines = _wrap(d, title, font, 820)[:5]
-        line_h = 118
-    y = 540 - len(lines) * line_h // 2
+    size = _fit_size(d, lines, 920, 124)
+    font, line_h = _font(size), int(size * 1.22)
+    y = 1080 - 110 - line_h * len(lines)
+    d.rectangle([80, y - 40, 170, y - 30], fill="white")
     for line in lines:
-        w = d.textlength(line, font=font)
-        d.text(((1080 - w) / 2, y), line, font=font, fill="white")
+        d.text((80, y), line, font=font, fill="white")
         y += line_h
-    d.line([440, y + 30, 640, y + 30], fill=accent, width=8)
+    if brand:
+        d.text((80, 70), brand, font=_font(34), fill=(255, 255, 255))
+    im.save(out, quality=92)
+    return out
+
+
+def _thumb_magazine(lines, out, marker: str, brand: str) -> Path:
+    im = Image.new("RGB", (1080, 1080), "#f6f4ef")
+    d = ImageDraw.Draw(im)
+    size = _fit_size(d, lines, 920, 136)
+    font, line_h = _font(size), int(size * 1.3)
+    y = 540 - line_h * len(lines) // 2
+    for i, line in enumerate(lines):
+        if i == len(lines) - 1:  # 마지막 줄에 형광펜
+            w = d.textlength(line, font=font)
+            d.rectangle([72, y + size * 0.55, 88 + w, y + size * 1.08], fill=marker)
+        d.text((80, y), line, font=font, fill="#16181b")
+        y += line_h
+    d.line([80, 960, 1000, 960], fill="#d9d5cc", width=2)
+    if brand:
+        d.text((80, 1000), brand, font=_font(32), fill="#6b6f76", anchor="lm")
     im.save(out, quality=92)
     return out
 

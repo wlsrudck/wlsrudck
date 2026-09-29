@@ -38,28 +38,42 @@ def make_photo_folders(rows) -> None:
         (PHOTOS / slugify(r["keyword"])).mkdir(parents=True, exist_ok=True)
 
 
-def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict) -> dict:
-    """썸네일, 요약 카드, 무료 사진을 만들어 output/<slug>_images/에 저장한다."""
+def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: str = "") -> dict:
+    """썸네일, 지표 카드, 요약 카드, 무료 사진을 만들어 output/<slug>_images/에 저장한다."""
     folder = OUTPUT / f"{slug}_images"
     folder.mkdir(parents=True, exist_ok=True)
     media = {"stock": {}}
-    if cfg.get("thumbnail", True):
-        media["thumbnail"] = images.make_thumbnail(post.title, folder / "thumbnail.jpg", slug, post.thumbnail_text)
     if cfg.get("metrics_card", True) and post.metrics:
         media["metrics_card"] = images.make_metrics_card(post.metrics, post.metrics_basis, folder / "metrics.jpg", slug)
     if cfg.get("summary_card", True) and post.summary:
         media["summary_card"] = images.make_summary_card(post.title, post.summary, folder / "summary.jpg", slug)
 
-    if not cfg.get("stock_photos", True):
-        return media
     key_file = ROOT / "pixabay_key.txt"
     key = key_file.read_text(encoding="utf-8-sig").strip() if key_file.exists() else ""
-    if not key:
+    use_stock = cfg.get("stock_photos", True) and bool(key)
+    if cfg.get("stock_photos", True) and not key:
         print("  (pixabay_key.txt가 없어 무료 사진은 건너뜁니다)")
-        return media
+
     used_ids: set[int] = set()
+    thumb_photo = None
+    if cfg.get("thumbnail", True) and cfg.get("thumbnail_style", "auto") == "auto":
+        # 썸네일 배경: 직접 찍은 사진이 있으면 그걸, 없으면 무료 사진을 따로 찾는다
+        if photos:
+            thumb_photo = photos[0]
+        elif use_stock and post.thumbnail_query.strip():
+            try:
+                found = images.pixabay_photo(post.thumbnail_query, key, folder, used_ids)
+                if found:
+                    thumb_photo, photo_id = found
+                    used_ids.add(photo_id)
+            except urllib.error.HTTPError as e:
+                print(f"  썸네일 사진 검색 실패: HTTP {e.code}")
+                use_stock = False
+            except Exception as e:
+                print(f"  썸네일 사진 검색 실패: {e}")
+
     for i, s in enumerate(post.sections):
-        if len(media["stock"]) >= cfg.get("max_stock_photos", 3):
+        if not use_stock or len(media["stock"]) >= cfg.get("max_stock_photos", 3):
             break
         if s.photo or not s.stock_query.strip():
             continue
@@ -76,7 +90,11 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict) -> dict:
         if found:
             media["stock"][i], photo_id = found
             used_ids.add(photo_id)
-    print(f"  이미지 준비: 썸네일 {'만듦' if 'thumbnail' in media else '없음'}, "
+
+    if cfg.get("thumbnail", True):
+        media["thumbnail"] = images.make_thumbnail(post.title, folder / "thumbnail.jpg", slug, post.thumbnail_text,
+                                                   photo=thumb_photo, brand=brand)
+    print(f"  이미지 준비: 썸네일 {('사진형' if thumb_photo else '매거진형') if 'thumbnail' in media else '없음'}, "
           f"지표 카드 {'만듦' if 'metrics_card' in media else '없음'}, "
           f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 무료 사진 {len(media['stock'])}장")
     return media
@@ -186,7 +204,7 @@ def main():
         made += 1
 
         OUTPUT.mkdir(exist_ok=True)
-        media = prepare_media(post, slug, photos, cfg.get("images", {}))
+        media = prepare_media(post, slug, photos, cfg.get("images", {}), cfg["naver"].get("blog_name", ""))
         preview = OUTPUT / f"{dt.date.today()}_{slug}.html"
         preview.write_text(post.to_html(photos, OUTPUT, media), encoding="utf-8")
         print(f"  미리보기 저장: {preview} ({len(post.body_text())}자)")

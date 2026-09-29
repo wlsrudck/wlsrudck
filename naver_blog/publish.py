@@ -1,6 +1,7 @@
 """Playwright로 네이버 스마트에디터 ONE에 글을 입력하고 임시저장(기본) 또는 발행한다."""
 
 import random
+import re
 import time
 from pathlib import Path
 
@@ -97,7 +98,7 @@ _MARK_SIZE_OPTION = """(size) => {
         || cands.find(e => (e.innerText || "").trim() === String(size) && !e.closest(".se-component"));
     if (!el) return false;
     el.setAttribute("data-nb-pick", "1");
-    return true;
+    return (el.className || el.tagName) + " | " + (el.innerText || "").trim().slice(0, 10);
 }"""
 
 _MARK_COLOR_OPTION = """(hex) => {
@@ -114,7 +115,7 @@ _MARK_COLOR_OPTION = """(hex) => {
     }
     if (!best) return false;
     best.setAttribute("data-nb-pick", "1");
-    return best.getAttribute("data-color");
+    return (best.className || best.tagName) + " | " + best.getAttribute("data-color");
 }"""
 
 # 버튼을 못 찾았을 때 고칠 수 있게 보이는 버튼 이름을 파일로 남긴다
@@ -139,51 +140,79 @@ def _style_targets(blocks, style: dict) -> list[tuple[str, int | None, str]]:
     return out
 
 
-def _pick(page: Page, editor, button_css: str, mark_js: str, arg, log: list) -> bool:
+def _pick(page: Page, editor, button_css: str, mark_js: str, arg, log: list) -> str:
     """툴바 버튼을 눌러 목록을 열고, 표시해 둔 항목을 클릭한다. 실패하면 그때 화면의 버튼 목록을 log에 남긴다"""
     btn = editor.locator(button_css).first
     if not btn.count():
         log.append(f"[버튼 없음] {button_css}\n" + editor.evaluate(_DUMP_BUTTONS))
-        return False
+        return ""
     btn.click(timeout=5000)
     _pause(0.3, 0.6)
-    if not editor.evaluate(mark_js, arg):
+    picked = editor.evaluate(mark_js, arg)
+    if not picked:
         log.append(f"[목록에서 {arg} 못 찾음] {button_css} 누른 뒤 화면\n" + editor.evaluate(_DUMP_BUTTONS))
         page.keyboard.press("Escape")
-        return False
+        return ""
     editor.locator("[data-nb-pick]").first.click(timeout=5000)
     _pause(0.2, 0.5)
+    return picked
+
+
+def _select_line(page: Page, editor, text: str) -> bool:
+    """문단 끝에 커서를 두고 Shift+← 로 글자 수만큼 선택한다. 사람이 드래그한 것처럼 에디터가 선택을 알아챈다"""
+    sel = SELECTORS["body"]
+    para = editor.locator(sel).filter(has_text=text).last
+    if not para.count():
+        return False
+    para.click()
+    if not editor.evaluate(_CARET_TO_END_OF, [sel, text]):
+        return False
+    page.keyboard.press("End")
+    for _ in range(len(text)):
+        page.keyboard.press("Shift+ArrowLeft")
+    _pause(0.2, 0.4)
     return True
 
 
+def _styled(html: str, size: int | None, color: str) -> bool:
+    """문단 HTML에 고른 크기·색이 실제로 들어갔는지 (색은 팔레트에서 실제로 고른 값으로 확인)"""
+    h = html.lower()
+    color = color.lower()
+    r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
+    has_color = color in h or color[1:] in h or f"rgb({r}, {g}, {b})" in h
+    has_size = size is None or f"fs{size}" in h or f"{size}px" in h
+    return has_color and has_size
+
+
 def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None = None) -> int:
-    """이미 입력한 문단을 골라 툴바로 글자 크기·색을 바꾼다. 못 하면 그대로 두고(굵은 글씨만), 바꾼 줄 수를 돌려준다."""
+    """이미 입력한 문단을 골라 툴바로 글자 크기·색을 바꾼다. 실제로 바뀐 줄 수를 돌려준다.
+    처음 두 줄은 무엇을 눌렀고 결과가 어땠는지 editor_toolbar.txt에 남긴다(네이버 화면이 달라졌을 때 고치는 용도)."""
     sel = SELECTORS["body"]
-    done, log = 0, []
-    for text, size, color in targets:
-        if len(log) >= 2:  # 같은 이유로 계속 실패하면 시간만 드니 멈춘다
+    done, log, notes = 0, [], []
+    for i, (text, size, color) in enumerate(targets):
+        if len(log) >= 2 or (i >= 2 and done == 0):  # 처음 두 줄이 안 되면 나머지도 안 되니 멈춘다
             break
         try:
-            para = editor.locator(sel).filter(has_text=text).last
-            if not para.count():
+            if not _select_line(page, editor, text):
                 continue
-            para.click()
-            if not editor.evaluate(_SELECT_PARAGRAPH, [sel, text]):
-                continue
-            _pause(0.2, 0.4)
-            ok_size = size is None or _pick(page, editor, SELECTORS["font_size_btn"], _MARK_SIZE_OPTION, size, log)
-            if size is not None and ok_size:
-                editor.evaluate(_SELECT_PARAGRAPH, [sel, text])  # 목록을 닫으며 선택이 풀렸을 수 있어 다시 선택
-                _pause(0.1, 0.3)
-            ok_color = _pick(page, editor, SELECTORS["font_color_btn"], _MARK_COLOR_OPTION, color, log)
-            if ok_size and ok_color:
-                done += 1
+            picked_size = "" if size is None else _pick(page, editor, SELECTORS["font_size_btn"], _MARK_SIZE_OPTION, size, log)
+            if size is not None and picked_size:
+                _select_line(page, editor, text)  # 목록을 닫으며 선택이 풀렸을 수 있어 다시 선택
+            picked_color = _pick(page, editor, SELECTORS["font_color_btn"], _MARK_COLOR_OPTION, color, log)
+            page.keyboard.press("End")  # 선택 해제
+            after = editor.evaluate(_PARAGRAPH_HTML, [sel, text])
+            m = re.search(r"#[0-9a-fA-F]{6}", picked_color)
+            ok = bool(m) and _styled(after, size, m.group(0))
+            done += ok
+            if i < 2:
+                notes.append(f"[{text[:20]}] 크기 선택: {picked_size or '-'} / 색 선택: {picked_color or '-'} / 결과: {'성공' if ok else '실패'}\n"
+                             f"  문단 HTML: {after[:300]}")
         except Exception as e:
             print(f"  글자 꾸미기 건너뜀 ({text[:15]}): {str(e).splitlines()[0]}")
             log.append(f"[오류] {e}\n" + editor.evaluate(_DUMP_BUTTONS))
             page.keyboard.press("Escape")
-    if log and screenshot_dir:
-        (screenshot_dir / "editor_toolbar.txt").write_text("\n\n".join(log), encoding="utf-8")
+    if screenshot_dir and (log or done < len(targets)):
+        (screenshot_dir / "editor_toolbar.txt").write_text("\n\n".join(notes + log), encoding="utf-8")
         page.screenshot(path=str(screenshot_dir / "editor_toolbar.png"))
     return done
 
@@ -243,7 +272,7 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screens
         n = _style_paragraphs(page, editor, targets, screenshot_dir)
         print(f"  글자 꾸미기: {n}/{len(targets)}줄 (소제목 크기·색, Q&A 색)")
         if n < len(targets) and screenshot_dir and (screenshot_dir / "editor_toolbar.txt").exists():
-            print("  (꾸미기 버튼을 못 찾은 경우 output 폴더의 editor_toolbar.png / .txt 를 보내주세요)")
+            print("  (꾸미기가 덜 된 경우 output 폴더의 editor_toolbar.txt 를 메모장으로 열어 캡처해 보내주세요)")
 
     # 뒤에서부터 넣어야 같은 자리에 들어가는 사진끼리 순서가 뒤집히지 않는다.
     # 단, 네이버는 처음 올린 사진을 대표 사진으로 잡으므로 맨 앞 사진(썸네일)만 먼저 올린다.

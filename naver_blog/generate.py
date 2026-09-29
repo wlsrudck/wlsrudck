@@ -167,6 +167,7 @@ SYSTEM = """당신은 네이버 블로그 글을 쓰는 작가입니다. 자연�
   사진에서 확실히 보이지 않는 것은 추측하지 않습니다. 사진이 없는데 있는 것처럼 쓰지 않습니다.
 - 사진을 배치하지 않은 소제목에는 무료 사진 사이트에서 찾을 영어 검색어(stock_query)를 적습니다.
   소제목 내용을 눈으로 보여주는 구체적인 사물이나 장면으로. 예: 월세 → "apartment keys rent", 세금 → "calculator tax form".
+  상표·로고·앱 화면이 찍힐 만한 검색어(social media, smartphone app, cinema screen 등)는 피합니다.
   사람이 나오는 장면(선수, 인물의 동작)은 검색하지 않습니다. 글의 주인공으로 오해받을 수 있으니 물건·장소 위주로.
   나이, 조건, 기간, 절차, 인물 소개처럼 사진으로 표현하기 어려운 소제목은 빈 문자열. 엉뚱한 사진보다 없는 편이 낫습니다.
   이 사진은 작성자가 찍은 게 아니므로 본문에서 언급하지 않습니다."""
@@ -292,6 +293,15 @@ SITE_NAMES = {
     "fsc.go.kr": "금융위원회", "bok.or.kr": "한국은행", "kosis.kr": "국가통계포털", "kdic.or.kr": "예금보험공사",
     "yna.co.kr": "연합뉴스", "news.naver.com": "네이버 뉴스", "wikipedia.org": "위키백과",
     "olympics.com": "올림픽 공식 홈페이지", "worldathletics.org": "월드아슬레틱스", "kaaf.or.kr": "대한육상연맹",
+    "imbc.com": "MBC", "kbs.co.kr": "KBS", "sbs.co.kr": "SBS", "ytn.co.kr": "YTN", "jtbc.co.kr": "JTBC",
+    "chosun.com": "조선일보", "joongang.co.kr": "중앙일보", "donga.com": "동아일보", "hani.co.kr": "한겨레",
+    "khan.co.kr": "경향신문", "hankookilbo.com": "한국일보", "seoul.co.kr": "서울신문", "kmib.co.kr": "국민일보",
+    "segye.com": "세계일보", "munhwa.com": "문화일보", "imaeil.com": "매일신문", "busan.com": "부산일보",
+    "hankyung.com": "한국경제", "mk.co.kr": "매일경제", "mt.co.kr": "머니투데이", "edaily.co.kr": "이데일리",
+    "sedaily.com": "서울경제", "heraldcorp.com": "헤럴드경제", "asiae.co.kr": "아시아경제", "fnnews.com": "파이낸셜뉴스",
+    "newsis.com": "뉴시스", "news1.kr": "뉴스1", "nocutnews.co.kr": "노컷뉴스", "ohmynews.com": "오마이뉴스",
+    "osen.co.kr": "OSEN", "xportsnews.com": "엑스포츠뉴스", "sportschosun.com": "스포츠조선", "dispatch.co.kr": "디스패치",
+    "namu.wiki": "나무위키", "kobis.or.kr": "영화진흥위원회",
 }
 
 

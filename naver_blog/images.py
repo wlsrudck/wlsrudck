@@ -115,6 +115,19 @@ def _get(url: str, timeout: int):
     return urllib.request.urlopen(urllib.request.Request(url, headers=HEADERS), timeout=timeout)
 
 
+# 사진 태그에 이런 단어가 있으면 상표·로고가 찍혔을 가능성이 높아 쓰지 않는다
+BRAND_TAGS = {
+    "facebook", "instagram", "twitter", "youtube", "google", "apple", "iphone", "ipad", "macbook", "samsung",
+    "microsoft", "windows", "amazon", "netflix", "universal", "disney", "coca-cola", "coca cola", "pepsi",
+    "starbucks", "mcdonalds", "nike", "adidas", "logo", "brand", "whatsapp", "tiktok", "linkedin", "social media",
+}
+
+
+def _has_brand(hit: dict) -> bool:
+    tags = {t.strip().lower() for t in hit.get("tags", "").split(",")}
+    return any(t in BRAND_TAGS or any(b in t for b in BRAND_TAGS) for t in tags)
+
+
 def pixabay_photo(query: str, api_key: str, out_dir: Path, exclude: set[int]) -> tuple[Path, int] | None:
     """검색 결과 중 아직 안 쓴 사진 하나를 내려받는다. 없으면 None."""
     url = "https://pixabay.com/api/?" + urllib.parse.urlencode({
@@ -124,7 +137,7 @@ def pixabay_photo(query: str, api_key: str, out_dir: Path, exclude: set[int]) ->
     with _get(url, 20) as r:
         hits = json.load(r).get("hits", [])
     for hit in hits:
-        if hit["id"] in exclude:
+        if hit["id"] in exclude or _has_brand(hit):
             continue
         out = out_dir / f"pixabay_{hit['id']}.jpg"
         if not out.exists():

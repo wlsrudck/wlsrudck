@@ -141,6 +141,26 @@ def bump_today():
     STATE.write_text(json.dumps({"date": dt.date.today().isoformat(), "count": posted_today() + 1}))
 
 
+def load_config() -> dict:
+    """config.toml을 읽는다. 같은 [칸]이 두 번 들어가 있으면(붙여넣다 겹친 경우) 합쳐서 읽는다."""
+    text = (ROOT / "config.toml").read_text(encoding="utf-8-sig")
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        if "twice" not in str(e):
+            raise
+    cfg: dict = {}
+    for chunk in re.split(r"(?m)^(?=\s*\[)", text):
+        part = tomllib.loads(chunk)  # 칸 하나씩 따로 읽으면 겹쳐도 오류가 안 난다
+        for name, values in part.items():
+            if isinstance(values, dict):
+                cfg.setdefault(name, {}).update(values)
+            else:
+                cfg[name] = values
+    print("⚠ config.toml에 같은 칸([naver] 등)이 두 번 들어 있어요. 뒤쪽 값을 씁니다. 겹친 부분은 지워 주세요.")
+    return cfg
+
+
 def sleep_minutes(rng, label):
     minutes = random.uniform(*rng)
     print(f"{label}: {minutes:.0f}분 대기")
@@ -154,7 +174,7 @@ def main():
     ap.add_argument("--make-folders", action="store_true")
     args = ap.parse_args()
 
-    cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8-sig"))
+    cfg = load_config()
     pub = cfg["publish"]
 
     rows = load_rows()

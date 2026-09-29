@@ -142,10 +142,16 @@ def make_metrics_card(metrics: list, basis: str, out: Path, seed: str, brand: st
     th = min(280, (1080 - top - bottom - gap * (rows - 1)) // rows)
     top += (1080 - bottom - top - (th * rows + gap * (rows - 1))) // 2  # 타일 묶음을 세로 가운데로
     pad = 36
-    # 숫자 크기는 모든 타일에서 같게: 가장 긴 숫자가 칸에 들어가는 크기
+    # 숫자 크기는 모든 타일에서 같게. 한 줄에 다 들어가면 크게, 안 되면 두 줄까지 줄여서
+    inner, value_h = tw - pad * 2, th - 175  # 이름(위)과 기준·출처(아래) 사이 공간
     max_size = min(112, int(th * 0.36))
-    size = next((sz for sz in range(max_size, 40, -4)
-                 if all(d.textlength(m.value, font=_font(sz)) <= tw - pad * 2 for m in metrics)), 40)
+
+    def fits(sz, max_lines):
+        f = _font(sz)
+        return all(len(_wrap(d, m.value, f, inner)) <= max_lines for m in metrics) and sz * 1.2 * max_lines <= value_h + sz * 0.2
+
+    size = next((sz for sz in range(max_size, 60, -4) if fits(sz, 1)), None) \
+        or next((sz for sz in range(64, 38, -2) if fits(sz, 2)), 40)
     for i, m in enumerate(metrics):
         x = left + (i % cols) * (tw + gap)
         y = top + (i // cols) * (th + gap)
@@ -153,7 +159,14 @@ def make_metrics_card(metrics: list, basis: str, out: Path, seed: str, brand: st
         label_font = _font(34)
         d.text((x + pad, y + 50), _wrap(d, m.label, label_font, tw - pad * 2)[0], font=label_font, fill=sub, anchor="lm")
         pending = m.value.strip() == "확인 필요"
-        d.text((x + pad, y + th / 2 + 8), m.value, font=_font(size), fill=muted if pending else ink, anchor="lm")
+        vfont = _font(size)
+        vlines = _wrap(d, m.value, vfont, inner)
+        if len(vlines) > 2:  # 그래도 넘치면 두 번째 줄 끝을 … 로
+            vlines = [vlines[0], vlines[1][:-1] + "…"]
+        line_h = size * 1.2
+        vy = y + 80 + (value_h - line_h * len(vlines)) / 2 + line_h / 2
+        for j, line in enumerate(vlines):
+            d.text((x + pad, vy + j * line_h), line, font=vfont, fill=muted if pending else ink, anchor="lm")
         note_font = _font(27)
         notes = _wrap(d, m.note, note_font, tw - pad * 2)[:2]
         for j, line in enumerate(notes):
@@ -211,12 +224,15 @@ BRAND_TAGS = {
     "facebook", "instagram", "twitter", "youtube", "google", "apple", "iphone", "ipad", "macbook", "samsung",
     "microsoft", "windows", "amazon", "netflix", "universal", "disney", "coca-cola", "coca cola", "pepsi",
     "starbucks", "mcdonalds", "nike", "adidas", "logo", "brand", "whatsapp", "tiktok", "linkedin", "social media",
+    # 국기·기관 문장: 한국 이야기에 외국 기관 사진이 붙으면 오해를 부른다
+    "flag", "emblem", "seal", "coat of arms", "united states", "america", "wall street", "white house", "capitol",
 }
+BRAND_EXACT = {"sec", "usa", "us", "fbi", "irs"}  # 짧은 단어는 다른 단어 속에 섞여 있을 수 있어 태그 전체가 같을 때만
 
 
 def _has_brand(hit: dict) -> bool:
     tags = {t.strip().lower() for t in hit.get("tags", "").split(",")}
-    return any(t in BRAND_TAGS or any(b in t for b in BRAND_TAGS) for t in tags)
+    return any(t in BRAND_EXACT or t in BRAND_TAGS or any(b in t for b in BRAND_TAGS) for t in tags)
 
 
 def pixabay_photo(query: str, api_key: str, out_dir: Path, exclude: set[int]) -> tuple[Path, int] | None:

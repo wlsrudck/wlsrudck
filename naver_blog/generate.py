@@ -25,7 +25,7 @@ class Section(BaseModel):
 
 class Metric(BaseModel):
     label: str = Field(description="지표 이름. 예: 누적 관객, 분배율(최근 1년)")
-    value: str = Field(description="숫자와 단위. 예: 163만 3616명, 13.81%. 조사로 확인 못 했으면 정확히 \"확인 필요\"")
+    value: str = Field(description="숫자와 단위만 짧게(12자 이내). 예: 163만 3616명, 13.81%, 4~6배. 조건·설명은 note에. 조사로 확인 못 했으면 정확히 \"확인 필요\"")
     note: str = Field(description="기준·출처 한 줄. 예: 9월 28일 영화진흥위원회. 확인 필요면 어디서 확인하는지")
 
     @property
@@ -43,7 +43,7 @@ class Post(BaseModel):
     intro: list[str] = Field(description="세 줄 도입. 정확히 3개: 궁금증과 맞닿은 장면/질문, 확인 가능한 핵심 사실, 이 글에서 얻을 답")
     pull_quote: str = Field(description="짧은 호흡 문체에서 도입 뒤에 크게 뽑아 보여줄 한 줄(20자 안팎). 정리형 문체면 빈 문자열")
     thumbnail_text: list[str] = Field(description="썸네일에 크게 넣을 짧은 문구 1~2줄. 각 줄 12자 이내")
-    thumbnail_query: str = Field(description="썸네일 배경 사진을 찾을 영어 검색어 2~4단어. 주제를 한눈에 보여주는 장소·사물. 사람·로고 제외")
+    thumbnail_query: str = Field(description="썸네일 배경 사진을 찾을 영어 검색어 2~4단어. 주제를 한눈에 보여주는 장소·사물. 사람·로고·국기·기관 문장(紋章) 제외")
     sections: list[Section]
     tags: list[str] = Field(description="해시태그 5~10개, '#' 없이")
     summary: list[str] = Field(description="글 핵심 요약 3~4개. 각 20자 이내")
@@ -197,6 +197,7 @@ SYSTEM = """당신은 네이버 블로그 글을 쓰는 작가입니다. 자연�
 - 사진을 배치하지 않은 소제목에는 무료 사진 사이트에서 찾을 영어 검색어(stock_query)를 적습니다.
   소제목 내용을 눈으로 보여주는 구체적인 사물이나 장면으로. 예: 월세 → "apartment keys rent", 세금 → "calculator tax form".
   상표·로고·앱 화면이 찍힐 만한 검색어(social media, smartphone app, cinema screen 등)는 피합니다.
+  국기, 정부·기관 문장이나 건물(특히 외국 기관)은 한국 이야기와 헷갈리게 하니 검색하지 않습니다.
   사람이 나오는 장면(선수, 인물의 동작)은 검색하지 않습니다. 글의 주인공으로 오해받을 수 있으니 물건·장소 위주로.
   나이, 조건, 기간, 절차, 인물 소개처럼 사진으로 표현하기 어려운 소제목은 빈 문자열. 엉뚱한 사진보다 없는 편이 낫습니다.
   이 사진은 작성자가 찍은 게 아니므로 본문에서 언급하지 않습니다."""
@@ -346,6 +347,8 @@ SITE_NAMES = {
     "nts.go.kr": "국세청", "hometax.go.kr": "홈택스", "nps.or.kr": "국민연금공단", "nhis.or.kr": "국민건강보험공단",
     "work24.go.kr": "고용24", "youthcenter.go.kr": "온통청년", "applyhome.co.kr": "청약홈", "fss.or.kr": "금융감독원",
     "fsc.go.kr": "금융위원회", "bok.or.kr": "한국은행", "kosis.kr": "국가통계포털", "kdic.or.kr": "예금보험공사",
+    "moj.go.kr": "법무부", "law.go.kr": "국가법령정보센터", "scourt.go.kr": "대법원", "casenote.kr": "케이스노트",
+    "krx.co.kr": "한국거래소", "dart.fss.or.kr": "전자공시 DART", "ftc.go.kr": "공정거래위원회",
     "yna.co.kr": "연합뉴스", "news.naver.com": "네이버 뉴스", "wikipedia.org": "위키백과",
     "olympics.com": "올림픽 공식 홈페이지", "worldathletics.org": "월드아슬레틱스", "kaaf.or.kr": "대한육상연맹",
     "imbc.com": "MBC", "kbs.co.kr": "KBS", "sbs.co.kr": "SBS", "ytn.co.kr": "YTN", "jtbc.co.kr": "JTBC",

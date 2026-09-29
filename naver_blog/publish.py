@@ -123,9 +123,12 @@ def _write_blocks(page: Page, editor, blocks) -> int:
     if typed < expected * 0.8:
         raise RuntimeError(f"본문 입력 실패: {expected}자 중 {typed}자만 들어감")
 
-    # 뒤에서부터 넣어야 같은 자리에 들어가는 사진끼리 순서가 뒤집히지 않는다
+    # 뒤에서부터 넣어야 같은 자리에 들어가는 사진끼리 순서가 뒤집히지 않는다.
+    # 단, 네이버는 처음 올린 사진을 대표 사진으로 잡으므로 맨 앞 사진(썸네일)만 먼저 올린다.
+    # (썸네일은 도입 끝줄에 붙고 다른 사진과 자리가 겹치지 않아 순서가 꼬이지 않는다)
+    order = photos[:1] + list(reversed(photos[1:]))
     done = 0
-    for photo, anchor in reversed(photos):
+    for photo, anchor in order:
         try:
             _insert_photo_after(page, editor, photo, anchor or first_line)
             done += 1

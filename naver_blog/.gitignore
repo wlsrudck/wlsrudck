@@ -6,3 +6,8 @@ photos/
 pixabay_key.txt
 run_log.txt
 naver_keys.txt
+music/*.mp3
+music/*.m4a
+music/*.wav
+music/*.ogg
+music/*.aac

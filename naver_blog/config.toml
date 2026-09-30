@@ -52,3 +52,5 @@ voice = "ko-KR-SunHiNeural"
 speed = "+15%"
 # 인터넷 음성이 안 될 때 쓰는 윈도우 기본 목소리 빠르기 (보통 180~250)
 voice_rate = 220
+# music 폴더에 넣은 배경음악 크기 (0.05 아주 작게 ~ 0.25 크게)
+music_volume = 0.12

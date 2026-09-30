@@ -268,3 +268,25 @@ def pixabay_photo(query: str, api_key: str, out_dir: Path, exclude: set[int]) ->
                 out.write_bytes(r.read())
         return out, hit["id"]
     return None
+
+
+def pixabay_video(query: str, api_key: str, out_dir: Path, exclude: set[int]) -> tuple[Path, int] | None:
+    """클립 배경으로 쓸 무료 동영상 하나를 내려받는다. 너무 큰 4K는 피하고 가로 1280~1920을 고른다. 없으면 None."""
+    url = "https://pixabay.com/api/videos/?" + urllib.parse.urlencode({
+        "key": api_key, "q": query, "safesearch": "true", "per_page": 20,
+    })
+    with _get(url, 20) as r:
+        hits = json.load(r).get("hits", [])
+    for hit in hits:
+        if hit["id"] in exclude or _has_brand(hit) or _has_crime(hit, query) or hit.get("duration", 0) < 4:
+            continue
+        rends = sorted((v for v in hit.get("videos", {}).values() if v.get("url")), key=lambda v: v.get("width", 0))
+        pick = next((v for v in rends if v.get("width", 0) >= 1280), rends[-1] if rends else None)
+        if not pick:
+            continue
+        out = out_dir / f"pixabay_v_{hit['id']}.mp4"
+        if not out.exists():
+            with _get(pick["url"], 120) as r:
+                out.write_bytes(r.read())
+        return out, hit["id"]
+    return None

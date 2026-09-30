@@ -141,10 +141,10 @@ def load_rows():
     # 쉼표 없이 `키워드 "메모"` 로 적은 줄은 `키워드,"메모"` 로 고쳐 읽는다
     text = re.sub(r'(?m)^([^",\n]+?)[ \t]+(".*")[ \t]*$', r"\1,\2", text.replace("\r\n", "\n"))
     lines = [r for r in csv.reader(io.StringIO(text, newline="")) if r and r[0].strip()]
-    if lines and lines[0][0].strip().lower() == "keyword":
+    if lines and lines[0][0].strip().lower() == "keyword":  # 칸 이름 줄: keyword,memo,status,category
         lines = lines[1:]
-    return [{"keyword": r[0].strip(), "memo": r[1] if len(r) > 1 else "", "status": r[2] if len(r) > 2 else ""}
-            for r in lines]
+    return [{"keyword": r[0].strip(), "memo": r[1] if len(r) > 1 else "", "status": r[2] if len(r) > 2 else "",
+             "category": r[3].strip() if len(r) > 3 else ""} for r in lines]
 
 
 def mark_done(keyword: str, status: str) -> None:
@@ -160,7 +160,7 @@ def mark_done(keyword: str, status: str) -> None:
 
 def save_rows(rows):
     with KEYWORDS.open("w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["keyword", "memo", "status"])
+        w = csv.DictWriter(f, fieldnames=["keyword", "memo", "status", "category"], restval="", extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
 
@@ -349,8 +349,9 @@ def main():
 
         from publish import post_to_naver  # dry-run에서는 playwright 없이도 동작하도록
 
+        category = (row.get("category") or cfg["naver"].get("category", "")).strip()
         post_to_naver(post, photos, media, cfg["naver"]["blog_id"], pub["auto_publish"], pub["headless"], OUTPUT,
-                      cfg.get("style"))
+                      cfg.get("style"), category)
         mark_done(keyword, f"{'published' if pub['auto_publish'] else 'draft'} {dt.datetime.now():%Y-%m-%d %H:%M}")
         bump_today()
         print(f"  {'발행' if pub['auto_publish'] else '임시저장'} 완료")

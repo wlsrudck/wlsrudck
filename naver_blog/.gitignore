@@ -12,3 +12,4 @@ music/*.wav
 music/*.ogg
 music/*.aac
 used_media.json
+categories.json

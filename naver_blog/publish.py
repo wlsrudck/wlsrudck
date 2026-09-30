@@ -626,10 +626,83 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screens
     return done
 
 
-def _open_write_page(page, blog_id: str) -> None:
+CATEGORY_CACHE = Path(__file__).parent / "categories.json"
+
+
+def _norm_cat(name: str) -> str:
+    """카테고리 이름 비교용: 글 개수 (28), 띄어쓰기, 가운뎃점·쉼표 모양 차이를 없앤다"""
+    name = re.sub(r"\(\d+\)\s*$", "", name or "")
+    return re.sub(r"[\s·・•.,/_\-]", "", name).lower()
+
+
+def _find_categories(page, blog_id: str) -> dict[str, int]:
+    """내 블로그 카테고리 {이름: 번호}. 모바일 카테고리 목록을 먼저 읽고, 안 되면 PC 글 목록 화면의 링크에서 찾는다"""
+    import json
+    found: dict[str, int] = {}
+
+    def walk(o):
+        if isinstance(o, dict):
+            no, name = o.get("categoryNo"), o.get("categoryName")
+            if isinstance(no, int) and isinstance(name, str) and name.strip():
+                found[name.strip()] = no
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    try:
+        r = page.request.get(f"https://m.blog.naver.com/api/blogs/{blog_id}/category-list",
+                             headers={"Referer": f"https://m.blog.naver.com/{blog_id}"}, timeout=20000)
+        if r.ok:
+            walk(json.loads(r.text()))
+    except Exception:
+        pass
+    if not found:
+        try:
+            page.goto(f"https://blog.naver.com/PostList.naver?blogId={blog_id}&categoryNo=0&from=postList",
+                      wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(2500)
+            for f in page.frames:
+                for href, text in f.evaluate("""() => [...document.querySelectorAll('a[href*="categoryNo="]')]
+                        .map(a => [a.getAttribute('href'), (a.innerText || '').trim()])"""):
+                    m = re.search(r"categoryNo=(\d+)", href or "")
+                    name = re.sub(r"\(\d+\)\s*$", "", text).strip()
+                    if m and name and int(m.group(1)) > 0:
+                        found.setdefault(name, int(m.group(1)))
+        except Exception:
+            pass
+    return found
+
+
+def _category_no(page, blog_id: str, name: str) -> int | None:
+    """카테고리 이름 → 번호. 한 번 찾은 목록은 categories.json에 저장해 두고, 없는 이름이면 다시 찾는다"""
+    import json
+    if not name:
+        return None
+    try:
+        cats = json.loads(CATEGORY_CACHE.read_text(encoding="utf-8"))
+    except Exception:
+        cats = {}
+    want = _norm_cat(name)
+    hit = next((no for n, no in cats.items() if _norm_cat(n) == want), None)
+    if hit is None:
+        cats = _find_categories(page, blog_id) or cats
+        if cats:
+            CATEGORY_CACHE.write_text(json.dumps(cats, ensure_ascii=False, indent=1), encoding="utf-8")
+        hit = next((no for n, no in cats.items() if _norm_cat(n) == want), None)
+        if hit is None:  # 하위 카테고리 이름 일부만 적은 경우 (예: "연예" → "연예·이슈 기록")
+            part = [no for n, no in cats.items() if want and want in _norm_cat(n)]
+            hit = part[0] if len(part) == 1 else None
+    if hit is None:
+        names = ", ".join(cats) if cats else "목록을 읽지 못함"
+        print(f"  ⚠ 카테고리 '{name}'를 찾지 못해 기본 카테고리로 저장해요. (내 카테고리: {names})")
+    return hit
+
+
+def _open_write_page(page, blog_id: str, category_no: int | None = None) -> None:
     """글쓰기 화면 열기. 네이버는 광고·통계 연결이 계속 오가서 '조용해질 때까지' 기다리면 시간 초과가 나므로,
     화면 뼈대만 뜨면 넘어가고 편집기는 뒤에서 따로 기다린다. 인터넷이 느릴 때를 위해 한 번 더 시도한다."""
-    url = f"https://blog.naver.com/{blog_id}?Redirect=Write&"
+    url = f"https://blog.naver.com/{blog_id}?Redirect=Write&" + (f"categoryNo={category_no}" if category_no else "")
     for attempt in range(2):
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
@@ -645,7 +718,7 @@ def _open_write_page(page, blog_id: str) -> None:
 
 
 def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, auto_publish: bool, headless: bool,
-                  screenshot_dir: Path, style: dict | None = None):
+                  screenshot_dir: Path, style: dict | None = None, category: str = ""):
     if not STATE_PATH.exists():
         raise LoginRequired("auth/state.json이 없습니다. 먼저 `python login.py`를 실행하세요.")
 
@@ -654,7 +727,10 @@ def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, aut
         context = browser.new_context(storage_state=str(STATE_PATH), locale="ko-KR")
         page = context.new_page()
         try:
-            _open_write_page(page, blog_id)
+            cat_no = _category_no(page, blog_id, category)
+            if cat_no:
+                print(f"  카테고리: {category} (번호 {cat_no})")
+            _open_write_page(page, blog_id, cat_no)
             if "nid.naver.com" in page.url:
                 raise LoginRequired("로그인 세션이 만료되었습니다. `python login.py`를 다시 실행하세요.")
 

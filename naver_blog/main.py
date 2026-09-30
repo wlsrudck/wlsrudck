@@ -10,6 +10,7 @@
 import argparse
 import csv
 import datetime as dt
+import io
 import json
 import random
 import re
@@ -131,8 +132,13 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
 
 def load_rows():
     """첫 줄의 칸 이름(keyword,memo,status)이 지워져 있어도 읽는다."""
-    with KEYWORDS.open(encoding="utf-8-sig", newline="") as f:
-        lines = [r for r in csv.reader(f) if r and r[0].strip()]
+    # 엑셀로 저장하면 한글 인코딩(cp949)으로 바뀌는 경우가 있어 둘 다 읽는다
+    raw = KEYWORDS.read_bytes()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("cp949")
+    lines = [r for r in csv.reader(io.StringIO(text, newline="")) if r and r[0].strip()]
     if lines and lines[0][0].strip().lower() == "keyword":
         lines = lines[1:]
     return [{"keyword": r[0].strip(), "memo": r[1] if len(r) > 1 else "", "status": r[2] if len(r) > 2 else ""}

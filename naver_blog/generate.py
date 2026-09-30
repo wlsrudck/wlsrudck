@@ -29,7 +29,8 @@ class Section(BaseModel):
 TEXT_STYLE = {"heading_size": 24, "heading_color": "#00756a", "q_color": "#00756a", "a_color": "#666666",
               "intro_color": "#777777", "intro_bold": True, "quote_style": "포스트잇",
               "key_color": "#d9480f", "key_underline": True,
-              "divider_style": 3, "heading_box": "버티컬 라인"}
+              "divider_style": 3, "heading_box": "버티컬 라인",
+              "toc_title_size": 19, "toc_color": "#555555", "quote_size": 19}
 
 
 def is_qa(text: str) -> bool:
@@ -54,7 +55,8 @@ class QA(BaseModel):
 class Post(BaseModel):
     title: str
     intro: list[str] = Field(description="세 줄 도입. 정확히 3개: 궁금증과 맞닿은 장면/질문, 확인 가능한 핵심 사실, 이 글에서 얻을 답")
-    pull_quote: str = Field(description="짧은 호흡 문체에서 도입 뒤에 크게 뽑아 보여줄 한 줄(20자 안팎). 정리형 문체면 빈 문자열")
+    pull_quote: str = Field(description="짧은 호흡 문체에서 도입 뒤에 크게 뽑아 보여줄 한 줄(20자 안팎). 제목 되풀이 금지, "
+                                        "핵심 답을 숫자·날짜와 함께. 정리형 문체면 빈 문자열")
     thumbnail_text: list[str] = Field(description="썸네일에 크게 넣을 짧은 문구 1~2줄. 각 줄 12자 이내")
     thumbnail_query: str = Field(description="썸네일 배경 사진을 찾을 영어 검색어 2~4단어. 주제를 한눈에 보여주는 장소·사물. 사람·로고·국기·기관 문장(紋章) 제외")
     sections: list[Section]
@@ -79,7 +81,10 @@ class Post(BaseModel):
 
     def toc(self) -> str:
         items = [s.heading for s in self.sections if s.heading] + (["자주 묻는 질문"] if self.qa else [])
-        lines = [h if re.match(r"\d+\.\s", h) else f"{i}. {h}" for i, h in enumerate(items, 1)]
+        # 본문 소제목(1. 2. 3.)과 글자가 겹치지 않게 ① ② ③ 번호를 쓴다 (에디터에서 목차 줄만 따로 꾸밀 수 있게)
+        circled = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮"
+        lines = [(circled[i] if i < len(circled) else f"{i + 1}.") + " " + re.sub(r"^\d+\.\s*", "", h)
+                 for i, h in enumerate(items)]
         return "목차\n" + "\n".join(lines) if items else ""
 
     def all_text(self) -> str:
@@ -274,7 +279,8 @@ SHORT_VOICE = """
   항목과 항목 사이에는 프로그램이 빈 줄을 넣습니다.
 - 소제목은 번호 없이 짧게 씁니다(프로그램이 1. 2. 3. 번호를 붙입니다). 10~15자 안팎.
 - 도입 세 줄도 짧게 끊어 씁니다. 인사말은 쓰지 않습니다.
-- pull_quote: 글의 핵심을 한 줄로 뽑은 강조 문장. 도입 바로 뒤에 크게 들어갑니다.
+- pull_quote: 도입 바로 뒤에 크게 들어가는 강조 문장. 제목을 되풀이하지 말고, 독자가 가장 궁금한 답을
+  숫자·날짜·금액을 넣어 한 줄로 씁니다. 예: "11월 5일부터, 홈택스에서 미리 확인" (20자 안팎)
 - 딱딱한 설명이 이어지면 사이에 가벼운 한마디(짧은 감탄, 되묻기)를 한두 번 넣어 쉬어 가게 합니다.
   억지 유머, 유행어, 특정 블로거의 말버릇 흉내는 쓰지 않습니다.
 - 대화체(누가 누구에게 말하는 장면)는 작성자 메모에 실제 대화가 있을 때만 씁니다. 없는 대화를 만들지 않습니다.

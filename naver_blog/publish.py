@@ -137,6 +137,11 @@ def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | N
         if line.strip():
             out.append((line.strip(), None, st["intro_color"], bool(st["intro_bold"]), False))
     for kind, value in blocks:
+        if kind == "text" and value.startswith("목차\n"):  # 목차: 제목은 크게+색+굵게, 항목은 차분한 회색
+            label, *items = value.split("\n")
+            out.append((label.strip(), st["toc_title_size"], st["heading_color"], True, False))
+            out += [(it.strip(), None, st["toc_color"], False, False) for it in items if it.strip()]
+    for kind, value in blocks:
         if kind == "heading":
             out.append((value.strip(), st["heading_size"], st["heading_color"], False, False))
         elif kind == "text" and is_qa(value):
@@ -413,10 +418,26 @@ def _save_log(editor, screenshot_dir: Path | None, name: str, log: list):
 
 def _insert_quote_after(page: Page, editor, text: str, anchor: str, style: dict | None, screenshot_dir: Path | None) -> str:
     """anchor 문단 뒤에 인용구(기본 포스트잇)를 넣고 text를 쓴다. 안 되면 굵은 글씨 한 줄로 대신 넣는다."""
-    kind = {**TEXT_STYLE, **(style or {})}["quote_style"]
+    st = {**TEXT_STYLE, **(style or {})}
+    kind = st["quote_style"]
     log = []
     try:
         if _insert_component(page, editor, anchor, "인용구", "quotation", kind, log) and _write_in_component(page, editor, text, anchor, log):
+            # 인용구 안 글자도 크게+색+굵게 (소제목 상자와 같은 방법: 방금 친 글자를 Shift+← 로 선택)
+            try:
+                for pick, arg, css in ((_MARK_SIZE_OPTION, st["quote_size"], "font_size_btn"),
+                                       (_MARK_COLOR_OPTION, st["heading_color"], "font_color_btn")):
+                    for _ in range(len(text)):
+                        page.keyboard.press("Shift+ArrowLeft")
+                    _pick(page, editor, SELECTORS[css], pick, arg, log)
+                    page.keyboard.press("End")
+                for _ in range(len(text)):
+                    page.keyboard.press("Shift+ArrowLeft")
+                page.keyboard.press("Control+B")
+                page.keyboard.press("End")
+            except Exception as e:
+                log.append(f"인용구 글자 꾸미기 오류: {str(e).splitlines()[0]}")
+                page.keyboard.press("Escape")
             return f"{kind} 인용구로 넣음"
     except Exception as e:
         log.append(f"오류: {str(e).splitlines()[0]}")

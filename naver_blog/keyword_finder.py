@@ -89,16 +89,24 @@ def find_candidates(topic: str, cfg: dict, blog: str) -> list[Candidate]:
         messages = messages[:1] + [{"role": "assistant", "content": blocks}]
     notes = "\n".join(b.text for b in blocks if b.type == "text").strip()
 
-    parsed = client.beta.messages.parse(
-        model=cfg["model"], max_tokens=8000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
-        messages=[{"role": "user", "content": prompt + "\n\n조사한 내용과 후보:\n" + notes
-                   + "\n\n위 후보를 정해진 형식으로 20개 정리하세요."}],
-        output_format=Candidates,
-    )
-    if parsed.parsed_output is None:
-        raise RuntimeError("키워드 후보를 정리하지 못했어요.")
+    # 정리 단계도 오래 걸릴 수 있어 스트리밍으로 받는다. 결과는 JSON 글자로 받아 직접 검사한다.
+    ask = (prompt + "\n\n조사한 내용과 후보:\n" + notes + "\n\n위 후보 20개를 아래 JSON 형식으로만 답하세요. 설명 없이 JSON만.\n"
+           '{"items": [{"keyword": "...", "kind": "정보형|해결형|이슈형", "reason": "...", "title": "..."}]}')
+    parsed = None
+    for attempt in range(2):
+        final = _stream_with_retry(client, model=cfg["model"], max_tokens=8000,
+                                   betas=["server-side-fallback-2026-07-01"], fallbacks="default",
+                                   messages=[{"role": "user", "content": ask}])
+        text = "".join(b.text for b in final.content if b.type == "text")
+        start, end = text.find("{"), text.rfind("}")
+        try:
+            parsed = Candidates.model_validate_json(text[start:end + 1])
+            break
+        except Exception:
+            if attempt == 1:
+                raise RuntimeError("키워드 후보를 정리하지 못했어요. 잠시 뒤 다시 실행해 주세요.")
     seen, out = set(), []
-    for c in parsed.parsed_output.items:
+    for c in parsed.items:
         k = " ".join(c.keyword.split())
         if k and k.replace(" ", "") not in seen:
             seen.add(k.replace(" ", ""))

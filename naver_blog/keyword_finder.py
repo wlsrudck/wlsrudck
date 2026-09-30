@@ -19,6 +19,7 @@ import sys
 import time
 import tomllib
 import urllib.parse
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -98,7 +99,8 @@ def find_candidates(topic: str, cfg: dict, blog: str) -> list[Candidate]:
 KEYS_TEMPLATE = """# 네이버 API 키 (비워 두면 검색량·문서 수 없이 후보만 보여 줍니다)
 # 이 파일은 다른 사람에게 보여 주거나 캡처하지 마세요.
 
-# 네이버 개발자센터 > Application > 내 애플리케이션 (사용 API: 검색)
+# 네이버클라우드 콘솔 > Services > NAVER API HUB > 앱 등록 (API: 검색 - 블로그) 의 Client ID / Client Secret
+# (예전 네이버 개발자센터 검색 API 키도 그대로 넣으면 됩니다)
 search_client_id=
 search_client_secret=
 
@@ -129,10 +131,20 @@ def _get_json(url: str, headers: dict) -> dict:
 
 
 def blog_doc_count(keyword: str, keys: dict) -> int:
-    """네이버 블로그 검색 결과 총 문서 수"""
-    url = "https://openapi.naver.com/v1/search/blog.json?" + urllib.parse.urlencode({"query": keyword, "display": 1})
-    data = _get_json(url, {"X-Naver-Client-Id": keys["search_client_id"],
-                           "X-Naver-Client-Secret": keys["search_client_secret"]})
+    """네이버 블로그 검색 결과 총 문서 수.
+    2026년 7월 31일부터 검색 API는 네이버클라우드 NAVER API HUB로 옮겨 갔다. HUB 주소를 먼저 쓰고,
+    예전 개발자센터 키라서 HUB가 거절하면 예전 주소로 한 번 더 시도한다."""
+    query = urllib.parse.urlencode({"query": keyword, "display": 1})
+    try:
+        data = _get_json("https://naverapihub.apigw.ntruss.com/search/v1/blog?" + query,
+                         {"X-NCP-APIGW-API-KEY-ID": keys["search_client_id"],
+                          "X-NCP-APIGW-API-KEY": keys["search_client_secret"]})
+    except urllib.error.HTTPError as e:
+        if e.code not in (401, 403):
+            raise
+        data = _get_json("https://openapi.naver.com/v1/search/blog.json?" + query,
+                         {"X-Naver-Client-Id": keys["search_client_id"],
+                          "X-Naver-Client-Secret": keys["search_client_secret"]})
     return int(data.get("total", 0))
 
 

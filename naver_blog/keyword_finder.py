@@ -57,8 +57,22 @@ FIND_PROMPT = """네이버 블로그 '{blog}'에 쓸 키워드를 찾고 있습�
 - 제목 예시에는 {banned} 같은 광고 단어를 쓰지 마세요."""
 
 
+def _stream_with_retry(client: anthropic.Anthropic, **kwargs):
+    """웹 검색이 들어간 요청은 오래 걸려서, 답을 조금씩 받는 스트리밍으로 연결이 끊기지 않게 한다.
+    그래도 연결이 끊기면 30초 쉬고 두 번 더 시도한다."""
+    for attempt in range(3):
+        try:
+            with client.beta.messages.stream(**kwargs) as stream:
+                return stream.get_final_message()
+        except (anthropic.APIConnectionError, anthropic.APITimeoutError) as e:
+            if attempt == 2:
+                raise RuntimeError("Claude 서버 연결이 계속 끊겨요. 인터넷 연결을 확인하고 잠시 뒤 다시 실행해 주세요.") from e
+            print(f"      연결이 끊겨 30초 뒤 다시 시도합니다 ({attempt + 1}/2)")
+            time.sleep(30)
+
+
 def find_candidates(topic: str, cfg: dict, blog: str) -> list[Candidate]:
-    client = anthropic.Anthropic(api_key=_api_key())
+    client = anthropic.Anthropic(api_key=_api_key(), max_retries=4)
     prompt = FIND_PROMPT.format(blog=blog or "정보 블로그", topic=topic, today=dt.date.today().isoformat(),
                                 banned=", ".join(BANNED_WORDS))
     tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": cfg.get("max_searches", 5),
@@ -66,10 +80,9 @@ def find_candidates(topic: str, cfg: dict, blog: str) -> list[Candidate]:
     messages = [{"role": "user", "content": prompt}]
     blocks = []
     for _ in range(5):  # 검색이 길어지면 pause_turn으로 끊기므로 이어서 요청
-        response = client.beta.messages.create(
-            model=cfg["model"], max_tokens=16000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
-            tools=tools, messages=messages,
-        )
+        response = _stream_with_retry(client, model=cfg["model"], max_tokens=16000,
+                                      betas=["server-side-fallback-2026-07-01"], fallbacks="default",
+                                      tools=tools, messages=messages)
         blocks.extend(response.content)
         if response.stop_reason != "pause_turn":
             break

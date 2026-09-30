@@ -694,6 +694,41 @@ def my_posts(blog_id: str, limit: int = 30) -> list[tuple[str, str]]:
     return out[:limit]
 
 
+def _system(cfg: dict) -> str:
+    short = cfg.get("voice", "short") == "short"
+    return SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else SEARCH) + (SHORT_VOICE if short else "") + STYLE_RULES
+
+
+def polish_saved(post: Post, memo: str, cfg: dict) -> Post:
+    """저장해 둔 글을 다시 쓸 때도(♻) 규칙 점검을 한 번 더 한다: 도입 중복 빼기, 지어낸 경험·금지어·AI 말투 고치기"""
+    dedupe_intro(post)
+    hits, ai_hits = banned_in(post), ai_phrases_in(post)
+    fake = [] if (memo or "").strip() else fake_experience_in(post)
+    if not (hits or ai_hits or fake):
+        return post
+    print(f"  저장해 둔 글에서 고칠 표현 발견({', '.join(hits + ai_hits + fake)}) → 고쳐 쓰는 중")
+    client = anthropic.Anthropic(api_key=_api_key(), max_retries=6)
+    keep = {"links": post.links, "updated": post.updated}
+    res = client.beta.messages.parse(
+        model=cfg["model"], max_tokens=16000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
+        system=_system(cfg),
+        messages=[{"role": "user", "content": (
+            f"작성자 메모: {memo or '(없음)'}\n\n아래 글을 규칙에 맞게 고쳐 같은 형식으로 주세요. 사실·숫자·구성은 그대로 둡니다.\n"
+            + (f"- 광고처럼 보이는 표현: {', '.join(hits)}\n" if hits else "")
+            + (f"- AI 말투: {', '.join(ai_hits)}\n" if ai_hits else "")
+            + (f"- 메모에 없는데 글쓴이가 직접 겪은 것처럼 쓴 표현: {', '.join(fake)} → 독자의 궁금증이나 사실 서술로\n"
+               if fake else "")
+            + "\n" + post.model_dump_json())}],
+        output_format=Post,
+    )
+    if res.stop_reason == "end_turn" and res.parsed_output is not None:
+        post = res.parsed_output
+        post.links, post.updated = keep["links"], keep["updated"]
+        dedupe_intro(post)
+        fix_key_lines(post)
+    return post
+
+
 def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
                   mine: list[tuple[str, str]] = (), next_keyword: str = "") -> Post:
     # 서버가 붐빌 때(529) 조금씩 더 기다리며 여러 번 다시 시도한다
@@ -712,7 +747,7 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
         raise NotEnoughInfo(miss.group(1).strip() or "핵심 정보")
     notes = re.sub(r"\[핵심답:[^\]]*\]", "", notes).strip()
     short = cfg.get("voice", "short") == "short"
-    system = SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else SEARCH) + (SHORT_VOICE if short else "") + STYLE_RULES
+    system = _system(cfg)
     content = []
     for i, path in enumerate(photos, 1):
         content.append({"type": "text", "text": f"사진 {i}:"})

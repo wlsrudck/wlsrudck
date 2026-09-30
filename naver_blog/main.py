@@ -23,7 +23,7 @@ import urllib.error
 
 import images
 from generate import (NotEnoughInfo, Post, SearchFailed, checklist, choose_photo, find_photos, generate_post,
-                      make_threads, my_posts)
+                      make_threads, my_posts, polish_saved)
 
 ROOT = Path(__file__).parent
 KEYWORDS = ROOT / "keywords.csv"
@@ -286,7 +286,8 @@ def main():
                 # 오늘 이미 써 둔 글(창을 닫아 중간에 멈춘 경우 등)은 다시 쓰지 않고 그대로 네이버에 넣는다
                 post = Post.load(json.loads(saved_json.read_text(encoding="utf-8"))["post"])
                 reused = True
-                print("  ♻ 오늘 이미 써 둔 글이 있어서 새로 쓰지 않고 그대로 씁니다 (Claude 비용 없음)")
+                print("  ♻ 오늘 이미 써 둔 글이 있어서 새로 쓰지 않고 그대로 씁니다")
+                post = polish_saved(post, row.get("memo", ""), cfg["writing"])
             else:
                 later = [r["keyword"] for r in pending if r is not row]
                 for attempt in range(3):

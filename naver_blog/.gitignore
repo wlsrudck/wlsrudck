@@ -11,3 +11,4 @@ music/*.m4a
 music/*.wav
 music/*.ogg
 music/*.aac
+used_media.json

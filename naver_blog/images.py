@@ -251,6 +251,41 @@ def _has_brand(hit: dict) -> bool:
     return any(t in BRAND_EXACT or t in BRAND_TAGS or any(b in t for b in BRAND_TAGS) for t in tags)
 
 
+# 한 번 쓴 무료 사진·동영상은 다른 글에서 다시 쓰지 않는다 (같은 사진이 여러 글에 반복되면 독창성에 좋지 않다)
+USED_FILE = Path(__file__).parent / "used_media.json"
+
+
+def _used() -> dict:
+    """{"photo": {사진번호: 글이름}, "video": {...}}. 기록 파일이 없으면 output 폴더에 이미 받아 둔 것으로 채운다"""
+    try:
+        return json.loads(USED_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    used = {"photo": {}, "video": {}}
+    out = Path(__file__).parent / "output"
+    for folder in out.glob("*_images") if out.exists() else []:
+        slug = folder.name.removesuffix("_images")
+        for f in folder.glob("pixabay_*"):
+            kind, pid = ("video", f.stem[len("pixabay_v_"):]) if f.stem.startswith("pixabay_v_") else ("photo", f.stem[len("pixabay_"):])
+            if pid.isdigit():
+                used[kind].setdefault(pid, slug)
+    return used
+
+
+def _taken(kind: str, pid: int, out_dir: Path) -> bool:
+    owner = _used()[kind].get(str(pid))
+    return owner is not None and owner != out_dir.name.removesuffix("_images")
+
+
+def _mark_used(kind: str, pid: int, out_dir: Path) -> None:
+    used = _used()
+    used[kind].setdefault(str(pid), out_dir.name.removesuffix("_images"))
+    try:
+        USED_FILE.write_text(json.dumps(used, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def pixabay_photo(query: str, api_key: str, out_dir: Path, exclude: set[int]) -> tuple[Path, int] | None:
     """검색 결과 중 아직 안 쓴 사진 하나를 내려받는다. 없으면 None."""
     url = "https://pixabay.com/api/?" + urllib.parse.urlencode({
@@ -260,12 +295,13 @@ def pixabay_photo(query: str, api_key: str, out_dir: Path, exclude: set[int]) ->
     with _get(url, 20) as r:
         hits = json.load(r).get("hits", [])
     for hit in hits:
-        if hit["id"] in exclude or _has_brand(hit) or _has_crime(hit, query):
+        if hit["id"] in exclude or _has_brand(hit) or _has_crime(hit, query) or _taken("photo", hit["id"], out_dir):
             continue
         out = out_dir / f"pixabay_{hit['id']}.jpg"
         if not out.exists():
             with _get(hit["largeImageURL"], 60) as r:
                 out.write_bytes(r.read())
+        _mark_used("photo", hit["id"], out_dir)
         return out, hit["id"]
     return None
 
@@ -278,7 +314,8 @@ def pixabay_video(query: str, api_key: str, out_dir: Path, exclude: set[int]) ->
     with _get(url, 20) as r:
         hits = json.load(r).get("hits", [])
     for hit in hits:
-        if hit["id"] in exclude or _has_brand(hit) or _has_crime(hit, query) or hit.get("duration", 0) < 4:
+        if hit["id"] in exclude or _has_brand(hit) or _has_crime(hit, query) or hit.get("duration", 0) < 4 \
+                or _taken("video", hit["id"], out_dir):
             continue
         rends = sorted((v for v in hit.get("videos", {}).values() if v.get("url")), key=lambda v: v.get("width", 0))
         pick = next((v for v in rends if v.get("width", 0) >= 1280), rends[-1] if rends else None)
@@ -288,5 +325,6 @@ def pixabay_video(query: str, api_key: str, out_dir: Path, exclude: set[int]) ->
         if not out.exists():
             with _get(pick["url"], 120) as r:
                 out.write_bytes(r.read())
+        _mark_used("video", hit["id"], out_dir)
         return out, hit["id"]
     return None

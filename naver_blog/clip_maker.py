@@ -275,7 +275,7 @@ def _srt_time(t: float) -> str:
 
 def load_saved(path: Path) -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
-    data["post"] = Post.model_validate(data["post"])
+    data["post"] = Post.load(data["post"])
     return data
 
 

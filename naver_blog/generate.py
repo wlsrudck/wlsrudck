@@ -12,6 +12,7 @@ from pathlib import Path
 import anthropic
 from PIL import Image, ImageOps
 from pydantic import BaseModel, Field
+from pydantic.json_schema import SkipJsonSchema
 
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
@@ -70,13 +71,20 @@ class Post(BaseModel):
     answer_found: bool = Field(description="제목이 약속한 핵심 답(예: 실제 일정, 금액, 조건)을 조사 자료에서 찾아 본문에 담았으면 true")
     missing: str = Field(description="answer_found가 false면 무엇을 못 찾았는지 한 문장. true면 빈 문자열")
     sources: list[str] = Field(description="참고한 출처 URL. 조사 자료에 있는 URL만, 없으면 빈 목록")
-    closing: list[str] = Field(default=[], description="마무리 3문장: ①독자 상황에 공감하며 도움이 됐다면 공감 부탁 "
+    closing: list[str] = Field(description="마무리 3문장: ①독자 상황에 공감하며 도움이 됐다면 공감 부탁 "
                                                         "②비슷한 정보를 이어서 정리한다는 이웃 추가 안내 ③댓글로 상황·질문을 남기게 하는 참여 유도. "
                                                         "매번 다른 표현으로, 과장 없이")
-    next_teaser: str = Field(default="", description="'다음 글 주제'가 주어졌을 때만 그 글을 예고하는 한 문장. 날짜 약속 없이. 없으면 빈 문자열")
-    related: list[int] = Field(default=[], description="'내 블로그의 다른 글' 목록에서 이 글과 관련 있는 글 번호(최대 5개). 목록이 없거나 관련 글이 없으면 빈 목록")
-    links: list[str] = Field(default=[], description="비워 두세요 (프로그램이 채웁니다)")
-    updated: str = Field(default="", description="비워 두세요 (프로그램이 채웁니다)")
+    next_teaser: str = Field(description="'다음 글 주제'가 주어졌을 때만 그 글을 예고하는 한 문장. 날짜 약속 없이. 없으면 빈 문자열")
+    related: list[int] = Field(description="'내 블로그의 다른 글' 목록에서 이 글과 관련 있는 글 번호(최대 5개). 목록이 없거나 관련 글이 없으면 빈 목록")
+    # 아래 둘은 프로그램이 채운다 (Claude에게 보내는 답 형식에서는 빠진다)
+    links: SkipJsonSchema[list[str]] = []
+    updated: SkipJsonSchema[str] = ""
+
+    @classmethod
+    def load(cls, data: dict) -> "Post":
+        """저장해 둔 글 불러오기 (예전 버전에서 저장해 새 칸이 없는 글도 읽히게)"""
+        data = {"closing": [], "next_teaser": "", "related": [], **data}
+        return cls.model_validate(data)
 
     def body_text(self) -> str:
         parts = list(self.intro)

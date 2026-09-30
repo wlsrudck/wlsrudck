@@ -190,6 +190,25 @@ def load_config() -> dict:
     return cfg
 
 
+def explain_error(e: Exception) -> str:
+    """오류를 한 줄로: 무슨 오류인지 + 흔한 경우의 해결 방법"""
+    import anthropic
+    msg = str(getattr(e, "message", "") or e).splitlines()[0][:200]
+    status = getattr(e, "status_code", None)
+    low = msg.lower()
+    if "credit balance" in low:
+        return f"Claude 사용 잔액이 부족해요. console.anthropic.com > Billing에서 충전해 주세요. ({msg})"
+    if status in (529, 503) or "overloaded" in low:
+        return f"Claude 서버가 붐벼요. 몇 분 뒤 다시 실행해 주세요. ({msg})"
+    if status == 429:
+        return f"짧은 시간에 요청이 많았어요. 1~2분 뒤 다시 실행해 주세요. ({msg})"
+    if status in (401, 403):
+        return f"Claude API 키를 확인해 주세요 (api_key.txt). ({msg})"
+    if isinstance(e, anthropic.APIConnectionError):
+        return f"인터넷 연결 문제예요. 연결을 확인하고 다시 실행해 주세요. ({msg})"
+    return f"{type(e).__name__}{f' {status}' if status else ''}: {msg}"
+
+
 def sleep_minutes(rng, label):
     minutes = random.uniform(*rng)
     print(f"{label}: {minutes:.0f}분 대기")
@@ -253,7 +272,7 @@ def main():
         try:
             if saved_json.exists() and not args.dry_run:
                 # 오늘 이미 써 둔 글(창을 닫아 중간에 멈춘 경우 등)은 다시 쓰지 않고 그대로 네이버에 넣는다
-                post = Post.model_validate(json.loads(saved_json.read_text(encoding="utf-8"))["post"])
+                post = Post.load(json.loads(saved_json.read_text(encoding="utf-8"))["post"])
                 reused = True
                 print("  ♻ 오늘 이미 써 둔 글이 있어서 새로 쓰지 않고 그대로 씁니다 (Claude 비용 없음)")
             else:
@@ -269,6 +288,10 @@ def main():
             if not args.dry_run:
                 mark_done(keyword, f"skip 정보부족 {dt.datetime.now():%Y-%m-%d}")
             continue
+        except Exception as e:
+            print(f"  ⚠ 글 생성 중 오류로 멈췄어요: {explain_error(e)}")
+            print("    이 키워드는 그대로 두었어요. 위 문구를 캡처해 보내 주세요.")
+            break
         made += 1
 
         OUTPUT.mkdir(exist_ok=True)

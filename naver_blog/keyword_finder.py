@@ -155,8 +155,9 @@ def _count(value) -> int:
     return 5 if "<" in str(value) else int(str(value).replace(",", "") or 0)
 
 
-def monthly_volumes(keywords: list[str], keys: dict) -> dict[str, int]:
-    """월간 검색량(PC+모바일). 검색광고 API는 띄어쓰기 없는 키워드로 돌려주므로 띄어쓰기를 뺀 이름으로 맞춘다."""
+def monthly_volumes(keywords: list[str], keys: dict) -> dict[str, tuple[int, str] | None]:
+    """{키워드: (월간 검색량 PC+모바일, 광고 경쟁 정도 높음/중간/낮음)}.
+    검색광고 API는 띄어쓰기 없는 키워드로 돌려주므로 띄어쓰기를 뺀 이름으로 맞춘다."""
     out = {}
     uri = "/keywordstool"
     for i in range(0, len(keywords), 5):  # 한 번에 5개까지
@@ -170,17 +171,27 @@ def monthly_volumes(keywords: list[str], keys: dict) -> dict[str, int]:
                                "X-Customer": keys["ad_customer_id"], "X-Signature": sign})
         for row in data.get("keywordList", []):
             name = str(row.get("relKeyword", "")).replace(" ", "").lower()
-            out[name] = _count(row.get("monthlyPcQcCnt", 0)) + _count(row.get("monthlyMobileQcCnt", 0))
+            out[name] = (_count(row.get("monthlyPcQcCnt", 0)) + _count(row.get("monthlyMobileQcCnt", 0)),
+                         str(row.get("compIdx", "")).strip())
         time.sleep(0.3)
     return {k: out.get(k.replace(" ", "").lower()) for k in keywords}
 
 
-def grade(volume: int | None, docs: int | None) -> str:
-    """검색량이 제법 있고(수요) 문서가 적을수록(공급 부족) 좋은 키워드"""
-    if volume is None or docs is None:
+def grade(volume: int | None, docs: int | None, comp: str = "") -> str:
+    """검색량이 제법 있고(수요) 문서가 적을수록(공급 부족) 좋은 키워드.
+    문서 수가 없으면(검색 API 키 없음) 검색광고의 경쟁 정도(높음/중간/낮음)로 대신 판단한다."""
+    if volume is None:
         return "?"
     if volume < 100:
         return "C"  # 검색하는 사람이 거의 없음
+    if docs is None:
+        if not comp:
+            return "?"
+        if volume >= 500 and comp == "낮음":
+            return "S"
+        if volume >= 300 and comp in ("낮음", "중간"):
+            return "A"
+        return "B" if comp != "높음" else "C"
     ratio = docs / volume  # 검색 1건당 문서 수. 낮을수록 빈틈
     if volume >= 500 and ratio < 1:
         return "S"
@@ -193,18 +204,21 @@ def grade(volume: int | None, docs: int | None) -> str:
 
 # ── 결과 표 ─────────────────────────────────────────────────────
 
-def to_html(topic: str, rows: list[dict], has_numbers: bool) -> str:
+def to_html(topic: str, rows: list[dict], has_numbers: str) -> str:
     color = {"S": "#00756a", "A": "#2f9e44", "B": "#e8a200", "C": "#999", "?": "#999"}
     body = "".join(
         f'<tr><td>{i}</td><td><b style="color:{color[r["grade"]]}">{r["grade"]}</b></td>'
         f'<td><b>{html.escape(r["keyword"])}</b><br><small>{html.escape(r["kind"])}</small></td>'
         f'<td>{"" if r["volume"] is None else format(r["volume"], ",")}</td>'
-        f'<td>{"" if r["docs"] is None else format(r["docs"], ",")}</td>'
+        f'<td>{"" if r["docs"] is None else format(r["docs"], ",")}</td><td>{html.escape(r["comp"])}</td>'
         f'<td>{html.escape(r["title"])}<br><small>{html.escape(r["reason"])}</small></td></tr>'
         for i, r in enumerate(rows, 1))
-    note = ("등급: S = 검색 500회 이상 + 검색 1회당 문서 1개 미만, A = 300회 이상 + 3개 미만, "
-            "B = 10개 미만, C = 검색이 적거나 경쟁이 심함" if has_numbers else
-            "naver_keys.txt가 없어 검색량·문서 수를 붙이지 못했어요. 숫자 없이 후보만 보여 줍니다.")
+    note = {"docs": "등급: S = 검색 500회 이상 + 검색 1회당 문서 1개 미만, A = 300회 이상 + 3개 미만, "
+                    "B = 10개 미만, C = 검색이 적거나 경쟁이 심함",
+            "comp": "등급: 문서 수 대신 검색광고의 경쟁 정도로 판단. S = 검색 500회 이상 + 경쟁 낮음, "
+                    "A = 300회 이상 + 경쟁 낮음·중간, B = 경쟁 중간 이하, C = 검색이 적거나 경쟁 높음. "
+                    "경쟁 정도는 광고 입찰 기준이라 블로그 경쟁과 완전히 같지는 않아요.",
+            "": "naver_keys.txt에 키가 없어 검색량을 붙이지 못했어요. 숫자 없이 후보만 보여 줍니다."}[has_numbers]
     return f"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>키워드 추천 - {html.escape(topic)}</title>
 <style>
@@ -214,7 +228,7 @@ th{{background:#f6f8fa}} small{{color:#777}} .note{{color:#555;font-size:13px}}
 </style>
 <h1>키워드 추천: {html.escape(topic)}</h1>
 <p class="note">{dt.datetime.now():%Y-%m-%d %H:%M} · {note}</p>
-<table><tr><th>번호</th><th>등급</th><th>키워드</th><th>월 검색량</th><th>블로그 문서 수</th><th>제목 예시 / 이유</th></tr>{body}</table>
+<table><tr><th>번호</th><th>등급</th><th>키워드</th><th>월 검색량</th><th>블로그 문서 수</th><th>경쟁(광고)</th><th>제목 예시 / 이유</th></tr>{body}</table>
 """
 
 
@@ -239,16 +253,20 @@ def main():
     print(f"      후보 {len(cands)}개")
 
     keys = load_keys()
-    need = ["search_client_id", "search_client_secret", "ad_customer_id", "ad_access_license", "ad_secret_key"]
+    ad_keys = ["ad_customer_id", "ad_access_license", "ad_secret_key"]
+    search_keys = ["search_client_id", "search_client_secret"]
+    words = [c.keyword for c in cands]
     volumes, docs = {}, {}
-    has_numbers = all(keys.get(k) for k in need)
-    if has_numbers:
-        print("[2/3] 네이버 검색량·문서 수 확인 중...")
-        words = [c.keyword for c in cands]
+    if all(keys.get(k) for k in ad_keys):
+        print("[2/3] 네이버 검색광고로 월 검색량 확인 중...")
         try:
             volumes = monthly_volumes(words, keys)
         except Exception as e:
-            print(f"      검색량 확인 실패 (검색광고 API 키를 확인하세요): {e}")
+            print(f"      검색량 확인 실패 (naver_keys.txt의 검색광고 API 키를 확인하세요): {e}")
+    else:
+        print("[2/3] naver_keys.txt에 검색광고 API 키가 없어 검색량 없이 진행합니다.")
+    if all(keys.get(k) for k in search_keys):
+        print("      블로그 문서 수 확인 중...")
         for w in words:
             try:
                 docs[w] = blog_doc_count(w, keys)
@@ -256,14 +274,15 @@ def main():
                 print(f"      문서 수 확인 실패 (검색 API 키를 확인하세요): {e}")
                 break
             time.sleep(0.1)
-    else:
-        missing = [k for k in need if not keys.get(k)]
-        print(f"[2/3] naver_keys.txt에 {', '.join(missing)} 값이 없어 숫자 없이 진행합니다.")
+    has_numbers = "docs" if docs else ("comp" if any(volumes.values()) else "")
 
     order = {"S": 0, "A": 1, "B": 2, "?": 3, "C": 4}
-    rows = [{"keyword": c.keyword, "kind": c.kind, "reason": c.reason, "title": c.title,
-             "volume": volumes.get(c.keyword), "docs": docs.get(c.keyword),
-             "grade": grade(volumes.get(c.keyword), docs.get(c.keyword))} for c in cands]
+    rows = []
+    for c in cands:
+        vol, comp = volumes.get(c.keyword) or (None, "")
+        rows.append({"keyword": c.keyword, "kind": c.kind, "reason": c.reason, "title": c.title,
+                     "volume": vol, "docs": docs.get(c.keyword), "comp": comp,
+                     "grade": grade(vol, docs.get(c.keyword), comp)})
     rows.sort(key=lambda r: (order[r["grade"]], -(r["volume"] or 0)))
 
     OUTPUT.mkdir(exist_ok=True)
@@ -272,7 +291,9 @@ def main():
     out.write_text(to_html(topic, rows, has_numbers), encoding="utf-8")
     print(f"[3/3] 결과 표 저장: {out}")
     for i, r in enumerate(rows, 1):
-        nums = f"  검색 {r['volume']:,} / 문서 {r['docs']:,}" if r["volume"] is not None and r["docs"] is not None else ""
+        nums = "" if r["volume"] is None else f"  검색 {r['volume']:,}"
+        nums += "" if r["docs"] is None else f" / 문서 {r['docs']:,}"
+        nums += f" / 경쟁 {r['comp']}" if r["comp"] and r["docs"] is None else ""
         print(f"  {i:2d}. [{r['grade']}] {r['keyword']}{nums}")
 
     default = [r["keyword"] for r in rows if r["grade"] in ("S", "A")]

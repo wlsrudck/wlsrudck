@@ -179,9 +179,16 @@ class Post(BaseModel):
                 body.append(f'<p style="color:{st["intro_color"]};font-weight:{weight}">'
                             + html.escape(value).replace("\n", "<br>") + "</p>")
                 continue
-            if kind == "quote":
-                body.append('<p style="background:#fff8c4;border:1px solid #e8dc8c;padding:18px 22px;margin:24px 40px;'
-                            f'text-align:center;box-shadow:3px 3px 0 #e8dc8c">{html.escape(value)}</p>')
+            if kind == "quote":  # 네이버 '포스트잇' 인용구 모양: 회색 테두리 상자 + 오른쪽 아래 접힌 모서리
+                body.append('<p style="position:relative;background:#f7f7f7;border:3px solid #d6d6d6;padding:26px 30px;'
+                            f'margin:28px 40px;text-align:center;font-size:{st["quote_size"]}px;font-weight:bold;'
+                            f'color:{st["heading_color"]}">{html.escape(value)}'
+                            '<span style="position:absolute;right:-3px;bottom:-3px;border-style:solid;border-width:0 0 36px 36px;'
+                            'border-color:transparent transparent #fff #bdbdbd"></span></p>')
+            elif kind == "text" and value.startswith("목차\n"):
+                label, *items = value.split("\n")
+                body.append(f'<p><b style="font-size:{st["toc_title_size"]}px;color:{st["heading_color"]}">{html.escape(label)}</b><br>'
+                            + "<br>".join(f'<span style="color:{st["toc_color"]}">{html.escape(i)}</span>' for i in items) + "</p>")
             elif kind == "heading":
                 if st.get("divider_style") and not value.startswith("“"):
                     body.append('<hr style="width:60px;border:0;border-top:2px solid #bbb;margin:48px auto 24px">')

@@ -138,6 +138,8 @@ def load_rows():
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
         text = raw.decode("cp949")
+    # 쉼표 없이 `키워드 "메모"` 로 적은 줄은 `키워드,"메모"` 로 고쳐 읽는다
+    text = re.sub(r'(?m)^([^",\n]+?)[ \t]+(".*")[ \t]*$', r"\1,\2", text.replace("\r\n", "\n"))
     lines = [r for r in csv.reader(io.StringIO(text, newline="")) if r and r[0].strip()]
     if lines and lines[0][0].strip().lower() == "keyword":
         lines = lines[1:]

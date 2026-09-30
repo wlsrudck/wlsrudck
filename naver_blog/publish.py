@@ -61,10 +61,11 @@ def _type_lines(page: Page, text: str):
 
 
 # 문단 끝에 커서를 두는 스크립트. 네이버 에디터는 한 줄(Enter)마다 문단 하나를 만든다.
-_CARET_TO_END_OF = """([sel, text]) => {
+_CARET_TO_END_OF = """([sel, text, first]) => {
     const ps = [...document.querySelectorAll(sel)];
-    // 목차 줄과 본문 소제목이 같은 글자일 수 있어 뒤쪽(본문)을 고른다
-    const p = ps.filter(e => e.innerText.trim() === text).pop() || ps.filter(e => e.innerText.includes(text)).pop();
+    // 같은 글자의 문단이 여럿이면 기본은 뒤쪽(목차 줄보다 본문 소제목), first면 앞쪽(도입·목차)
+    const pick = a => first ? a[0] : a.pop();
+    const p = pick(ps.filter(e => e.innerText.trim() === text)) || pick(ps.filter(e => e.innerText.includes(text)));
     if (!p) return false;
     p.scrollIntoView({block: "center"});
     const range = document.createRange();
@@ -124,7 +125,7 @@ _DUMP_BUTTONS = """() => [...document.querySelectorAll("button")].filter(e => e.
     .map(e => (e.className || "") + " | " + (e.innerText || "").trim().slice(0, 20)
          + (e.getAttribute("data-color") ? " | " + e.getAttribute("data-color") : "")).join("\\n")"""
 
-_PARAGRAPH_HTML = "([sel, text]) => { const p = [...document.querySelectorAll(sel)].filter(e => e.innerText.trim() === text).pop(); return p ? p.innerHTML : ''; }"
+_PARAGRAPH_HTML = "([sel, text, first]) => { const a = [...document.querySelectorAll(sel)].filter(e => e.innerText.trim() === text); const p = first ? a[0] : a.pop(); return p ? p.innerHTML : ''; }"
 
 
 def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | None, str, bool, bool]]:
@@ -135,12 +136,12 @@ def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | N
     intro = next((v for k, v in blocks if k == "text"), "")
     for line in intro.split("\n"):
         if line.strip():
-            out.append((line.strip(), None, st["intro_color"], bool(st["intro_bold"]), False))
+            out.append((line.strip(), None, st["intro_color"], bool(st["intro_bold"]), False, True))
     for kind, value in blocks:
         if kind == "text" and value.startswith("목차\n"):  # 목차: 제목은 크게+색+굵게, 항목은 차분한 회색
             label, *items = value.split("\n")
-            out.append((label.strip(), st["toc_title_size"], st["heading_color"], True, False))
-            out += [(it.strip(), None, st["toc_color"], False, False) for it in items if it.strip()]
+            out.append((label.strip(), st["toc_title_size"], st["heading_color"], True, False, True))
+            out += [(it.strip(), None, st["toc_color"], False, False, True) for it in items if it.strip()]
     for kind, value in blocks:
         if kind == "heading":
             out.append((value.strip(), st["heading_size"], st["heading_color"], False, False))
@@ -173,11 +174,11 @@ def _pick(page: Page, editor, button_css: str, mark_js: str, arg, log: list) -> 
 
 # 문단의 마지막 글자 위치(문단 기준 좌표)와 몇 번째 문단인지. 같은 글자의 문단이 여럿이면 뒤쪽.
 # End 키는 '화면에 보이는 줄'의 끝으로 가서, 두 줄 이상으로 접힌 긴 문단(Q&A 답 등)에서는 문단 끝이 아니다.
-_PARAGRAPH_END_POS = """([sel, text]) => {
+_PARAGRAPH_END_POS = """([sel, text, first]) => {
     const ps = [...document.querySelectorAll(sel)];
     let i = -1;
-    ps.forEach((p, k) => { if (p.innerText.trim() === text) i = k; });
-    if (i < 0) ps.forEach((p, k) => { if (p.innerText.includes(text)) i = k; });
+    ps.forEach((p, k) => { if (p.innerText.trim() === text && !(first && i >= 0)) i = k; });
+    if (i < 0) ps.forEach((p, k) => { if (p.innerText.includes(text) && !(first && i >= 0)) i = k; });
     if (i < 0) return null;
     const p = ps[i];
     const r = document.createRange();
@@ -190,23 +191,23 @@ _PARAGRAPH_END_POS = """([sel, text]) => {
 }"""
 
 
-def _click_paragraph_end(page: Page, editor, text: str) -> bool:
+def _click_paragraph_end(page: Page, editor, text: str, first: bool = False) -> bool:
     """문단의 마지막 글자 바로 뒤를 마우스로 클릭해 커서를 둔다 (에디터가 확실히 알아채는 방법)"""
     sel = SELECTORS["body"]
-    pos = editor.evaluate(_PARAGRAPH_END_POS, [sel, text])
+    pos = editor.evaluate(_PARAGRAPH_END_POS, [sel, text, first])
     if not pos:
         return False
     para = editor.locator(sel).nth(pos["i"])
     para.scroll_into_view_if_needed()
     para.click(position={"x": pos["x"], "y": pos["y"]})
-    editor.evaluate(_CARET_TO_END_OF, [sel, text])
+    editor.evaluate(_CARET_TO_END_OF, [sel, text, first])
     page.keyboard.press("End")  # 이제 커서가 마지막 줄에 있으므로 End = 문단 끝
     return True
 
 
-def _select_line(page: Page, editor, text: str) -> bool:
+def _select_line(page: Page, editor, text: str, first: bool = False) -> bool:
     """문단 끝에 커서를 두고 Shift+← 로 글자 수만큼 선택한다. 사람이 드래그한 것처럼 에디터가 선택을 알아챈다"""
-    if not _click_paragraph_end(page, editor, text):
+    if not _click_paragraph_end(page, editor, text, first):
         return False
     for _ in range(len(text)):
         page.keyboard.press("Shift+ArrowLeft")
@@ -229,24 +230,25 @@ def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None =
     실패한 줄은 무엇을 눌렀고 결과가 어땠는지 editor_toolbar.txt에 남긴다(네이버 화면이 달라졌을 때 고치는 용도)."""
     sel = SELECTORS["body"]
     done, log, notes = 0, [], []
-    for i, (text, size, color, bold, underline) in enumerate(targets):
+    for i, (text, size, color, bold, underline, *rest) in enumerate(targets):
+        first = bool(rest and rest[0])  # 도입·목차 줄은 같은 글자가 본문에 또 있어도 앞쪽 문단
         if len(log) >= 2 or (i >= 2 and done == 0):  # 처음 두 줄이 안 되면 나머지도 안 되니 멈춘다
             break
         try:
-            if not _select_line(page, editor, text):
+            if not _select_line(page, editor, text, first):
                 continue
             picked_size = "" if size is None else _pick(page, editor, SELECTORS["font_size_btn"], _MARK_SIZE_OPTION, size, log)
             if size is not None and picked_size:
-                _select_line(page, editor, text)  # 목록을 닫으며 선택이 풀렸을 수 있어 다시 선택
+                _select_line(page, editor, text, first)  # 목록을 닫으며 선택이 풀렸을 수 있어 다시 선택
             picked_color = _pick(page, editor, SELECTORS["font_color_btn"], _MARK_COLOR_OPTION, color, log)
-            if bold and "<b" not in editor.evaluate(_PARAGRAPH_HTML, [sel, text]).lower():
-                _select_line(page, editor, text)
+            if bold and "<b" not in editor.evaluate(_PARAGRAPH_HTML, [sel, text, first]).lower():
+                _select_line(page, editor, text, first)
                 page.keyboard.press("Control+B")
-            if underline and "underline" not in editor.evaluate(_PARAGRAPH_HTML, [sel, text]).lower():
-                _select_line(page, editor, text)
+            if underline and "underline" not in editor.evaluate(_PARAGRAPH_HTML, [sel, text, first]).lower():
+                _select_line(page, editor, text, first)
                 page.keyboard.press("Control+U")
             page.keyboard.press("End")  # 선택 해제
-            after = editor.evaluate(_PARAGRAPH_HTML, [sel, text])
+            after = editor.evaluate(_PARAGRAPH_HTML, [sel, text, first])
             m = re.search(r"#[0-9a-fA-F]{6}", picked_color)
             ok = bool(m) and _styled(after, size, m.group(0))
             done += ok

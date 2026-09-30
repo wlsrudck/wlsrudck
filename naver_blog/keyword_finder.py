@@ -237,8 +237,8 @@ def grade(volume: int | None, docs: int | None, comp: str = "") -> str:
 
 # ── 결과 표 ─────────────────────────────────────────────────────
 
-def to_html(topic: str, rows: list[dict], has_numbers: str) -> str:
-    color = {"S": "#00756a", "A": "#2f9e44", "B": "#e8a200", "C": "#999", "?": "#999"}
+def to_html(topic: str, rows: list[dict], has_numbers: str, season: bool = False) -> str:
+    color = {"S": "#00756a", "A": "#2f9e44", "시즌": "#1c7ed6", "B": "#e8a200", "C": "#999", "?": "#999"}
     body = "".join(
         f'<tr><td>{i}</td><td><b style="color:{color[r["grade"]]}">{r["grade"]}</b></td>'
         f'<td><b>{html.escape(r["keyword"])}</b><br><small>{html.escape(r["kind"])}</small></td>'
@@ -261,6 +261,7 @@ th{{background:#f6f8fa}} small{{color:#777}} .note{{color:#555;font-size:13px}}
 </style>
 <h1>키워드 추천: {html.escape(topic)}</h1>
 <p class="note">{dt.datetime.now():%Y-%m-%d %H:%M} · {note}</p>
+{'<p class="note">시즌 모드: 검색량은 최근 30일 기준이라 시즌이 오기 전에는 낮게 나와요. <b>시즌</b> 표시는 곧 검색이 몰릴 키워드라 지금 써 두면 좋다는 뜻이에요 (피크 2~4주 전 작성 추천).</p>' if season else ''}
 <table><tr><th>번호</th><th>등급</th><th>키워드</th><th>월 검색량</th><th>블로그 문서 수</th><th>경쟁(광고)</th><th>제목 예시 / 이유</th></tr>{body}</table>
 """
 
@@ -275,15 +276,55 @@ def add_to_keywords(chosen: list[str]) -> int:
     return len(new)
 
 
+# 매년 같은 달에 검색이 몰리는 경제·생활 키워드 (시즌 모드의 기본 후보)
+# 설·추석처럼 날짜가 해마다 바뀌는 일정은 웹 검색 단계에서 올해 날짜로 보완한다.
+SEASON = {
+    1: ["연말정산 간소화", "연말정산 부양가족 공제", "자동차세 연납", "설 기차표 예매"],
+    2: ["연말정산 환급일", "연말정산 추가납부", "국가장학금 신청", "설 연휴 병원"],
+    3: ["자동차세 연납 신청", "건강보험료 정산", "법인세 신고", "신학기 교복 지원금"],
+    4: ["건강보험료 정산 환급", "근로장려금 신청 대상", "종합소득세 신고 대상", "봄 이사 비용"],
+    5: ["종합소득세 신고 기간", "근로장려금 신청 기간", "자녀장려금 신청", "종합소득세 환급"],
+    6: ["종합소득세 환급 조회", "재산세 부과 기준", "전기요금 누진제", "여름휴가 항공권"],
+    7: ["재산세 납부 기간", "부가세 확정신고", "전기요금 누진제 완화", "여름 휴가 지원금"],
+    8: ["근로장려금 지급일", "추석 기차표 예매", "2학기 국가장학금", "여름철 전기요금 폭탄"],
+    9: ["재산세 2기 납부", "추석 연휴 병원", "근로장려금 반기 지급", "추석 선물 세트"],
+    10: ["연말정산 미리보기", "국가건강검진 마감", "독감 예방접종", "부가세 예정신고"],
+    11: ["연말정산 미리보기", "종합부동산세 납부", "김장 비용", "수능 끝 할인"],
+    12: ["종합부동산세 납부 기간", "연말정산 준비", "증시휴장일", "연말 세액공제 챙기기"],
+}
+
+
+def season_topic(today: dt.date) -> tuple[str, list[str], str]:
+    """(표 제목, 기본 후보, Claude에게 줄 주제). 지금 달과 다음 달을 본다 (피크 2~4주 전에 써 두기 위해)"""
+    m1, m2 = today.month, today.month % 12 + 1
+    seeds = list(dict.fromkeys(SEASON[m1] + SEASON[m2]))
+    ask = (f"{m1}월~{m2}월에 검색이 몰리는 경제·생활 시즌 이슈. 올해 날짜 기준으로 앞으로 4~6주 안의 "
+           "세금 신고·납부 기한, 지원금 신청·지급일, 연휴·명절, 제도 변경 시행일, 계절 생활비를 찾으세요")
+    return f"{m1}~{m2}월 시즌 키워드", seeds, ask
+
+
 def main():
     cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8-sig"))
     load_keys()  # naver_keys.txt가 없으면 빈 양식을 바로 만들어 둔다
-    topic = " ".join(sys.argv[1:]).strip() or input("큰 주제를 입력하세요 (예: 청년 지원금, 캠핑, 국내주식): ").strip()
-    if not topic:
-        print("주제가 없어 종료합니다.")
-        return
-    print(f"[1/3] '{topic}' 최근 소식 확인하고 후보 뽑는 중... (1~2분)")
-    cands = find_candidates(topic, cfg["writing"], cfg.get("naver", {}).get("blog_name", ""))
+    args = [a for a in sys.argv[1:] if a != "--season"]
+    season = "--season" in sys.argv[1:]
+    topic = " ".join(args).strip()
+    if not topic and not season:
+        topic = input("큰 주제를 입력하세요 (예: 청년 지원금, 캠핑, 국내주식 / 엔터 = 이번 달 시즌 키워드): ").strip()
+        season = not topic or topic == "시즌"
+    blog = cfg.get("naver", {}).get("blog_name", "")
+    if season:
+        topic, seeds, ask = season_topic(dt.date.today())
+        print(f"[1/3] {topic}: 올해 일정 확인하고 후보 뽑는 중... (1~2분)")
+        cands = find_candidates(ask, cfg["writing"], blog)
+        have = {c.keyword.replace(" ", "") for c in cands}
+        for k in seeds:  # 매년 반복되는 기본 후보도 함께 (이미 있으면 건너뜀)
+            if k.replace(" ", "") not in have:
+                cands.append(Candidate(keyword=k, kind="시즌", title="", reason="매년 이 시기에 검색이 몰리는 키워드"))
+                have.add(k.replace(" ", ""))
+    else:
+        print(f"[1/3] '{topic}' 최근 소식 확인하고 후보 뽑는 중... (1~2분)")
+        cands = find_candidates(topic, cfg["writing"], blog)
     print(f"      후보 {len(cands)}개")
 
     keys = load_keys()
@@ -294,7 +335,7 @@ def main():
     if all(keys.get(k) for k in ad_keys):
         print("[2/3] 네이버 검색광고로 월 검색량 확인 중...")
         try:
-            volumes, related = monthly_volumes(words, keys, topic)
+            volumes, related = monthly_volumes(words, keys, "" if season else topic)
             # 실제 검색량이 있는 연관 키워드를 후보에 더한다
             # (검색 300~3만 회: 찾는 사람은 있고 너무 큰 키워드는 아닌 구간, 광고 경쟁 높음 제외, 최대 15개)
             extra = [r for r in related if 300 <= r[1] <= BIG and r[2] != "높음"][:15]
@@ -319,19 +360,22 @@ def main():
             time.sleep(0.1)
     has_numbers = "docs" if docs else ("comp" if any(volumes.values()) else "")
 
-    order = {"S": 0, "A": 1, "B": 2, "?": 3, "C": 4}
+    order = {"S": 0, "A": 1, "시즌": 2, "B": 3, "?": 4, "C": 5}
     rows = []
     for c in cands:
         vol, comp = volumes.get(c.keyword) or (None, "")
+        g = grade(vol, docs.get(c.keyword), comp)
+        # 검색량은 최근 30일 기준이라 시즌 전에는 낮게 나온다 → 시즌 모드에서는 낮은 등급 대신 '시즌'으로 표시
+        if season and g in ("B", "C", "?") and (comp != "높음"):
+            g = "시즌"
         rows.append({"keyword": c.keyword, "kind": c.kind, "reason": c.reason, "title": c.title,
-                     "volume": vol, "docs": docs.get(c.keyword), "comp": comp,
-                     "grade": grade(vol, docs.get(c.keyword), comp)})
+                     "volume": vol, "docs": docs.get(c.keyword), "comp": comp, "grade": g})
     rows.sort(key=lambda r: (order[r["grade"]], -(r["volume"] or 0)))
 
     OUTPUT.mkdir(exist_ok=True)
     safe = "".join(ch if ch.isalnum() else "_" for ch in topic)[:30]
     out = OUTPUT / f"키워드추천_{dt.date.today()}_{safe}.html"
-    out.write_text(to_html(topic, rows, has_numbers), encoding="utf-8")
+    out.write_text(to_html(topic, rows, has_numbers, season), encoding="utf-8")
     print(f"[3/3] 결과 표 저장: {out}")
     for i, r in enumerate(rows, 1):
         nums = "" if r["volume"] is None else f"  검색 {r['volume']:,}"
@@ -339,8 +383,11 @@ def main():
         nums += f" / 경쟁 {r['comp']}" if r["comp"] and r["docs"] is None else ""
         print(f"  {i:2d}. [{r['grade']}] {r['keyword']}{nums}")
 
-    default = [r["keyword"] for r in rows if r["grade"] in ("S", "A")]
-    hint = f"엔터 = S·A 등급 {len(default)}개" if default else "엔터 = 추가 안 함"
+    # 엔터 = S·A 등급 + (시즌 모드면) 지금도 검색이 조금은 있는(월 100회 이상) 시즌 키워드
+    default = [r["keyword"] for r in rows if r["grade"] in ("S", "A")
+               or (season and r["grade"] == "시즌" and (r["volume"] is None or r["volume"] >= 100))]
+    label = "S·A·시즌" if season else "S·A"
+    hint = f"엔터 = {label} 추천 {len(default)}개" if default else "엔터 = 추가 안 함"
     answer = input(f"\nkeywords.csv에 추가할 번호 (예: 1,3,5 / {hint} / 0 = 추가 안 함): ").strip()
     if answer == "0" or (not answer and not default):
         print("추가하지 않았어요.")

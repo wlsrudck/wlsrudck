@@ -6,6 +6,7 @@
 
 import json
 import random
+import re
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -272,11 +273,14 @@ def _off_topic(hit: dict, query: str) -> bool:
     tag_stems = {stem(t) for t in tags}
     if q and not any(stem(w) in tag_stems for w in q):
         return True
-    if tags & GRAPHIC_TAGS and not q & GRAPHIC_TAGS:
-        return True
-    if tags & PEOPLE_TAGS and not q & PEOPLE_TAGS:
-        return True
-    return False
+    return _unsafe(hit, query)
+
+
+def _unsafe(hit: dict, query: str) -> bool:
+    """수술·부상 장면이거나 사람이 주인공인 사진 (검색어가 그걸 찾는 게 아니면)"""
+    q = set(query.lower().split())
+    tags = _tags(hit)
+    return bool(tags & GRAPHIC_TAGS and not q & GRAPHIC_TAGS) or bool(tags & PEOPLE_TAGS and not q & PEOPLE_TAGS)
 
 
 def _has_brand(hit: dict) -> bool:
@@ -363,3 +367,67 @@ def pixabay_video(query: str, api_key: str, out_dir: Path, exclude: set[int]) ->
         _mark_used("video", hit["id"], out_dir)
         return out, hit["id"]
     return None
+
+
+# ── 소제목별 사진 고르기 ───────────────────────────────────────────
+# 검색 결과 여러 장을 후보로 받아(작은 크기), Claude가 소제목 내용에 맞는지 눈으로 보고 고른다.
+# 맞는 게 없으면 소제목 카드 이미지를 만든다 → 소제목마다 관련된 이미지가 반드시 하나 들어간다.
+
+def pixabay_candidates(query: str, api_key: str, out_dir: Path, exclude: set[int], n: int = 6) -> list[dict]:
+    url = "https://pixabay.com/api/?" + urllib.parse.urlencode({
+        "key": api_key, "q": query, "image_type": "photo",
+        "orientation": "horizontal", "safesearch": "true", "per_page": 30,
+    })
+    with _get(url, 20) as r:
+        hits = json.load(r).get("hits", [])
+    return [h for h in hits if h["id"] not in exclude and not _has_brand(h) and not _has_crime(h, query)
+            and not _unsafe(h, query) and not _taken("photo", h["id"], out_dir)][:n]
+
+
+def candidate_preview(hit: dict, folder: Path) -> Path:
+    """후보 사진의 작은 판(640px). 고르기용이라 원본은 아직 받지 않는다"""
+    folder.mkdir(parents=True, exist_ok=True)
+    out = folder / f"cand_{hit['id']}.jpg"
+    if not out.exists():
+        with _get(hit.get("webformatURL") or hit["previewURL"], 30) as r:
+            out.write_bytes(r.read())
+    return out
+
+
+def save_candidate(hit: dict, out_dir: Path) -> Path:
+    out = out_dir / f"pixabay_{hit['id']}.jpg"
+    if not out.exists():
+        with _get(hit["largeImageURL"], 60) as r:
+            out.write_bytes(r.read())
+    _mark_used("photo", hit["id"], out_dir)
+    return out
+
+
+def make_section_card(heading: str, line: str, out: Path, seed: str, brand: str = "") -> Path:
+    """맞는 사진이 없을 때 쓰는 소제목 카드 (썸네일·요약 카드와 같은 톤): 소제목 + 핵심 한 줄"""
+    marker = random.Random(seed).choice(MARKERS)
+    ink, sub, rule = "#16181b", "#4a4e55", "#d9d5cc"
+    im = Image.new("RGB", (1080, 720), "#f6f4ef")
+    d = ImageDraw.Draw(im)
+    heading = re.sub(r"^\d+\.\s*", "", heading).strip()
+    hsize = _fit_size(d, [heading], 920, 84, 48)
+    hl = _wrap(d, heading, _font(hsize), 920)[:2]
+    lines = _wrap(d, line.strip(), _font(44), 900)[:3] if line.strip() else []
+    total = len(hl) * hsize * 1.3 + (40 + len(lines) * 62 if lines else 0)
+    y = (720 - total) / 2
+    for i, l in enumerate(hl):
+        if i == len(hl) - 1:
+            w = d.textlength(l, font=_font(hsize))
+            d.rectangle([72, y + hsize * 0.55, 88 + w, y + hsize * 1.08], fill=marker)
+        d.text((80, y), l, font=_font(hsize), fill=ink)
+        y += hsize * 1.3
+    if lines:
+        y += 40
+        d.line([80, y - 20, 200, y - 20], fill=rule, width=3)
+        for l in lines:
+            d.text((80, y), l, font=_font(44), fill=sub)
+            y += 62
+    if brand:
+        d.text((1000, 670), brand, font=_font(28), fill="#8a8d93", anchor="rm")
+    im.save(out, quality=92)
+    return out

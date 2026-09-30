@@ -13,6 +13,7 @@ import datetime as dt
 import json
 import random
 import re
+import shutil
 import time
 import tomllib
 from pathlib import Path
@@ -20,8 +21,8 @@ from pathlib import Path
 import urllib.error
 
 import images
-from generate import (NotEnoughInfo, Post, SearchFailed, checklist, find_photos, generate_post, make_threads,
-                      my_posts)
+from generate import (NotEnoughInfo, Post, SearchFailed, checklist, choose_photo, find_photos, generate_post,
+                      make_threads, my_posts)
 
 ROOT = Path(__file__).parent
 KEYWORDS = ROOT / "keywords.csv"
@@ -39,7 +40,7 @@ def make_photo_folders(rows) -> None:
         (PHOTOS / slugify(r["keyword"])).mkdir(parents=True, exist_ok=True)
 
 
-def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: str = "") -> dict:
+def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: str = "", writing: dict | None = None) -> dict:
     """썸네일, 지표 카드, 요약 카드, 무료 사진을 만들어 output/<slug>_images/에 저장한다."""
     folder = OUTPUT / f"{slug}_images"
     folder.mkdir(parents=True, exist_ok=True)
@@ -73,31 +74,58 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             except Exception as e:
                 print(f"  썸네일 사진 검색 실패: {e}")
 
+    # 소제목마다 관련 이미지 하나: 직접 찍은 사진 → 무료 사진(후보 여러 장 중 Claude가 내용에 맞는 것만) → 소제목 카드
+    cand_dir = folder / "_candidates"
+    own_used, n_stock, n_card = set(), 0, 0
     for i, s in enumerate(post.sections):
-        if not use_stock or len(media["stock"]) >= cfg.get("max_stock_photos", 3):
-            break
-        if s.photo or not s.stock_query.strip():
+        if not s.heading.strip():
             continue
-        try:
-            found = images.pixabay_photo(s.stock_query, key, folder, used_ids)
-        except urllib.error.HTTPError as e:
-            # 키가 틀렸거나 접속이 막힌 경우라 다른 검색어도 똑같이 실패한다
-            hint = "pixabay_key 파일의 키를 확인하세요" if e.code in (400, 401) else "Pixabay가 접속을 막았습니다"
-            print(f"  무료 사진 검색 실패: HTTP {e.code} ({hint}). 무료 사진 없이 진행합니다.")
-            break
-        except Exception as e:
-            print(f"  무료 사진 검색 실패({s.stock_query}): {e}")
+        if s.photo and 1 <= s.photo <= len(photos) and s.photo not in own_used:
+            own_used.add(s.photo)
             continue
-        if found:
-            media["stock"][i], photo_id = found
-            used_ids.add(photo_id)
+        picked = None
+        queries = [q for q in [s.stock_query, *s.alt_queries] if q.strip()]
+        if use_stock and queries and writing:
+            cands, seen = [], set(used_ids)
+            for q in queries:
+                if len(cands) >= 6:
+                    break
+                try:
+                    found = images.pixabay_candidates(q, key, folder, seen, n=6 - len(cands))
+                except urllib.error.HTTPError as e:
+                    hint = "pixabay_key 파일의 키를 확인하세요" if e.code in (400, 401) else "Pixabay가 접속을 막았습니다"
+                    print(f"  무료 사진 검색 실패: HTTP {e.code} ({hint}). 소제목 카드로 대신합니다.")
+                    use_stock = False
+                    break
+                except Exception as e:
+                    print(f"  무료 사진 검색 실패({q}): {e}")
+                    continue
+                cands += found
+                seen |= {h["id"] for h in found}
+            if cands:
+                try:
+                    previews = [images.candidate_preview(h, cand_dir) for h in cands]
+                    n = choose_photo(s.heading, " ".join(s.paragraphs), previews, writing)
+                    if n:
+                        picked = images.save_candidate(cands[n - 1], folder)
+                        used_ids.add(cands[n - 1]["id"])
+                        n_stock += 1
+                except Exception as e:
+                    print(f"  무료 사진 고르기 실패({s.heading[:15]}): {str(e).splitlines()[0][:60]}")
+        if not picked and cfg.get("section_cards", True):
+            line = s.key_line.strip() or next((p.split("\n")[0] for p in s.paragraphs if p.strip()), "")
+            picked = images.make_section_card(s.heading, line, folder / f"section_{i + 1:02d}.jpg", slug, brand)
+            n_card += 1
+        if picked:
+            media["stock"][i] = picked
+    shutil.rmtree(cand_dir, ignore_errors=True)
 
     if cfg.get("thumbnail", True):
         media["thumbnail"] = images.make_thumbnail(post.title, folder / "thumbnail.jpg", slug, post.thumbnail_text,
                                                    photo=thumb_photo, brand=brand)
     print(f"  이미지 준비: 썸네일 {('사진형' if thumb_photo else '매거진형') if 'thumbnail' in media else '없음'}, "
           f"지표 카드 {'만듦' if 'metrics_card' in media else '없음'}, "
-          f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 무료 사진 {len(media['stock'])}장")
+          f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 소제목 이미지: 내용에 맞는 무료 사진 {n_stock}장 + 소제목 카드 {n_card}장")
     return media
 
 
@@ -244,7 +272,7 @@ def main():
         made += 1
 
         OUTPUT.mkdir(exist_ok=True)
-        media = prepare_media(post, slug, photos, cfg.get("images", {}), cfg["naver"].get("blog_name", ""))
+        media = prepare_media(post, slug, photos, cfg.get("images", {}), cfg["naver"].get("blog_name", ""), cfg["writing"])
         preview = OUTPUT / f"{dt.date.today()}_{slug}.html"
         checks = checklist(post, row.get("memo", ""), cfg["writing"])
         preview.write_text(post.to_html(photos, OUTPUT, media, cfg.get("style"), checks), encoding="utf-8")

@@ -19,7 +19,9 @@ PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 class Section(BaseModel):
     heading: str = Field(description="소제목 (없으면 빈 문자열)")
     photo: int | None = Field(description="이 소제목 바로 아래에 넣을 사진 번호(1부터). 없으면 null")
-    stock_query: str = Field(description="photo가 null일 때 무료 사진 사이트에서 찾을 영어 검색어 2~4단어. 필요 없으면 빈 문자열")
+    stock_query: str = Field(description="photo가 null이고 소제목이 있으면 반드시 적는 무료 사진 검색어(영어 2~4단어). "
+                                         "소제목 내용을 보여주는 사물·장소")
+    alt_queries: list[str] = Field(default=[], description="stock_query로 못 찾을 때 쓸 다른 영어 검색어 2개 (더 넓은 말로)")
     paragraphs: list[str] = Field(description="문단 목록. 한 문단은 2~4문장")
     key_line: str = Field(default="", description="이 소제목에서 독자가 꼭 기억할 한 줄(가격·날짜·핵심 팁 등). "
                                                   "paragraphs 안의 한 줄을 글자 그대로 복사. 없으면 빈 문자열")
@@ -146,7 +148,7 @@ class Post(BaseModel):
         if self.sources:
             has_links = any("http" in s for s in self.sources)
             out.append(("text", ("참고 자료\n" if has_links else "") + "\n".join(self.sources)))
-        if stock:
+        if any("pixabay" in Path(p).name for p in stock.values()):
             out.append(("text", "사진 출처: Pixabay"))
         if self.updated:
             out.append(("text", f"최종 수정: {self.updated} / 변경: 최초 작성"))
@@ -276,7 +278,8 @@ SYSTEM = """당신은 네이버 블로그 글을 쓰는 작가입니다. 자연�
   상표·로고·앱 화면이 찍힐 만한 검색어(social media, smartphone app, cinema screen 등)는 피합니다.
   국기, 정부·기관 문장이나 건물(특히 외국 기관)은 한국 이야기와 헷갈리게 하니 검색하지 않습니다.
   사람이 나오는 장면(선수, 인물의 동작)은 검색하지 않습니다. 글의 주인공으로 오해받을 수 있으니 물건·장소 위주로.
-  나이, 조건, 기간, 절차, 인물 소개처럼 사진으로 표현하기 어려운 소제목은 빈 문자열. 엉뚱한 사진보다 없는 편이 낫습니다.
+  나이, 조건, 기간, 절차처럼 사진으로 표현하기 어려운 소제목도 관련 사물로 적습니다(달력, 서류, 신분증 없는 지갑, 계산기 등).
+  alt_queries에는 더 넓은 검색어 2개를 적습니다. 맞는 사진이 없으면 프로그램이 소제목 카드 이미지를 대신 넣습니다.
   이 사진은 작성자가 찍은 게 아니므로 본문에서 언급하지 않습니다."""
 
 # 네이버 홈판(메인 피드) 노출용
@@ -597,6 +600,34 @@ BANNED_OK = re.compile(r"최고(가|치|점|금리|세율|한도|경영자|기�
 def banned_in(post: "Post") -> list[str]:
     text = BANNED_OK.sub("", post.all_text())
     return [w for w in BANNED_WORDS if w in text]
+
+
+def choose_photo(heading: str, context: str, previews: list[Path], cfg: dict) -> int:
+    """후보 사진 중 소제목 내용에 맞는 사진 번호(1부터). 맞는 게 없으면 0"""
+    if not previews:
+        return 0
+    client = anthropic.Anthropic(api_key=_api_key(), max_retries=3)
+    content = []
+    for i, path in enumerate(previews, 1):
+        content.append({"type": "text", "text": f"사진 {i}:"})
+        content.append(_image_block(path))
+    content.append({"type": "text", "text": (
+        f"네이버 블로그 글의 소제목: {heading}\n내용: {context[:300]}\n\n"
+        "위 사진 중 이 소제목 내용을 가장 잘 보여주는 사진 번호를 하나 고르세요. 조건:\n"
+        "- 내용과 직접 관련된 사물·장소·장면이어야 합니다 (예: 예방접종 → 주사기·백신 병, 수술 장면은 아님).\n"
+        "- 사람이 주인공인 사진, 수술·피·사고 장면, 로고·상표, 외국 국기·기관 건물은 고르지 않습니다.\n"
+        "- 한국 이야기에 뚜렷한 외국 글자·지폐가 크게 보이는 사진은 고르지 않습니다.\n"
+        "맞는 사진이 없으면 0. 숫자 하나만 답하세요.")})
+    try:
+        res = client.messages.create(model=cfg["model"], max_tokens=4000,
+                                     messages=[{"role": "user", "content": content}])
+        text = "".join(b.text for b in res.content if b.type == "text")
+        m = re.search(r"\d+", text)
+        n = int(m.group(0)) if m else 0
+        return n if 0 <= n <= len(previews) else 0
+    except Exception as e:
+        print(f"  (사진 고르기 실패: {str(e).splitlines()[0][:60]})")
+        return 0
 
 
 def my_posts(blog_id: str, limit: int = 30) -> list[tuple[str, str]]:

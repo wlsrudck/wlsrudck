@@ -205,6 +205,9 @@ def monthly_volumes(keywords: list[str], keys: dict, topic: str = "") -> tuple[d
     return matched, related
 
 
+BIG = 30000  # 월 검색이 이보다 많으면 '큰 키워드'로 본다
+
+
 def grade(volume: int | None, docs: int | None, comp: str = "") -> str:
     """검색량이 제법 있고(수요) 문서가 적을수록(공급 부족) 좋은 키워드.
     문서 수가 없으면(검색 API 키 없음) 검색광고의 경쟁 정도(높음/중간/낮음)로 대신 판단한다."""
@@ -215,6 +218,8 @@ def grade(volume: int | None, docs: int | None, comp: str = "") -> str:
     if docs is None:
         if not comp:
             return "?"
+        if volume > BIG:  # 광고 경쟁이 낮아도 큰 키워드는 대형 블로그·언론이 차지하고 있어 초보에게 불리
+            return "B"
         if volume >= 500 and comp == "낮음":
             return "S"
         if volume >= 300 and comp in ("낮음", "중간"):
@@ -244,7 +249,7 @@ def to_html(topic: str, rows: list[dict], has_numbers: str) -> str:
     note = {"docs": "등급: S = 검색 500회 이상 + 검색 1회당 문서 1개 미만, A = 300회 이상 + 3개 미만, "
                     "B = 10개 미만, C = 검색이 적거나 경쟁이 심함",
             "comp": "등급: 문서 수 대신 검색광고의 경쟁 정도로 판단. S = 검색 500회 이상 + 경쟁 낮음, "
-                    "A = 300회 이상 + 경쟁 낮음·중간, B = 경쟁 중간 이하, C = 검색이 적거나 경쟁 높음. "
+                    "A = 300회 이상 + 경쟁 낮음·중간, B = 경쟁 중간 이하 또는 월 3만 회가 넘는 큰 키워드, C = 검색이 적거나 경쟁 높음. "
                     "경쟁 정도는 광고 입찰 기준이라 블로그 경쟁과 완전히 같지는 않아요.",
             "": "naver_keys.txt에 키가 없어 검색량을 붙이지 못했어요. 숫자 없이 후보만 보여 줍니다."}[has_numbers]
     return f"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -290,8 +295,9 @@ def main():
         print("[2/3] 네이버 검색광고로 월 검색량 확인 중...")
         try:
             volumes, related = monthly_volumes(words, keys, topic)
-            # 실제 검색량이 있는 연관 키워드를 후보에 더한다 (검색 300회 이상, 광고 경쟁 높음 제외, 최대 15개)
-            extra = [r for r in related if r[1] >= 300 and r[2] != "높음"][:15]
+            # 실제 검색량이 있는 연관 키워드를 후보에 더한다
+            # (검색 300~3만 회: 찾는 사람은 있고 너무 큰 키워드는 아닌 구간, 광고 경쟁 높음 제외, 최대 15개)
+            extra = [r for r in related if 300 <= r[1] <= BIG and r[2] != "높음"][:15]
             for name, v, c in extra:
                 cands.append(Candidate(keyword=name, kind="연관검색어", title="",
                                        reason="네이버 검색광고가 알려 준 연관 키워드 (실제 검색량 기준)"))

@@ -310,9 +310,19 @@ def _api_key() -> str | None:
     if os.environ.get("ANTHROPIC_API_KEY"):
         return None  # SDK가 환경변수를 알아서 사용
     key_file = Path(__file__).parent / "api_key.txt"
-    if key_file.exists() and key_file.read_text(encoding="utf-8-sig").strip():
-        return key_file.read_text(encoding="utf-8-sig").strip()
-    raise RuntimeError("api_key.txt 파일에 Claude API 키를 붙여넣어 주세요.")
+    if not key_file.exists() or not key_file.read_text(encoding="utf-8-sig").strip():
+        raise RuntimeError("api_key.txt 파일에 Claude API 키를 붙여넣어 주세요.")
+    # 파일에 다른 줄(네이버 키, 메모 등)이 섞여 있으면 키 전체가 깨져 'Connection error'가 나므로
+    # sk-ant- 로 시작하는 줄만 골라 쓴다
+    text = key_file.read_text(encoding="utf-8-sig")
+    keys = re.findall(r"sk-ant-[A-Za-z0-9_\-]+", text)
+    if not keys:
+        raise RuntimeError("api_key.txt에 Claude API 키(sk-ant- 로 시작)가 없어요. "
+                           "console.anthropic.com에서 키를 복사해 이 파일에 한 줄로만 넣어 주세요.")
+    if len(text.split()) > 1:
+        print("  (참고: api_key.txt에 Claude 키 말고 다른 글자도 있어요. Claude 키만 골라 씁니다. "
+              "네이버 키는 naver_keys.txt에 넣어 주세요)")
+    return keys[0]
 
 
 RESEARCH_PROMPT = """네이버 블로그 글을 쓰기 전에 사실 확인용 자료를 조사해 주세요.

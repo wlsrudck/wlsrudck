@@ -333,4 +333,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except RuntimeError as e:  # 알아듣기 쉬운 안내만 보여 주고, 긴 오류 목록은 숨긴다
+        print(f"\n⚠ {e}")

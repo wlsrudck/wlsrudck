@@ -660,7 +660,8 @@ def my_posts(blog_id: str, limit: int = 30) -> list[tuple[str, str]]:
 
 def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
                   mine: list[tuple[str, str]] = (), next_keyword: str = "") -> Post:
-    client = anthropic.Anthropic(api_key=_api_key())
+    # 서버가 붐빌 때(529) 조금씩 더 기다리며 여러 번 다시 시도한다
+    client = anthropic.Anthropic(api_key=_api_key(), max_retries=6)
     notes, found = "", {}
     if cfg.get("research", True):
         try:

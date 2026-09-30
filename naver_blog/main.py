@@ -277,8 +277,17 @@ def main():
                 print("  ♻ 오늘 이미 써 둔 글이 있어서 새로 쓰지 않고 그대로 씁니다 (Claude 비용 없음)")
             else:
                 later = [r["keyword"] for r in pending if r is not row]
-                post = generate_post(keyword, row.get("memo", ""), photos, cfg["writing"],
-                                     mine, later[0] if later else "")
+                for attempt in range(3):
+                    try:
+                        post = generate_post(keyword, row.get("memo", ""), photos, cfg["writing"],
+                                             mine, later[0] if later else "")
+                        break
+                    except Exception as e:  # Claude 서버 혼잡(529)이면 3분 쉬고 최대 두 번 더
+                        if attempt == 2 or not (getattr(e, "status_code", None) in (529, 503)
+                                                or "overloaded" in str(e).lower()):
+                            raise
+                        print("  Claude 서버가 붐벼서 3분 기다렸다가 다시 시도해요...")
+                        time.sleep(180)
         except SearchFailed as e:
             # 주제 탓이 아니므로 건너뜀 표시를 하지 않고 다음 실행 때 다시 쓴다
             print(f"  ⏸ 웹 검색 도구 오류({e})로 조사를 못 했어요. 이 키워드는 그대로 두고 다음 실행 때 다시 씁니다.")

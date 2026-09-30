@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from playwright.sync_api import Frame, Page, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 from generate import TEXT_STYLE, Post, is_qa
 from login import STATE_PATH
@@ -604,6 +605,24 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screens
     return done
 
 
+def _open_write_page(page, blog_id: str) -> None:
+    """글쓰기 화면 열기. 네이버는 광고·통계 연결이 계속 오가서 '조용해질 때까지' 기다리면 시간 초과가 나므로,
+    화면 뼈대만 뜨면 넘어가고 편집기는 뒤에서 따로 기다린다. 인터넷이 느릴 때를 위해 한 번 더 시도한다."""
+    url = f"https://blog.naver.com/{blog_id}?Redirect=Write&"
+    for attempt in range(2):
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            break
+        except PlaywrightTimeout:
+            if attempt:
+                raise
+            print("  글쓰기 화면이 늦게 떠서 한 번 더 열어요...")
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+    except PlaywrightTimeout:
+        pass
+
+
 def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, auto_publish: bool, headless: bool,
                   screenshot_dir: Path, style: dict | None = None):
     if not STATE_PATH.exists():
@@ -614,7 +633,7 @@ def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, aut
         context = browser.new_context(storage_state=str(STATE_PATH), locale="ko-KR")
         page = context.new_page()
         try:
-            page.goto(f"https://blog.naver.com/{blog_id}?Redirect=Write&", wait_until="networkidle")
+            _open_write_page(page, blog_id)
             if "nid.naver.com" in page.url:
                 raise LoginRequired("로그인 세션이 만료되었습니다. `python login.py`를 다시 실행하세요.")
 
@@ -641,7 +660,10 @@ def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, aut
                 editor.locator(SELECTORS["publish_btn"]).first.click()
                 _pause(1.0, 2.0)
                 editor.locator(SELECTORS["publish_confirm"]).first.click()
-                page.wait_for_load_state("networkidle")
+                try:
+                    page.wait_for_load_state("networkidle", timeout=20000)
+                except PlaywrightTimeout:
+                    pass
             else:
                 editor.locator(SELECTORS["save_btn"]).first.click()
                 _pause(2.0, 3.0)

@@ -266,8 +266,8 @@ def popular_order(blog_id: str, titles: list[str]) -> dict[str, int]:
             page = ctx.new_page()
             for url in STAT_URLS:
                 try:
-                    page.goto(url.format(id=blog_id), wait_until="networkidle", timeout=30000)
-                    page.wait_for_timeout(2000)
+                    page.goto(url.format(id=blog_id), wait_until="domcontentloaded", timeout=45000)
+                    page.wait_for_timeout(5000)
                     text = "\n".join(f.inner_text("body") for f in page.frames if f.url.startswith("http"))
                 except Exception:
                     continue

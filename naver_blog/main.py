@@ -216,8 +216,16 @@ def main():
         print(f"[생성] {keyword} (사진 {len(photos)}장)")
         if not (row.get("memo") or "").strip():
             print("  💡 메모가 비어 있어요. keywords.csv 메모 칸에 직접 겪은 한두 줄을 적으면 글이 더 좋아져요 (경험은 지어내지 않아요)")
+        saved_json = OUTPUT / f"{dt.date.today()}_{slug}.json"
+        reused = False
         try:
-            post = generate_post(keyword, row.get("memo", ""), photos, cfg["writing"])
+            if saved_json.exists() and not args.dry_run:
+                # 오늘 이미 써 둔 글(창을 닫아 중간에 멈춘 경우 등)은 다시 쓰지 않고 그대로 네이버에 넣는다
+                post = Post.model_validate(json.loads(saved_json.read_text(encoding="utf-8"))["post"])
+                reused = True
+                print("  ♻ 오늘 이미 써 둔 글이 있어서 새로 쓰지 않고 그대로 씁니다 (Claude 비용 없음)")
+            else:
+                post = generate_post(keyword, row.get("memo", ""), photos, cfg["writing"])
         except SearchFailed as e:
             # 주제 탓이 아니므로 건너뜀 표시를 하지 않고 다음 실행 때 다시 쓴다
             print(f"  ⏸ 웹 검색 도구 오류({e})로 조사를 못 했어요. 이 키워드는 그대로 두고 다음 실행 때 다시 씁니다.")
@@ -240,7 +248,7 @@ def main():
         failed = [f"{name}({detail})" for name, ok, detail in checks if not ok]
         print(f"  발행 전 점검: {len(checks) - len(failed)}/{len(checks)} 통과"
               + (f" - 확인할 것: {', '.join(failed)}" if failed else ""))
-        if cfg["writing"].get("threads", True):
+        if cfg["writing"].get("threads", True) and not reused:
             try:
                 posts = make_threads(post, cfg["writing"])
                 tfile = OUTPUT / f"{dt.date.today()}_{slug}_스레드.txt"
@@ -248,7 +256,7 @@ def main():
                 print(f"  스레드 글 저장: {tfile.name} ({len(posts)}개 게시물)")
             except Exception as e:
                 print(f"  스레드 글은 건너뜀: {e}")
-        if cfg.get("clip", {}).get("auto", False):
+        if cfg.get("clip", {}).get("auto", False) and not reused:
             try:
                 from clip_maker import load_saved, make_clip
                 make_clip(load_saved(OUTPUT / f"{dt.date.today()}_{slug}.json"), cfg)

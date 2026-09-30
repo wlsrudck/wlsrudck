@@ -50,7 +50,9 @@ FIND_PROMPT = """네이버 블로그 '{blog}'에 쓸 키워드를 찾고 있습�
 
 웹 검색으로 이 주제의 최근 1~2개월 소식(정책 변경, 신청 기간, 가격 변화, 새 제품, 화제가 된 일)을 먼저 확인하세요.
 그다음 아래 조건의 키워드 후보 20개를 정리하세요.
-- 대형 블로그가 차지한 큰 키워드('강남 맛집', '아이폰' 같은 한두 단어)는 빼고, 2~4단어 조합의 롱테일 키워드
+- 대형 블로그가 차지한 큰 키워드('강남 맛집', '아이폰' 같은 한두 단어)는 빼고, 2~3단어 조합의 롱테일 키워드
+- 사람들이 검색창에 실제로 치는 짧고 흔한 표현으로 씁니다 (예: '청년월세 신청방법', '배당소득 분리과세').
+  문장처럼 긴 표현이나 기사 제목 같은 표현은 검색하는 사람이 거의 없으니 피합니다.
 - 사람들이 실제로 궁금해서 급하게 검색할 만한 정보형·해결형, 또는 요즘 소식과 맞물린 이슈형
 - 서로 겹치지 않게 (같은 말 순서만 바꾼 것 금지)
 - 검색량이나 문서 수는 추측해서 적지 마세요. 숫자는 프로그램이 네이버 공식 자료로 따로 붙입니다.
@@ -176,13 +178,14 @@ def _count(value) -> int:
     return 5 if "<" in str(value) else int(str(value).replace(",", "") or 0)
 
 
-def monthly_volumes(keywords: list[str], keys: dict) -> dict[str, tuple[int, str] | None]:
+def monthly_volumes(keywords: list[str], keys: dict, topic: str = "") -> tuple[dict, list]:
     """{키워드: (월간 검색량 PC+모바일, 광고 경쟁 정도 높음/중간/낮음)}.
     검색광고 API는 띄어쓰기 없는 키워드로 돌려주므로 띄어쓰기를 뺀 이름으로 맞춘다."""
     out = {}
     uri = "/keywordstool"
-    for i in range(0, len(keywords), 5):  # 한 번에 5개까지
-        chunk = keywords[i:i + 5]
+    hints = ([topic] if topic else []) + keywords  # 큰 주제도 넣으면 실제로 많이 찾는 연관 키워드가 함께 온다
+    for i in range(0, len(hints), 5):  # 한 번에 5개까지
+        chunk = hints[i:i + 5]
         ts = str(int(time.time() * 1000))
         sign = base64.b64encode(hmac.new(keys["ad_secret_key"].encode(), f"{ts}.GET.{uri}".encode(),
                                          hashlib.sha256).digest()).decode()
@@ -195,7 +198,11 @@ def monthly_volumes(keywords: list[str], keys: dict) -> dict[str, tuple[int, str
             out[name] = (_count(row.get("monthlyPcQcCnt", 0)) + _count(row.get("monthlyMobileQcCnt", 0)),
                          str(row.get("compIdx", "")).strip())
         time.sleep(0.3)
-    return {k: out.get(k.replace(" ", "").lower()) for k in keywords}
+    matched = {k: out.get(k.replace(" ", "").lower()) for k in keywords}
+    # 연관 키워드: 네이버가 알려 준, 실제로 검색되는 말 (검색량 순)
+    asked = {k.replace(" ", "").lower() for k in hints}
+    related = sorted(((name, v, c) for name, (v, c) in out.items() if name not in asked), key=lambda r: -r[1])
+    return matched, related
 
 
 def grade(volume: int | None, docs: int | None, comp: str = "") -> str:
@@ -265,6 +272,7 @@ def add_to_keywords(chosen: list[str]) -> int:
 
 def main():
     cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8-sig"))
+    load_keys()  # naver_keys.txt가 없으면 빈 양식을 바로 만들어 둔다
     topic = " ".join(sys.argv[1:]).strip() or input("큰 주제를 입력하세요 (예: 청년 지원금, 캠핑, 국내주식): ").strip()
     if not topic:
         print("주제가 없어 종료합니다.")
@@ -281,7 +289,15 @@ def main():
     if all(keys.get(k) for k in ad_keys):
         print("[2/3] 네이버 검색광고로 월 검색량 확인 중...")
         try:
-            volumes = monthly_volumes(words, keys)
+            volumes, related = monthly_volumes(words, keys, topic)
+            # 실제 검색량이 있는 연관 키워드를 후보에 더한다 (검색 300회 이상, 광고 경쟁 높음 제외, 최대 15개)
+            extra = [r for r in related if r[1] >= 300 and r[2] != "높음"][:15]
+            for name, v, c in extra:
+                cands.append(Candidate(keyword=name, kind="연관검색어", title="",
+                                       reason="네이버 검색광고가 알려 준 연관 키워드 (실제 검색량 기준)"))
+                volumes[name] = (v, c)
+            if extra:
+                print(f"      네이버 연관 키워드 {len(extra)}개를 후보에 더했어요")
         except Exception as e:
             print(f"      검색량 확인 실패 (naver_keys.txt의 검색광고 API 키를 확인하세요): {e}")
     else:

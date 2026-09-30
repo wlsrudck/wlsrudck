@@ -63,12 +63,16 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
         # 썸네일 배경: 직접 찍은 사진이 있으면 그걸, 없으면 무료 사진을 따로 찾는다
         if photos:
             thumb_photo = photos[0]
-        elif use_stock and post.thumbnail_query.strip():
+        elif use_stock and post.thumbnail_query.strip() and writing:
+            # 썸네일도 후보 여러 장 중 Claude가 제목에 맞는 사진만 고른다. 없으면 매거진형(글자) 썸네일
             try:
-                found = images.pixabay_photo(post.thumbnail_query, key, folder, used_ids)
-                if found:
-                    thumb_photo, photo_id = found
-                    used_ids.add(photo_id)
+                cands = images.pixabay_candidates(post.thumbnail_query, key, folder, used_ids, n=6)
+                if cands:
+                    previews = [images.candidate_preview(h, folder / "_candidates") for h in cands]
+                    n = choose_photo(post.title, " ".join(post.intro), previews, writing)
+                    if n:
+                        thumb_photo = images.save_candidate(cands[n - 1], folder)
+                        used_ids.add(cands[n - 1]["id"])
             except urllib.error.HTTPError as e:
                 print(f"  썸네일 사진 검색 실패: HTTP {e.code}")
                 use_stock = False

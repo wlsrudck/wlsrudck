@@ -493,6 +493,30 @@ AI_PHRASES = [
     r"결론적으로", r"요약하자면", r"종합적으로", r"다양한 요소", r"도움이 되셨기를", r"도움이 되길 바랍니다",
     r"이상으로", r"에 대해 자세히",
 ]
+# 메모가 없는데 직접 해 본 것처럼 쓴 표현 (경험을 지어내지 않는다는 규칙 점검용)
+FAKE_EXPERIENCE = [r"검색해\s*봤", r"찾아\s*봤", r"(?<![가-힣])해\s*봤어요", r"다녀왔", r"먹어\s*봤", r"써\s*봤",
+                   r"저도\s", r"제가\s", r"저는\s", r"우리\s?집", r"마음이 철렁", r"깜짝 놀랐"]
+
+
+def fake_experience_in(post: "Post") -> list[str]:
+    text = "\n".join([*post.intro, *(p for s in post.sections for p in s.paragraphs)])
+    return [m.group(0).strip() for pat in FAKE_EXPERIENCE if (m := re.search(pat, text))]
+
+
+def dedupe_intro(post: "Post") -> None:
+    """도입 세 줄과 거의 같은 문장이 바로 다음 본문에 또 나오면 뺀다 (같은 말 두 번)"""
+    import difflib
+    intro = [l.strip() for l in post.intro if l.strip()]
+    for sec in post.sections[:2]:
+        kept = []
+        for para in sec.paragraphs:
+            lines = [l for l in para.split("\n")
+                     if not any(difflib.SequenceMatcher(None, l.strip(), i).ratio() > 0.75 for i in intro)]
+            if any(l.strip() for l in lines):
+                kept.append("\n".join(lines))
+        sec.paragraphs = kept
+
+
 STYLE_RULES = """
 
 [AI 말투 피하기]
@@ -516,6 +540,8 @@ STYLE_RULES = """
 - "그리고, 또한, 하지만" 같은 접속어를 연달아 쓰지 않습니다. 이어지는 문단을 같은 말로 시작하지 않습니다.
 - 같은 단어를 가까운 세 문장에 연달아 쓰지 않습니다. 소제목 길이도 들쭉날쭉하게.
 - "이웃분들이 많이 물어보셔서" 같은 말은 작성자 메모에 그런 사실이 있을 때만 씁니다.
+- 작성자 메모가 없으면 "검색해봤어요", "찾아봤더니", "저도", "마음이 철렁했어요"처럼 글쓴이의 행동·감정을 쓰지 않습니다.
+- 도입 세 줄에 쓴 문장을 첫 소제목 앞 문단에서 되풀이하지 않습니다.
 
 [마무리]
 - closing 세 문장은 매번 다른 말로 씁니다. 같은 인사·같은 문장을 글마다 반복하지 않습니다.
@@ -629,7 +655,10 @@ def choose_photo(heading: str, context: str, previews: list[Path], cfg: dict) ->
     content.append({"type": "text", "text": (
         f"네이버 블로그 글의 소제목: {heading}\n내용: {context[:300]}\n\n"
         "위 사진 중 이 소제목 내용을 가장 잘 보여주는 사진 번호를 하나 고르세요. 조건:\n"
-        "- 내용과 직접 관련된 사물·장소·장면이어야 합니다 (예: 예방접종 → 주사기·백신 병, 수술 장면은 아님).\n"
+        "- 사진만 보고도 소제목 내용이 떠올라야 합니다 (예: 예방접종 → 주사기·백신 병, 수술 장면은 아님). "
+        "조금이라도 애매하면 0을 고르세요. 엉뚱한 사진보다 없는 편이 낫습니다.\n"
+        "- 폐건물·버려진 장소, 어둡고 음산하거나 무서운 분위기, 슬픈 느낌을 주는 사진은 고르지 않습니다.\n"
+        "- 요양원·병원·학교 같은 장소는 밝고 깨끗해서 그 장소로 바로 알아볼 수 있을 때만 고릅니다.\n"
         "- 사람이 주인공인 사진, 수술·피·사고 장면, 로고·상표, 외국 국기·기관 건물은 고르지 않습니다.\n"
         "- 한국 이야기에 뚜렷한 외국 글자·지폐가 크게 보이는 사진은 고르지 않습니다.\n"
         "맞는 사진이 없으면 0. 숫자 하나만 답하세요.")})
@@ -718,8 +747,9 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
     # 금지 표현이 남아 있으면 한 번만 고쳐 쓰게 한다 (공식 명칭 등 꼭 필요한 경우는 남을 수 있다)
     hits = banned_in(post)
     ai_hits = ai_phrases_in(post)
-    if hits or ai_hits:
-        print(f"  금지 표현·AI 말투 발견({', '.join(hits + ai_hits)}) → 고쳐 쓰는 중")
+    fake = [] if (memo or "").strip() else fake_experience_in(post)
+    if hits or ai_hits or fake:
+        print(f"  금지 표현·AI 말투·지어낸 경험 발견({', '.join(hits + ai_hits + fake)}) → 고쳐 쓰는 중")
         fixed = client.beta.messages.parse(
             model=cfg["model"],
             max_tokens=16000,
@@ -734,6 +764,9 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
                      "구체적인 사실 표현으로 바꾸세요. " if hits else "")
                     + (f"AI가 쓴 티가 나는 말투가 있습니다: {', '.join(ai_hits)}. 옆 사람에게 말하듯 자연스러운 "
                        "대화체로 바꾸세요. " if ai_hits else "")
+                    + (f"작성자 메모가 없는데 글쓴이가 직접 겪은 것처럼 쓴 표현이 있습니다: {', '.join(fake)}. "
+                       "글쓴이의 행동·감정을 지어내지 말고, 독자의 궁금증이나 사실 서술로 바꾸세요. "
+                       "도입 세 줄을 본문 첫머리에서 되풀이하지 마세요. " if fake else "")
                     + "같은 형식으로 다시 주세요. 나머지 내용과 사실은 그대로 유지하세요.")},
             ],
             output_format=Post,
@@ -744,6 +777,7 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
         if left:
             print(f"  ⚠ 금지 표현·AI 말투가 남아 있어요({', '.join(left)}). 발행 전에 확인하세요.")
 
+    dedupe_intro(post)
     fix_key_lines(post)
     post.links = [f"{mine[i - 1][0]}|{mine[i - 1][1]}" for i in dict.fromkeys(post.related) if 1 <= i <= len(mine)][:5]
     post.updated = time.strftime("%Y-%m-%d")

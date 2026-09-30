@@ -49,7 +49,8 @@ CLIP_PROMPT = """아래 네이버 블로그 글로 네이버 클립(세로 짧�
 - 마지막 장면은 "자세한 조건은 블로그에 정리해 뒀어요"처럼 블로그로 안내.
 - 글에 있는 사실만 씁니다. 경험·대화·후기를 새로 지어내지 않습니다. 숫자는 글과 똑같이.
 - 광고처럼 보이는 단어({banned})는 쓰지 않습니다.
-- 자막은 짧게, 내레이션은 말하듯 자연스럽게 (~예요, ~해요).
+- 자막은 짧게, 내레이션은 말하듯 자연스럽게 (~예요, ~해요). 내레이션은 음성 합성으로 읽으니
+  한 문장을 짧게 끊고 쉼표로 숨 쉴 자리를 주세요. 괄호·기호·영어 약어는 읽기 쉬운 한국어로 풀어 씁니다.
 
 제목: {title}
 
@@ -125,6 +126,7 @@ def edge_tts_to_wavs(texts: list[str], folder: Path, voice: str, rate: str) -> l
         import asyncio
         import edge_tts
     except Exception:
+        print("      (자연스러운 목소리 도구가 설치돼 있지 않아요. 1_install.bat을 한 번 실행해 주세요)")
         return None
 
     async def run():
@@ -247,8 +249,12 @@ def make_clip(saved: dict, cfg: dict) -> Path:
     ccfg = cfg.get("clip", {})
     narrations = [sc.narration for sc in script.scenes]
     wavs = edge_tts_to_wavs(narrations, folder, ccfg.get("voice", "ko-KR-SunHiNeural"), ccfg.get("speed", "+15%"))
-    if not wavs:
+    if wavs:
+        print(f"      목소리: 마이크로소프트 온라인 음성 {ccfg.get('voice', 'ko-KR-SunHiNeural')}")
+    else:
         wavs = tts_to_wavs(narrations, folder, ccfg.get("voice_rate", 220))
+        if wavs:
+            print("      목소리: 윈도우 기본 음성 (기계음에 가까워요)")
     if wavs:
         durations = [_wav_seconds(w) + 0.5 for w in wavs]
     else:
@@ -318,9 +324,41 @@ def popular_order(blog_id: str, titles: list[str]) -> dict[str, int]:
     return {}
 
 
+VOICE_SAMPLES = ["ko-KR-SunHiNeural", "ko-KR-InJoonNeural", "ko-KR-HyunsuMultilingualNeural"]
+SAMPLE_TEXT = "연말정산 미리보기, 올해는 11월 5일에 열려요. 홈택스에서 카드 사용액을 미리 확인할 수 있어요."
+
+
+def voice_test(cfg: dict) -> None:
+    """목소리 후보를 같은 문장으로 녹음해 output/목소리_샘플/에 저장한다 (Claude 비용 없음)"""
+    folder = OUTPUT / "목소리_샘플"
+    folder.mkdir(parents=True, exist_ok=True)
+    speed = cfg.get("clip", {}).get("speed", "+15%")
+    print(f"같은 문장을 목소리마다 녹음해요 (빠르기 {speed})...")
+    for voice in VOICE_SAMPLES:
+        wavs = edge_tts_to_wavs([SAMPLE_TEXT], folder, voice, speed)
+        if wavs:
+            out = folder / f"{voice}.wav"
+            out.unlink(missing_ok=True)
+            wavs[0].rename(out)
+            print(f"  만듦: {out.name}")
+    wavs = tts_to_wavs([SAMPLE_TEXT], folder, cfg.get("clip", {}).get("voice_rate", 220))
+    if wavs:
+        out = folder / "윈도우_기본.wav"
+        out.unlink(missing_ok=True)
+        wavs[0].rename(out)
+        print(f"  만듦: {out.name}")
+    print(f"\n{folder} 폴더에서 하나씩 들어 보고, 마음에 드는 이름을 config.toml [clip]의 voice에 적으세요.")
+    if sys.platform == "win32":
+        import os
+        os.startfile(folder)
+
+
 def main():
     from main import load_config
     cfg = load_config()
+    if "--voice-test" in sys.argv:
+        voice_test(cfg)
+        return
     files = saved_posts()[:30]
     if not files:
         print("클립으로 만들 글이 없어요. 업데이트 이후에 쓴 글부터 클립을 만들 수 있어요 (output 폴더의 .json).")

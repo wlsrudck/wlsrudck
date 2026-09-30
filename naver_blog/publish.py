@@ -126,22 +126,24 @@ _DUMP_BUTTONS = """() => [...document.querySelectorAll("button")].filter(e => e.
 _PARAGRAPH_HTML = "([sel, text]) => { const p = [...document.querySelectorAll(sel)].filter(e => e.innerText.trim() === text).pop(); return p ? p.innerHTML : ''; }"
 
 
-def _style_targets(blocks, style: dict) -> list[tuple[str, int | None, str, bool]]:
-    """(문단 글자, 글자 크기 또는 None, 색, 굵게 켜기) 목록.
-    도입 3줄은 회색 굵게, 소제목은 크게+색, Q&A는 질문·답을 다른 색으로"""
+def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | None, str, bool, bool]]:
+    """(문단 글자, 글자 크기 또는 None, 색, 굵게 켜기, 밑줄 켜기) 목록.
+    도입 3줄은 회색 굵게, 소제목은 크게+색, Q&A는 질문·답을 다른 색으로, 섹션별 핵심 한 줄은 색+굵게+밑줄"""
     st = {**TEXT_STYLE, **(style or {})}
     out = []
     intro = next((v for k, v in blocks if k == "text"), "")
     for line in intro.split("\n"):
         if line.strip():
-            out.append((line.strip(), None, st["intro_color"], bool(st["intro_bold"])))
+            out.append((line.strip(), None, st["intro_color"], bool(st["intro_bold"]), False))
     for kind, value in blocks:
         if kind == "heading":
-            out.append((value.strip(), st["heading_size"], st["heading_color"], False))
+            out.append((value.strip(), st["heading_size"], st["heading_color"], False, False))
         elif kind == "text" and is_qa(value):
             for line in value.split("\n"):
                 if line.strip():
-                    out.append((line.strip(), None, st["q_color"] if line.startswith("Q. ") else st["a_color"], False))
+                    out.append((line.strip(), None, st["q_color"] if line.startswith("Q. ") else st["a_color"], False, False))
+    for line in key_lines:
+        out.append((line.strip(), None, st["key_color"], True, bool(st["key_underline"])))
     return out
 
 
@@ -194,7 +196,7 @@ def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None =
     실패한 줄은 무엇을 눌렀고 결과가 어땠는지 editor_toolbar.txt에 남긴다(네이버 화면이 달라졌을 때 고치는 용도)."""
     sel = SELECTORS["body"]
     done, log, notes = 0, [], []
-    for i, (text, size, color, bold) in enumerate(targets):
+    for i, (text, size, color, bold, underline) in enumerate(targets):
         if len(log) >= 2 or (i >= 2 and done == 0):  # 처음 두 줄이 안 되면 나머지도 안 되니 멈춘다
             break
         try:
@@ -207,6 +209,9 @@ def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None =
             if bold and "<b" not in editor.evaluate(_PARAGRAPH_HTML, [sel, text]).lower():
                 _select_line(page, editor, text)
                 page.keyboard.press("Control+B")
+            if underline and "underline" not in editor.evaluate(_PARAGRAPH_HTML, [sel, text]).lower():
+                _select_line(page, editor, text)
+                page.keyboard.press("Control+U")
             page.keyboard.press("End")  # 선택 해제
             after = editor.evaluate(_PARAGRAPH_HTML, [sel, text])
             m = re.search(r"#[0-9a-fA-F]{6}", picked_color)
@@ -512,7 +517,8 @@ def _insert_photo_after(page: Page, editor, photo: Path, anchor: str):
     _pause(1.0, 2.0)
 
 
-def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screenshot_dir: Path | None = None) -> int:
+def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screenshot_dir: Path | None = None,
+                  key_lines=()) -> int:
     """글자를 전부 먼저 입력하고, 그다음 사진을 제자리에 끼워 넣는다.
     사진을 올린 뒤 커서를 다시 글 칸으로 옮기는 동작이 불안정해서 이렇게 나눴다.
     실패한 사진은 건너뛰고, 넣은 사진 수를 돌려준다."""
@@ -568,10 +574,10 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screens
     # 사진 다음에 넣어야 같은 자리에서 구분선 → 소제목 → 사진 순서가 된다
     fallback = _insert_heading_parts(page, editor, heads, st, screenshot_dir) if heads else []
 
-    targets = _style_targets(blocks + [("heading", h) for h in fallback], style)
+    targets = _style_targets(blocks + [("heading", h) for h in fallback], style, key_lines)
     if targets:
         n = _style_paragraphs(page, editor, targets, screenshot_dir)
-        print(f"  글자 꾸미기: {n}/{len(targets)}줄 (도입 회색 굵게, 소제목 크기·색, Q&A 색)")
+        print(f"  글자 꾸미기: {n}/{len(targets)}줄 (도입, 소제목, Q&A, 핵심 문장 {len(key_lines)}줄)")
         if n < len(targets) and screenshot_dir and (screenshot_dir / "editor_toolbar.txt").exists():
             print("  (꾸미기가 덜 된 경우 output 폴더의 editor_toolbar.txt 를 메모장으로 열어 캡처해 보내주세요)")
     return done
@@ -603,7 +609,7 @@ def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, aut
             editor.locator(SELECTORS["body"]).first.click()
             _pause()
             blocks = post.blocks(photos, media)
-            done = _write_blocks(page, editor, blocks, style, screenshot_dir)
+            done = _write_blocks(page, editor, blocks, style, screenshot_dir, post.key_lines())
             total = sum(1 for k, _ in blocks if k == "photo")
             print(f"  네이버 입력: 본문 완료, 사진 {done}/{total}장")
             _pause(1.5, 3.0)

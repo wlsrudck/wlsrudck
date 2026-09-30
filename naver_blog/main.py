@@ -214,6 +214,8 @@ def main():
         slug = slugify(keyword)
         photos = find_photos(PHOTOS / slug)
         print(f"[생성] {keyword} (사진 {len(photos)}장)")
+        if not (row.get("memo") or "").strip():
+            print("  💡 메모가 비어 있어요. keywords.csv 메모 칸에 직접 겪은 한두 줄을 적으면 글이 더 좋아져요 (경험은 지어내지 않아요)")
         try:
             post = generate_post(keyword, row.get("memo", ""), photos, cfg["writing"])
         except SearchFailed as e:

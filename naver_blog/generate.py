@@ -21,11 +21,14 @@ class Section(BaseModel):
     photo: int | None = Field(description="이 소제목 바로 아래에 넣을 사진 번호(1부터). 없으면 null")
     stock_query: str = Field(description="photo가 null일 때 무료 사진 사이트에서 찾을 영어 검색어 2~4단어. 필요 없으면 빈 문자열")
     paragraphs: list[str] = Field(description="문단 목록. 한 문단은 2~4문장")
+    key_line: str = Field(default="", description="이 소제목에서 독자가 꼭 기억할 한 줄(가격·날짜·핵심 팁 등). "
+                                                  "paragraphs 안의 한 줄을 글자 그대로 복사. 없으면 빈 문자열")
 
 
 # 소제목·Q&A 글자 꾸미기 기본값. config.toml의 [style]에서 바꿀 수 있다
 TEXT_STYLE = {"heading_size": 24, "heading_color": "#00756a", "q_color": "#00756a", "a_color": "#666666",
               "intro_color": "#777777", "intro_bold": True, "quote_style": "포스트잇",
+              "key_color": "#d9480f", "key_underline": True,
               "divider_style": 3, "heading_box": "버티컬 라인"}
 
 
@@ -126,6 +129,9 @@ class Post(BaseModel):
         out.append(("text", " ".join(f"#{t}" for t in self.tags)))
         return out
 
+    def key_lines(self) -> list[str]:
+        return [s.key_line.strip() for s in self.sections if s.key_line.strip()]
+
     def to_html(self, photos: list[Path], out_dir: Path, media: dict | None = None, style: dict | None = None) -> str:
         """미리보기용 HTML. 실제 네이버 글과 비슷한 모양으로 보여준다."""
         st = {**TEXT_STYLE, **(style or {})}
@@ -154,7 +160,11 @@ class Post(BaseModel):
                 body.append(f'<p><b style="color:{st["q_color"]}">{html.escape(q)}</b><br>'
                             f'<span style="color:{st["a_color"]}">{html.escape(a).replace(chr(10), "<br>")}</span></p>')
             else:
-                body.append("<p>" + html.escape(value).replace("\n", "<br>") + "</p>")
+                keys = set(self.key_lines())
+                deco = "text-decoration:underline;" if st["key_underline"] else ""
+                lines = [f'<b style="color:{st["key_color"]};{deco}">{html.escape(l)}</b>' if l.strip() in keys
+                         else html.escape(l) for l in value.split("\n")]
+                body.append("<p>" + "<br>".join(lines) + "</p>")
         if not any(not m.pending for m in self.metrics):
             warn_metric = ('<p style="background:#fff3cd;border:1px solid #e0b000;padding:12px;border-radius:6px">'
                            '⚠ 확인된 지표가 하나도 없어요. 규칙(검증 가능한 지표 최소 1개)을 채우지 못한 글이에요.</p>')
@@ -408,6 +418,47 @@ def source_name(url: str, title: str | None) -> str:
     return urllib.parse.urlparse(url).netloc.removeprefix("www.")
 
 
+# AI가 쓴 티가 나는 말투. 나오면 금지어처럼 한 번 고쳐 쓰게 한다
+AI_PHRASES = [
+    r"에 대해 알아보", r"알아보겠습니다", r"알아보도록", r"살펴보겠습니다", r"살펴보도록", r"필수적인", r"필수적입니다",
+    r"고려해야 합니다", r"중요한 요소", r"것이 중요합니다", r"첫째[,\s]", r"둘째[,\s]", r"마지막으로[,\s]",
+    r"결론적으로", r"요약하자면", r"종합적으로", r"다양한 요소", r"도움이 되셨기를", r"도움이 되길 바랍니다",
+    r"이상으로", r"에 대해 자세히",
+]
+STYLE_RULES = """
+
+[AI 말투 피하기]
+- 다음 같은 교과서·보고서 말투는 쓰지 않습니다: "~에 대해 알아보겠습니다", "~는 필수적인 요소입니다",
+  "~를 고려해야 합니다", "첫째·둘째·마지막으로", "결론적으로", "도움이 되셨기를 바랍니다".
+- 옆 사람에게 말하듯 "~해요", "~더라고요", "~하세요"로 끝냅니다. 같은 끝맺음이 세 번 연속 나오지 않게 합니다.
+
+[핵심 한 줄]
+- 소제목마다 key_line에 독자가 꼭 기억할 한 줄(금액, 날짜, 조건, 핵심 팁)을 paragraphs 안에서 글자 그대로 골라 적습니다.
+  이 줄은 색과 밑줄로 강조됩니다. 강조할 만한 줄이 없으면 빈 문자열."""
+
+
+def ai_phrases_in(post: "Post") -> list[str]:
+    text = post.all_text()
+    found = []
+    for pat in AI_PHRASES:
+        m = re.search(pat, text)
+        if m:
+            found.append(m.group(0).strip(" ,"))
+    return found
+
+
+def fix_key_lines(post: "Post") -> None:
+    """key_line이 본문 줄과 글자가 다르면 가장 비슷한 줄로 맞추고, 못 찾으면 비운다 (강조는 정확히 같은 줄에만 들어간다)"""
+    for sec in post.sections:
+        key = sec.key_line.strip()
+        lines = [l.strip() for p in sec.paragraphs for l in p.split("\n") if l.strip()]
+        if not key or key in lines:
+            sec.key_line = key
+            continue
+        near = [l for l in lines if key in l or l in key]
+        sec.key_line = max(near, key=len) if near else ""
+
+
 # 금지어가 들어 있어도 광고 표현이 아닌 용어는 허용 (예: 주가 "최고가", 대부업 "최고금리")
 BANNED_OK = re.compile(r"최고(가|치|점|금리|세율|한도|경영자|기온|위원|법원)")
 
@@ -433,7 +484,7 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Pos
         raise NotEnoughInfo(miss.group(1).strip() or "핵심 정보")
     notes = re.sub(r"\[핵심답:[^\]]*\]", "", notes).strip()
     short = cfg.get("voice", "short") == "short"
-    system = SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else SEARCH) + (SHORT_VOICE if short else "")
+    system = SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else SEARCH) + (SHORT_VOICE if short else "") + STYLE_RULES
     content = []
     for i, path in enumerate(photos, 1):
         content.append({"type": "text", "text": f"사진 {i}:"})
@@ -465,8 +516,9 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Pos
 
     # 금지 표현이 남아 있으면 한 번만 고쳐 쓰게 한다 (공식 명칭 등 꼭 필요한 경우는 남을 수 있다)
     hits = banned_in(post)
-    if hits:
-        print(f"  금지 표현 발견({', '.join(hits)}) → 고쳐 쓰는 중")
+    ai_hits = ai_phrases_in(post)
+    if hits or ai_hits:
+        print(f"  금지 표현·AI 말투 발견({', '.join(hits + ai_hits)}) → 고쳐 쓰는 중")
         fixed = client.beta.messages.parse(
             model=cfg["model"],
             max_tokens=16000,
@@ -476,16 +528,22 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Pos
             messages=[
                 {"role": "user", "content": content},
                 {"role": "assistant", "content": post.model_dump_json()},
-                {"role": "user", "content": f"다음 표현이 남아 있습니다: {', '.join(hits)}. 공식 명칭이나 정확한 인용이 아니라면 "
-                                            "구체적인 사실 표현으로 바꿔서 같은 형식으로 다시 주세요. 나머지 내용은 유지하세요."},
+                {"role": "user", "content": (
+                    (f"광고처럼 보이는 표현이 남아 있습니다: {', '.join(hits)}. 공식 명칭이나 정확한 인용이 아니라면 "
+                     "구체적인 사실 표현으로 바꾸세요. " if hits else "")
+                    + (f"AI가 쓴 티가 나는 말투가 있습니다: {', '.join(ai_hits)}. 옆 사람에게 말하듯 자연스러운 "
+                       "대화체로 바꾸세요. " if ai_hits else "")
+                    + "같은 형식으로 다시 주세요. 나머지 내용과 사실은 그대로 유지하세요.")},
             ],
             output_format=Post,
         )
         if fixed.stop_reason == "end_turn" and fixed.parsed_output is not None:
             post = fixed.parsed_output
-        left = banned_in(post)
+        left = banned_in(post) + ai_phrases_in(post)
         if left:
-            print(f"  ⚠ 금지 표현이 남아 있어요({', '.join(left)}). 발행 전에 확인하세요.")
+            print(f"  ⚠ 금지 표현·AI 말투가 남아 있어요({', '.join(left)}). 발행 전에 확인하세요.")
+
+    fix_key_lines(post)
 
     if short:
         # 짧은 호흡 문체는 소제목 앞에 1. 2. 3. 번호

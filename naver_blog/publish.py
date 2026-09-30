@@ -165,16 +165,43 @@ def _pick(page: Page, editor, button_css: str, mark_js: str, arg, log: list) -> 
     return picked
 
 
+# 문단의 마지막 글자 위치(문단 기준 좌표)와 몇 번째 문단인지. 같은 글자의 문단이 여럿이면 뒤쪽.
+# End 키는 '화면에 보이는 줄'의 끝으로 가서, 두 줄 이상으로 접힌 긴 문단(Q&A 답 등)에서는 문단 끝이 아니다.
+_PARAGRAPH_END_POS = """([sel, text]) => {
+    const ps = [...document.querySelectorAll(sel)];
+    let i = -1;
+    ps.forEach((p, k) => { if (p.innerText.trim() === text) i = k; });
+    if (i < 0) ps.forEach((p, k) => { if (p.innerText.includes(text)) i = k; });
+    if (i < 0) return null;
+    const p = ps[i];
+    const r = document.createRange();
+    r.selectNodeContents(p);
+    const rects = [...r.getClientRects()].filter(x => x.width > 0);
+    const pr = p.getBoundingClientRect();
+    if (!rects.length) return {i, x: 2, y: pr.height / 2};
+    const last = rects[rects.length - 1];
+    return {i, x: Math.max(1, last.right - pr.left - 1), y: last.top - pr.top + last.height / 2};
+}"""
+
+
+def _click_paragraph_end(page: Page, editor, text: str) -> bool:
+    """문단의 마지막 글자 바로 뒤를 마우스로 클릭해 커서를 둔다 (에디터가 확실히 알아채는 방법)"""
+    sel = SELECTORS["body"]
+    pos = editor.evaluate(_PARAGRAPH_END_POS, [sel, text])
+    if not pos:
+        return False
+    para = editor.locator(sel).nth(pos["i"])
+    para.scroll_into_view_if_needed()
+    para.click(position={"x": pos["x"], "y": pos["y"]})
+    editor.evaluate(_CARET_TO_END_OF, [sel, text])
+    page.keyboard.press("End")  # 이제 커서가 마지막 줄에 있으므로 End = 문단 끝
+    return True
+
+
 def _select_line(page: Page, editor, text: str) -> bool:
     """문단 끝에 커서를 두고 Shift+← 로 글자 수만큼 선택한다. 사람이 드래그한 것처럼 에디터가 선택을 알아챈다"""
-    sel = SELECTORS["body"]
-    para = editor.locator(sel).filter(has_text=text).last
-    if not para.count():
+    if not _click_paragraph_end(page, editor, text):
         return False
-    para.click()
-    if not editor.evaluate(_CARET_TO_END_OF, [sel, text]):
-        return False
-    page.keyboard.press("End")
     for _ in range(len(text)):
         page.keyboard.press("Shift+ArrowLeft")
     _pause(0.2, 0.4)
@@ -284,11 +311,8 @@ _TEXT_IN_COMPONENT = """(text) => [...document.querySelectorAll('.se-component:n
 
 
 def _caret_after(page: Page, editor, anchor: str):
-    sel = SELECTORS["body"]
-    editor.locator(sel).filter(has_text=anchor[-40:]).last.click()
-    if not editor.evaluate(_CARET_TO_END_OF, [sel, anchor]):
+    if not _click_paragraph_end(page, editor, anchor):
         raise RuntimeError(f"위치를 찾지 못함: {anchor[:20]}")
-    page.keyboard.press("End")
     _pause(0.3, 0.6)
 
 
@@ -501,11 +525,8 @@ def _insert_heading_parts(page: Page, editor, heads, st: dict, screenshot_dir: P
 
 def _insert_photo_after(page: Page, editor, photo: Path, anchor: str):
     """anchor 문단 끝에 커서를 두고 사진을 올린다. (사진은 커서 위치 다음에 들어간다)"""
-    para = editor.locator(SELECTORS["body"]).filter(has_text=anchor[-40:]).last
-    para.click()
-    if not editor.evaluate(_CARET_TO_END_OF, [SELECTORS["body"], anchor]):
+    if not _click_paragraph_end(page, editor, anchor):
         raise RuntimeError(f"사진 넣을 위치를 찾지 못함: {anchor[:20]}")
-    page.keyboard.press("End")
     _pause(0.3, 0.8)
 
     images = editor.locator(SELECTORS["image"])

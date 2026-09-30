@@ -246,6 +246,39 @@ def _has_crime(hit: dict, query: str) -> bool:
     return any(t in CRIME_TAGS or any(w in t.split() for w in CRIME_TAGS) for t in tags)
 
 
+# 수술·피·부상 장면: 예방접종·건강보험 같은 글에 붙으면 겁을 주는 엉뚱한 사진이 된다
+GRAPHIC_TAGS = {"surgery", "surgeon", "operation", "operating", "blood", "bloody", "wound", "injury", "injured",
+                "accident", "corpse", "dead", "death", "autopsy", "scalpel", "emergency"}
+# 사람이 주인공인 사진: 글쓴이나 글 속 인물로 오해받을 수 있어, 검색어가 사람을 찾는 게 아니면 쓰지 않는다
+PEOPLE_TAGS = {"people", "person", "man", "woman", "men", "women", "boy", "girl", "child", "children", "kid", "kids",
+               "baby", "doctor", "doctors", "nurse", "surgeon", "patient", "businessman", "businesswoman", "portrait",
+               "face", "model", "couple", "family", "team", "worker", "student", "senior", "elderly"}
+_STOP = {"and", "the", "for", "with", "of", "a", "an", "in", "on", "to"}
+
+
+def _tags(hit: dict) -> set[str]:
+    words = set()
+    for t in hit.get("tags", "").lower().split(","):
+        words |= set(t.split())
+    return words
+
+
+def _off_topic(hit: dict, query: str) -> bool:
+    """검색어와 상관없거나(태그에 검색어 단어가 하나도 없음), 수술·사람 사진이면 True"""
+    q = {w for w in query.lower().split() if w not in _STOP and len(w) > 2}
+    tags = _tags(hit)
+    # 복수형(keys/key) 정도는 같은 말로 본다
+    stem = lambda w: w[:-1] if w.endswith("s") and len(w) > 3 else w
+    tag_stems = {stem(t) for t in tags}
+    if q and not any(stem(w) in tag_stems for w in q):
+        return True
+    if tags & GRAPHIC_TAGS and not q & GRAPHIC_TAGS:
+        return True
+    if tags & PEOPLE_TAGS and not q & PEOPLE_TAGS:
+        return True
+    return False
+
+
 def _has_brand(hit: dict) -> bool:
     tags = {t.strip().lower() for t in hit.get("tags", "").split(",")}
     return any(t in BRAND_EXACT or t in BRAND_TAGS or any(b in t for b in BRAND_TAGS) for t in tags)
@@ -295,7 +328,8 @@ def pixabay_photo(query: str, api_key: str, out_dir: Path, exclude: set[int]) ->
     with _get(url, 20) as r:
         hits = json.load(r).get("hits", [])
     for hit in hits:
-        if hit["id"] in exclude or _has_brand(hit) or _has_crime(hit, query) or _taken("photo", hit["id"], out_dir):
+        if hit["id"] in exclude or _has_brand(hit) or _has_crime(hit, query) or _off_topic(hit, query) \
+                or _taken("photo", hit["id"], out_dir):
             continue
         out = out_dir / f"pixabay_{hit['id']}.jpg"
         if not out.exists():
@@ -314,7 +348,8 @@ def pixabay_video(query: str, api_key: str, out_dir: Path, exclude: set[int]) ->
     with _get(url, 20) as r:
         hits = json.load(r).get("hits", [])
     for hit in hits:
-        if hit["id"] in exclude or _has_brand(hit) or _has_crime(hit, query) or hit.get("duration", 0) < 4 \
+        if hit["id"] in exclude or _has_brand(hit) or _has_crime(hit, query) or _off_topic(hit, query) \
+                or hit.get("duration", 0) < 4 \
                 or _taken("video", hit["id"], out_dir):
             continue
         rends = sorted((v for v in hit.get("videos", {}).values() if v.get("url")), key=lambda v: v.get("width", 0))

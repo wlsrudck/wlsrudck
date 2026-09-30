@@ -132,7 +132,8 @@ class Post(BaseModel):
     def key_lines(self) -> list[str]:
         return [s.key_line.strip() for s in self.sections if s.key_line.strip()]
 
-    def to_html(self, photos: list[Path], out_dir: Path, media: dict | None = None, style: dict | None = None) -> str:
+    def to_html(self, photos: list[Path], out_dir: Path, media: dict | None = None, style: dict | None = None,
+                checks: list | None = None) -> str:
         """미리보기용 HTML. 실제 네이버 글과 비슷한 모양으로 보여준다."""
         st = {**TEXT_STYLE, **(style or {})}
         body = []
@@ -173,14 +174,28 @@ class Post(BaseModel):
         warn = warn_metric + ("" if self.answer_found else
                 f'<p style="background:#fff3cd;border:1px solid #e0b000;padding:12px;border-radius:6px">'
                 f'⚠ 핵심 정보를 찾지 못했어요: {html.escape(self.missing)}<br>이대로 발행하는 건 추천하지 않아요.</p>')
-        return f"""<!doctype html><meta charset="utf-8"><title>{html.escape(self.title)}</title>
+        if checks:
+            passed = sum(1 for _, ok, _ in checks if ok)
+            rows = "".join(f'<tr><td>{"✅" if ok else "⚠️"}</td><td>{html.escape(name)}</td><td>{html.escape(detail)}</td></tr>'
+                           for name, ok, detail in checks)
+            warn = (f'<details class="chk" open><summary>발행 전 점검표 <b>{passed}/{len(checks)}</b> 통과</summary>'
+                    f'<table>{rows}</table></details>') + warn
+        return f"""<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{html.escape(self.title)}</title>
 <style>
 body{{max-width:720px;margin:40px auto;padding:0 16px;font-family:'Malgun Gothic',sans-serif;line-height:1.8;color:#222}}
+body.m{{max-width:390px;border:1px solid #ddd;border-radius:24px;padding:24px 16px;box-shadow:0 4px 24px #0001}}
+.tools{{position:sticky;top:0;background:#fff;padding:8px 0;text-align:right;z-index:1}}
+.tools button{{font:inherit;font-size:14px;padding:6px 12px;border:1px solid #ccc;border-radius:16px;background:#fff;cursor:pointer}}
+.chk{{background:#f6f8fa;border:1px solid #d0d7de;border-radius:8px;padding:10px 14px;margin:8px 0 16px;font-size:14px}}
+.chk summary{{cursor:pointer}} .chk table{{border-collapse:collapse;margin-top:6px;width:100%}}
+.chk td{{padding:3px 6px;vertical-align:top;border-top:1px solid #e5e7eb}}
 h1{{font-size:30px;border-bottom:1px solid #ddd;padding-bottom:16px}}
 h2{{font-size:21px;margin-top:40px}}
 img{{max-width:100%;border-radius:4px;margin:8px 0}}
 p:last-child{{color:#2d7be5}}
 </style>
+<div class="tools"><button onclick="document.body.classList.toggle('m');this.textContent=document.body.classList.contains('m')?'💻 PC로 보기':'📱 모바일로 보기'">📱 모바일로 보기</button></div>
 {warn}<h1>{html.escape(self.title)}</h1>
 {chr(10).join(body)}
 """
@@ -457,6 +472,63 @@ def fix_key_lines(post: "Post") -> None:
             continue
         near = [l for l in lines if key in l or l in key]
         sec.key_line = max(near, key=len) if near else ""
+
+
+def checklist(post: "Post", memo: str, cfg: dict) -> list[tuple[str, bool, str]]:
+    """발행 전 점검표: (항목, 통과 여부, 설명). 글쓰기 규칙의 마지막 점검 항목을 자동으로 확인한다."""
+    body_len = len(post.body_text())
+    lo, hi = cfg.get("min_chars", 1500), cfg.get("max_chars", 2500)
+    greet = any(g in " ".join(post.intro) for g in ("안녕하세요", "반갑습니다", "안녕하십니까"))
+    headings = [s for s in post.sections if s.heading.strip()]
+    confirmed = [m for m in post.metrics if not m.pending]
+    banned, ai = banned_in(post), ai_phrases_in(post)
+    has_memo = bool((memo or "").strip())
+    return [
+        ("도입 3줄", len(post.intro) == 3 and not greet, "인사말이 들어 있어요" if greet else f"{len(post.intro)}줄"),
+        ("목차", len(headings) >= 2, f"소제목 {len(headings)}개"),
+        ("검증 지표", bool(confirmed), f"확인 {len(confirmed)}개 / 확인 필요 {len(post.metrics) - len(confirmed)}개"),
+        ("핵심 정보", post.answer_found, "조사로 찾음" if post.answer_found else f"못 찾음: {post.missing}"),
+        ("출처", bool(post.sources), ", ".join(post.sources)[:60] or "없음"),
+        ("Q&A", len(post.qa) >= 2, f"{len(post.qa)}개"),
+        ("태그 한 줄", 3 <= len(post.tags) <= 15, f"{len(post.tags)}개"),
+        ("금지어", not banned, "없음" if not banned else ", ".join(banned)),
+        ("AI 말투", not ai, "없음" if not ai else ", ".join(ai)),
+        ("직접 경험(메모)", has_memo, "메모 반영" if has_memo else "메모 없음 → 정보글로만 작성"),
+        ("글자 수", lo * 0.8 <= body_len <= hi * 1.3, f"{body_len}자 (목표 {lo}~{hi})"),
+    ]
+
+
+class Threads(BaseModel):
+    posts: list[str] = Field(description="스레드 게시물 3~5개. 각 450자 이내")
+
+
+THREADS_PROMPT = """아래 네이버 블로그 글을 스레드(Threads)에 올릴 연속 게시물 3~5개로 바꿔 주세요.
+- 첫 게시물은 스크롤을 멈추게 하는 한두 줄 + 핵심 숫자 하나. 과장·낚시 표현은 쓰지 않습니다.
+- 한 게시물은 450자 이내, 짧은 줄로 끊어 씁니다. 이모지는 게시물당 1개 이하.
+- 블로그 글에 있는 사실만 씁니다. 경험이나 대화를 새로 지어내지 않습니다.
+- 광고처럼 보이는 단어(최고, 100%, 강추, 추천, 무료 등)는 쓰지 않습니다.
+- 마지막 게시물은 "자세한 조건과 표는 블로그에 정리해 뒀어요"처럼 블로그로 안내하고, 해시태그 2~3개로 끝냅니다. 링크는 넣지 않습니다.
+
+제목: {title}
+
+본문:
+{body}"""
+
+
+def make_threads(post: "Post", cfg: dict) -> list[str]:
+    """블로그 글을 스레드용 연속 게시물로 바꾼다"""
+    client = anthropic.Anthropic(api_key=_api_key())
+    response = client.beta.messages.parse(
+        model=cfg["model"],
+        max_tokens=4000,
+        betas=["server-side-fallback-2026-07-01"],
+        fallbacks="default",
+        messages=[{"role": "user", "content": THREADS_PROMPT.format(title=post.title, body=post.all_text())}],
+        output_format=Threads,
+    )
+    if response.stop_reason == "refusal" or response.parsed_output is None:
+        raise RuntimeError("스레드 글 생성 실패")
+    return [p.strip() for p in response.parsed_output.posts if p.strip()]
 
 
 # 금지어가 들어 있어도 광고 표현이 아닌 용어는 허용 (예: 주가 "최고가", 대부업 "최고금리")

@@ -28,6 +28,7 @@ voice = "short"         # "short": 짧은 호흡(한 줄 한 문장, 1. 2. 3. �
 style = "homefeed"      # "homefeed": 네이버 홈판 노출용 제목/구성, "normal": 일반 정보글
 research = true         # 글 쓰기 전에 웹 검색으로 최신 정보 확인 (글당 비용 조금 증가)
 max_searches = 5        # 글 하나당 최대 검색 횟수
+threads = true          # 스레드(Threads)용 연속 게시물도 output 폴더에 같이 만들기 (글당 비용 조금 추가)
 
 [style]
 heading_size = 24          # 소제목 글자 크기 (본문은 네이버 기본 19)

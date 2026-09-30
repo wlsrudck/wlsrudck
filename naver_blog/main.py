@@ -20,7 +20,7 @@ from pathlib import Path
 import urllib.error
 
 import images
-from generate import NotEnoughInfo, Post, SearchFailed, find_photos, generate_post
+from generate import NotEnoughInfo, Post, SearchFailed, checklist, find_photos, generate_post, make_threads
 
 ROOT = Path(__file__).parent
 KEYWORDS = ROOT / "keywords.csv"
@@ -232,8 +232,20 @@ def main():
         OUTPUT.mkdir(exist_ok=True)
         media = prepare_media(post, slug, photos, cfg.get("images", {}), cfg["naver"].get("blog_name", ""))
         preview = OUTPUT / f"{dt.date.today()}_{slug}.html"
-        preview.write_text(post.to_html(photos, OUTPUT, media, cfg.get("style")), encoding="utf-8")
+        checks = checklist(post, row.get("memo", ""), cfg["writing"])
+        preview.write_text(post.to_html(photos, OUTPUT, media, cfg.get("style"), checks), encoding="utf-8")
         print(f"  미리보기 저장: {preview} ({len(post.body_text())}자)")
+        failed = [f"{name}({detail})" for name, ok, detail in checks if not ok]
+        print(f"  발행 전 점검: {len(checks) - len(failed)}/{len(checks)} 통과"
+              + (f" - 확인할 것: {', '.join(failed)}" if failed else ""))
+        if cfg["writing"].get("threads", True):
+            try:
+                posts = make_threads(post, cfg["writing"])
+                tfile = OUTPUT / f"{dt.date.today()}_{slug}_스레드.txt"
+                tfile.write_text("\n\n────────── 다음 게시물 ──────────\n\n".join(posts), encoding="utf-8")
+                print(f"  스레드 글 저장: {tfile.name} ({len(posts)}개 게시물)")
+            except Exception as e:
+                print(f"  스레드 글은 건너뜀: {e}")
         confirmed = [m for m in post.metrics if not m.pending]
         if not confirmed:
             print("  ⚠ 확인된 지표가 하나도 없어요 (규칙: 검증 가능한 지표 최소 1개)")

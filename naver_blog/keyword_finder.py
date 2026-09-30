@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import html
 import json
+import re
 import sys
 import time
 import tomllib
@@ -206,6 +207,8 @@ def monthly_volumes(keywords: list[str], keys: dict, topic: str = "") -> tuple[d
 
 
 BIG = 30000  # 월 검색이 이보다 많으면 '큰 키워드'로 본다
+# 상품·쇼핑 키워드(선물세트, 추천, 최저가 등)는 직접 써 본 후기가 필요한 글이라 정보 블로그 자동 글에는 맞지 않는다
+SHOPPING = re.compile(r"세트|선물|추천|최저가|구매|쿠폰|할인코드|가성비|후기|\d+호$|브랜드|쇼핑")
 
 
 def grade(volume: int | None, docs: int | None, comp: str = "") -> str:
@@ -287,7 +290,7 @@ SEASON = {
     6: ["종합소득세 환급 조회", "재산세 부과 기준", "전기요금 누진제", "여름휴가 항공권"],
     7: ["재산세 납부 기간", "부가세 확정신고", "전기요금 누진제 완화", "여름 휴가 지원금"],
     8: ["근로장려금 지급일", "추석 기차표 예매", "2학기 국가장학금", "여름철 전기요금 폭탄"],
-    9: ["재산세 2기 납부", "추석 연휴 병원", "근로장려금 반기 지급", "추석 선물 세트"],
+    9: ["재산세 2기 납부", "추석 연휴 병원", "근로장려금 반기 지급", "추석 연휴 은행 영업"],
     10: ["연말정산 미리보기", "국가건강검진 마감", "독감 예방접종", "부가세 예정신고"],
     11: ["연말정산 미리보기", "종합부동산세 납부", "김장 비용", "수능 끝 할인"],
     12: ["종합부동산세 납부 기간", "연말정산 준비", "증시휴장일", "연말 세액공제 챙기기"],
@@ -338,7 +341,7 @@ def main():
             volumes, related = monthly_volumes(words, keys, "" if season else topic)
             # 실제 검색량이 있는 연관 키워드를 후보에 더한다
             # (검색 300~3만 회: 찾는 사람은 있고 너무 큰 키워드는 아닌 구간, 광고 경쟁 높음 제외, 최대 15개)
-            extra = [r for r in related if 300 <= r[1] <= BIG and r[2] != "높음"][:15]
+            extra = [r for r in related if 300 <= r[1] <= BIG and r[2] != "높음" and not SHOPPING.search(r[0])][:15]
             for name, v, c in extra:
                 cands.append(Candidate(keyword=name, kind="연관검색어", title="",
                                        reason="네이버 검색광고가 알려 준 연관 키워드 (실제 검색량 기준)"))

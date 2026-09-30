@@ -272,19 +272,6 @@ _MARK_BY_TEXT = """(word) => {
 
 _COMPONENT_COUNT = "() => document.querySelectorAll('.se-component').length"
 
-# 부품을 넣기 전 목록을 기억해 두고, 넣은 뒤 새로 생긴 부품의 글 칸을 표시한다
-_REMEMBER_COMPONENTS = "() => { window.__nbComps = new Set(document.querySelectorAll('.se-component')); return true; }"
-_MARK_NEW_COMPONENT_TEXT = """() => {
-    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
-    const old = window.__nbComps || new Set();
-    const fresh = [...document.querySelectorAll(".se-component")].filter(c => !old.has(c));
-    for (const c of fresh) {
-        const p = c.querySelector(".se-text-paragraph, [contenteditable='true'], p");
-        if (p) { p.setAttribute("data-nb-pick", "1"); return (c.className || "") + " | " + (p.className || p.tagName); }
-    }
-    return "";
-}"""
-
 # 인용구 목록의 순서 (글자로 못 찾을 때 순번으로 고른다)
 QUOTE_KINDS = ["따옴표", "버티컬 라인", "말풍선", "라인&따옴표", "포스트잇", "프레임"]
 _TEXT_IN_COMPONENT = """(text) => [...document.querySelectorAll('.se-component:not(.se-text)')]
@@ -303,7 +290,6 @@ def _caret_after(page: Page, editor, anchor: str):
 def _insert_component(page: Page, editor, anchor: str, label: str, clsre: str, option, log: list) -> bool:
     """anchor 문단 뒤에 인용구/구분선 같은 부품을 넣는다. option은 목록 항목 글자(str) 또는 순번(int)"""
     _caret_after(page, editor, anchor)
-    editor.evaluate(_REMEMBER_COMPONENTS)
     before = editor.evaluate(_COMPONENT_COUNT)
     opener = editor.evaluate(_MARK_MENU_OPENER, [label, clsre])
     if not opener:
@@ -329,29 +315,38 @@ def _insert_component(page: Page, editor, anchor: str, label: str, clsre: str, o
     return True
 
 
-_NEW_COMPONENT_HAS_TEXT = """(text) => {
-    const old = window.__nbComps || new Set();
-    return [...document.querySelectorAll(".se-component")].filter(c => !old.has(c))
-        .some(c => (c.innerText || "").includes(text));
+# anchor 문단 바로 다음에 오는 부품(방금 넣은 인용구 상자)을 찾는다.
+# "새로 생긴 부품"으로 찾으면 에디터가 앞 상자를 다시 그릴 때 앞 상자를 새것으로 착각한다 → 위치로 찾는다
+_BOX_AFTER = """([anchor, mode, text]) => {
+    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const paras = [...document.querySelectorAll(".se-text-paragraph")].filter(p => p.innerText.trim() === anchor);
+    const a = paras[paras.length - 1];
+    if (!a) return mode === "mark" ? "" : false;
+    const box = [...document.querySelectorAll(".se-component")].find(c =>
+        !c.contains(a) && (a.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING));
+    const ok = box && /quotation/i.test(box.className);
+    if (mode === "has") return !!ok && (box.innerText || "").includes(text);
+    if (mode === "empty") return !!ok && !(box.innerText || "").replace(/내용을 입력하세요\\.?|출처 입력/g, "").trim();
+    if (!ok) return "";
+    const p = box.querySelector(".se-text-paragraph, [contenteditable='true'], p");
+    if (!p) return "";
+    p.setAttribute("data-nb-pick", "1");
+    return (box.className || "") + " | " + (p.className || p.tagName);
 }"""
 _DOC_LENGTH = "() => document.body.innerText.length"
-_NEW_COMPONENT_COUNT = """() => { const old = window.__nbComps || new Set();
-    return [...document.querySelectorAll(".se-component")].filter(c => !old.has(c)).length; }"""
 
 
-def _write_in_component(page: Page, editor, text: str, log: list) -> bool:
-    """방금 넣은 인용구 안에 글자를 쓴다. 커서가 상자 밖에 있을 수 있어 새 상자의 글 칸을 직접 누른 뒤 쓴다.
+def _write_in_component(page: Page, editor, text: str, anchor: str, log: list) -> bool:
+    """anchor 문단 바로 뒤에 방금 넣은 인용구 상자 안에 글자를 쓴다. 상자의 글 칸을 직접 누른 뒤에만 쓴다.
     안 들어가면 한 번 더 시도하고, 그래도 안 되면 빈 상자를 지운다(빈 상자가 글에 남지 않게)."""
     for attempt in (1, 2):
-        # 새 상자의 글 칸이 화면에 생길 때까지 최대 3초 기다린다.
-        # 못 찾으면 절대 그냥 치지 않는다 (커서가 앞 상자에 남아 있으면 앞 소제목 뒤에 붙어 버린다)
         target = ""
-        for _ in range(10):
+        for _ in range(12):  # 상자 글 칸이 화면에 생길 때까지 최대 약 3초
             _pause(0.25, 0.35)
-            target = editor.evaluate(_MARK_NEW_COMPONENT_TEXT)
+            target = editor.evaluate(_BOX_AFTER, [anchor, "mark", ""])
             if target:
                 break
-        log.append(f"새 상자 글 칸({attempt}차): {target or '못 찾음'}")
+        log.append(f"상자 글 칸({attempt}차): {target or '못 찾음'}")
         if not target:
             break
         editor.locator("[data-nb-pick]").first.click(timeout=5000)
@@ -359,9 +354,9 @@ def _write_in_component(page: Page, editor, text: str, log: list) -> bool:
         length = editor.evaluate(_DOC_LENGTH)
         page.keyboard.insert_text(text)
         _pause(0.4, 0.7)
-        if editor.evaluate(_NEW_COMPONENT_HAS_TEXT, text):
+        if editor.evaluate(_BOX_AFTER, [anchor, "has", text]):
             return True
-        if editor.evaluate(_DOC_LENGTH) > length:  # 글자가 다른 곳에 들어갔을 때만 되돌린다 (아니면 앞의 작업이 지워진다)
+        if editor.evaluate(_DOC_LENGTH) > length:  # 글자가 다른 곳에 들어갔을 때만 되돌린다
             log.append(f"상자에 글자가 안 들어가고 다른 곳에 들어감({attempt}차) → 되돌림")
             page.keyboard.press("Control+Z")
             _pause(0.3, 0.6)
@@ -369,13 +364,13 @@ def _write_in_component(page: Page, editor, text: str, log: list) -> bool:
             log.append(f"상자에 글자가 안 들어감({attempt}차)")
     # 빈 상자 지우기: 상자 글 칸에서 Backspace (빈 인용구는 Backspace로 없어진다)
     for _ in range(2):
-        if not editor.evaluate(_NEW_COMPONENT_COUNT):
+        if not editor.evaluate(_BOX_AFTER, [anchor, "empty", ""]):
             break
-        if editor.evaluate(_MARK_NEW_COMPONENT_TEXT):
+        if editor.evaluate(_BOX_AFTER, [anchor, "mark", ""]):
             editor.locator("[data-nb-pick]").first.click(timeout=5000)
             page.keyboard.press("Backspace")
             _pause(0.3, 0.6)
-    if editor.evaluate(_NEW_COMPONENT_COUNT):
+    if editor.evaluate(_BOX_AFTER, [anchor, "empty", ""]):
         log.append("빈 상자를 지우지 못함")
         print("  ⚠ 빈 인용구 상자가 1개 남았을 수 있어요. 발행 전에 확인해 지워 주세요.")
     return False
@@ -391,7 +386,7 @@ def _insert_quote_after(page: Page, editor, text: str, anchor: str, style: dict 
     kind = {**TEXT_STYLE, **(style or {})}["quote_style"]
     log = []
     try:
-        if _insert_component(page, editor, anchor, "인용구", "quotation", kind, log) and _write_in_component(page, editor, text, log):
+        if _insert_component(page, editor, anchor, "인용구", "quotation", kind, log) and _write_in_component(page, editor, text, anchor, log):
             return f"{kind} 인용구로 넣음"
     except Exception as e:
         log.append(f"오류: {str(e).splitlines()[0]}")
@@ -464,7 +459,7 @@ def _insert_heading_parts(page: Page, editor, heads, st: dict, screenshot_dir: P
             boxed = False
             try:
                 if fails["box"] < 2 and _insert_component(page, editor, mark, "인용구", "quotation", box, log) \
-                        and _write_in_component(page, editor, heading, log):
+                        and _write_in_component(page, editor, heading, mark, log):
                     boxed = True
                     ok_box += 1
                     # 상자 안 소제목도 크기·색을 맞춘다 (방금 친 글자를 Shift+← 로 선택)

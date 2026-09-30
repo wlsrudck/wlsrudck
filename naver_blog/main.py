@@ -235,6 +235,8 @@ def main():
         checks = checklist(post, row.get("memo", ""), cfg["writing"])
         preview.write_text(post.to_html(photos, OUTPUT, media, cfg.get("style"), checks), encoding="utf-8")
         print(f"  미리보기 저장: {preview} ({len(post.body_text())}자)")
+        saved = {"keyword": keyword, "slug": slug, "date": str(dt.date.today()), "post": post.model_dump()}
+        (OUTPUT / f"{dt.date.today()}_{slug}.json").write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
         failed = [f"{name}({detail})" for name, ok, detail in checks if not ok]
         print(f"  발행 전 점검: {len(checks) - len(failed)}/{len(checks)} 통과"
               + (f" - 확인할 것: {', '.join(failed)}" if failed else ""))
@@ -246,6 +248,12 @@ def main():
                 print(f"  스레드 글 저장: {tfile.name} ({len(posts)}개 게시물)")
             except Exception as e:
                 print(f"  스레드 글은 건너뜀: {e}")
+        if cfg.get("clip", {}).get("auto", False):
+            try:
+                from clip_maker import load_saved, make_clip
+                make_clip(load_saved(OUTPUT / f"{dt.date.today()}_{slug}.json"), cfg)
+            except Exception as e:
+                print(f"  클립은 건너뜀: {e}")
         confirmed = [m for m in post.metrics if not m.pending]
         if not confirmed:
             print("  ⚠ 확인된 지표가 하나도 없어요 (규칙: 검증 가능한 지표 최소 1개)")

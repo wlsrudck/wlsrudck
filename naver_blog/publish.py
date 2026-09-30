@@ -191,7 +191,7 @@ def _styled(html: str, size: int | None, color: str) -> bool:
 
 def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None = None) -> int:
     """이미 입력한 문단을 골라 툴바로 글자 크기·색을 바꾼다. 실제로 바뀐 줄 수를 돌려준다.
-    처음 두 줄은 무엇을 눌렀고 결과가 어땠는지 editor_toolbar.txt에 남긴다(네이버 화면이 달라졌을 때 고치는 용도)."""
+    실패한 줄은 무엇을 눌렀고 결과가 어땠는지 editor_toolbar.txt에 남긴다(네이버 화면이 달라졌을 때 고치는 용도)."""
     sel = SELECTORS["body"]
     done, log, notes = 0, [], []
     for i, (text, size, color, bold) in enumerate(targets):
@@ -212,7 +212,7 @@ def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None =
             m = re.search(r"#[0-9a-fA-F]{6}", picked_color)
             ok = bool(m) and _styled(after, size, m.group(0))
             done += ok
-            if i < 2:
+            if not ok and len(notes) < 6:  # 실패한 줄만 기록 (성공한 줄은 볼 필요가 없다)
                 notes.append(f"[{text[:20]}] 크기 선택: {picked_size or '-'} / 색 선택: {picked_color or '-'} / 결과: {'성공' if ok else '실패'}\n"
                              f"  문단 HTML: {after[:300]}")
         except Exception as e:

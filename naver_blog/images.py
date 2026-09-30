@@ -230,6 +230,22 @@ BRAND_TAGS = {
 BRAND_EXACT = {"sec", "usa", "us", "fbi", "irs"}  # 짧은 단어는 다른 단어 속에 섞여 있을 수 있어 태그 전체가 같을 때만
 
 
+# 범죄·단속 느낌 사진: 세금·금융 글에 붙으면 "걸리면 처벌" 같은 엉뚱한 인상을 준다.
+# 검색어 자체가 범죄 이야기(예: 미공개정보 처벌)일 때만 허용
+CRIME_TAGS = {
+    "police", "policeman", "handcuff", "handcuffs", "prison", "jail", "arrest", "criminal", "crime", "thief",
+    "burglar", "robbery", "fraud", "corruption", "bribe", "bribery", "mafia", "gun", "weapon", "court", "judge",
+    "gavel", "lawyer", "justice", "punishment", "guilty", "cop", "sheriff", "detective", "evidence", "scam",
+}
+
+
+def _has_crime(hit: dict, query: str) -> bool:
+    if any(w in query.lower() for w in CRIME_TAGS):
+        return False
+    tags = {t.strip().lower() for t in hit.get("tags", "").split(",")}
+    return any(t in CRIME_TAGS or any(w in t.split() for w in CRIME_TAGS) for t in tags)
+
+
 def _has_brand(hit: dict) -> bool:
     tags = {t.strip().lower() for t in hit.get("tags", "").split(",")}
     return any(t in BRAND_EXACT or t in BRAND_TAGS or any(b in t for b in BRAND_TAGS) for t in tags)
@@ -244,7 +260,7 @@ def pixabay_photo(query: str, api_key: str, out_dir: Path, exclude: set[int]) ->
     with _get(url, 20) as r:
         hits = json.load(r).get("hits", [])
     for hit in hits:
-        if hit["id"] in exclude or _has_brand(hit):
+        if hit["id"] in exclude or _has_brand(hit) or _has_crime(hit, query):
             continue
         out = out_dir / f"pixabay_{hit['id']}.jpg"
         if not out.exists():

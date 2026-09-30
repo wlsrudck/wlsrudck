@@ -4,3 +4,4 @@ playwright>=1.40
 pillow>=10
 pyttsx3>=2.90
 imageio-ffmpeg>=0.5
+edge-tts>=7

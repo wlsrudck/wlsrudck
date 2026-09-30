@@ -46,5 +46,9 @@ key_underline = true           # 핵심 한 줄 밑줄
 [clip]
 # true면 글을 쓸 때마다 네이버 클립용 세로 영상(mp4)도 같이 만든다. 따로 만들려면 8_make_clip.bat
 auto = false
-# 목소리 빠르기 (보통 150~200)
-voice_rate = 175
+# 목소리: ko-KR-SunHiNeural(여자) 또는 ko-KR-InJoonNeural(남자)
+voice = "ko-KR-SunHiNeural"
+# 빠르기: "+0%"가 보통, "+15%"는 조금 빠르게, "+30%"는 빠르게
+speed = "+15%"
+# 인터넷 음성이 안 될 때 쓰는 윈도우 기본 목소리 빠르기 (보통 180~250)
+voice_rate = 220

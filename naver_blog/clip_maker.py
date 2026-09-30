@@ -2,7 +2,7 @@
 
 - 대본: Claude가 글 내용만으로 30~40초 분량 장면 5~6개를 쓴다 (지어낸 경험·과장 없음)
 - 화면: 1080x1920 세로 카드 (글의 사진 위에 자막을 크게, 사진이 없으면 매거진형 배경)
-- 소리: 윈도우 기본 한국어 음성(TTS)으로 읽기. 한국어 음성이 없으면 자막만 있는 영상
+- 소리: 마이크로소프트 Edge 온라인 한국어 음성(무료)으로 읽기. 안 되면 윈도우 기본 음성, 그것도 없으면 자막만
 - 결과: output/날짜_키워드_클립/ 에 clip.mp4, 장면 이미지, 대본.txt, 자막.srt, 설명_해시태그.txt
 
 사용법:
@@ -76,8 +76,8 @@ def _cover(photo: Path) -> Image.Image:
     """사진을 세로 화면에 꽉 채우고, 글자가 잘 보이게 어둡게 흐리게"""
     with Image.open(photo) as src:
         im = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGB"), (W, H), Image.LANCZOS)
-    im = im.filter(ImageFilter.GaussianBlur(3))
-    return Image.blend(im, Image.new("RGB", (W, H), "black"), 0.55)
+    im = im.filter(ImageFilter.GaussianBlur(14))  # 자막보다 사진이 먼저 눈에 들어오지 않게 충분히 흐리게
+    return Image.blend(im, Image.new("RGB", (W, H), "black"), 0.5)
 
 
 def make_card(caption: str, out: Path, photo: Path | None, marker: str, brand: str, idx: int, total: int,
@@ -116,10 +116,38 @@ def make_card(caption: str, out: Path, photo: Path | None, marker: str, brand: s
     return out
 
 
-# ── 음성 (윈도우 기본 TTS) ─────────────────────────────────────────
+# ── 음성 ─────────────────────────────────────────────────────────
+# 1순위: 마이크로소프트 Edge 온라인 음성(무료, 사람 목소리에 가까움, 인터넷 필요)
+# 2순위: 윈도우 기본 음성(기계음에 가까움, 인터넷 없이)
 
-def tts_to_wavs(texts: list[str], folder: Path, rate: int = 175) -> list[Path] | None:
-    """장면별 wav를 만든다. 한국어 음성이 없거나 pyttsx3가 없으면 None"""
+def edge_tts_to_wavs(texts: list[str], folder: Path, voice: str, rate: str) -> list[Path] | None:
+    try:
+        import asyncio
+        import edge_tts
+    except Exception:
+        return None
+
+    async def run():
+        for i, text in enumerate(texts, 1):
+            await edge_tts.Communicate(text, voice, rate=rate).save(str(folder / f"voice_{i:02d}.mp3"))
+
+    try:
+        asyncio.run(run())
+        paths = []
+        for i in range(1, len(texts) + 1):
+            mp3, wav = folder / f"voice_{i:02d}.mp3", folder / f"voice_{i:02d}.wav"
+            subprocess.run([_ffmpeg(), "-y", "-loglevel", "error", "-i", str(mp3), "-ar", "44100", "-ac", "1",
+                            str(wav)], check=True)
+            mp3.unlink(missing_ok=True)
+            paths.append(wav)
+        return paths
+    except Exception as e:
+        print(f"      (자연스러운 목소리를 못 불러와서 윈도우 기본 목소리로 바꿔요: {str(e).splitlines()[0][:80]})")
+        return None
+
+
+def tts_to_wavs(texts: list[str], folder: Path, rate: int = 220) -> list[Path] | None:
+    """윈도우 기본 음성으로 장면별 wav를 만든다. 한국어 음성이 없거나 pyttsx3가 없으면 None"""
     try:
         import pyttsx3
     except Exception:
@@ -215,8 +243,12 @@ def make_clip(saved: dict, cfg: dict) -> Path:
         cards.append(make_card(sc.caption, folder / f"scene_{i + 1:02d}.jpg", photo, marker, brand,
                                i, len(script.scenes), first=(i == 0)))
 
-    print("[3/4] 목소리 만드는 중... (윈도우 한국어 음성)")
-    wavs = tts_to_wavs([sc.narration for sc in script.scenes], folder, cfg.get("clip", {}).get("voice_rate", 175))
+    print("[3/4] 목소리 만드는 중...")
+    ccfg = cfg.get("clip", {})
+    narrations = [sc.narration for sc in script.scenes]
+    wavs = edge_tts_to_wavs(narrations, folder, ccfg.get("voice", "ko-KR-SunHiNeural"), ccfg.get("speed", "+15%"))
+    if not wavs:
+        wavs = tts_to_wavs(narrations, folder, ccfg.get("voice_rate", 220))
     if wavs:
         durations = [_wav_seconds(w) + 0.5 for w in wavs]
     else:

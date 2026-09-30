@@ -62,12 +62,19 @@ class Post(BaseModel):
     sections: list[Section]
     tags: list[str] = Field(description="해시태그 5~10개, '#' 없이")
     summary: list[str] = Field(description="글 핵심 요약 3~4개. 각 20자 이내")
-    qa: list[QA] = Field(description="독자가 실제로 궁금해할 Q&A 2~4개")
+    qa: list[QA] = Field(description="독자가 실제로 검색할 법한 질문 4~6개. 답은 1~2문장으로 바로")
     metrics: list[Metric] = Field(description="핵심 지표 1~4개. 최소 1개는 반드시 있어야 함. 확인 못 한 지표는 value를 '확인 필요'로")
     metrics_basis: str = Field(description="지표 기준일. 예: 2026년 9월 28일 기준. 지표가 없으면 빈 문자열")
     answer_found: bool = Field(description="제목이 약속한 핵심 답(예: 실제 일정, 금액, 조건)을 조사 자료에서 찾아 본문에 담았으면 true")
     missing: str = Field(description="answer_found가 false면 무엇을 못 찾았는지 한 문장. true면 빈 문자열")
     sources: list[str] = Field(description="참고한 출처 URL. 조사 자료에 있는 URL만, 없으면 빈 목록")
+    closing: list[str] = Field(default=[], description="마무리 3문장: ①독자 상황에 공감하며 도움이 됐다면 공감 부탁 "
+                                                        "②비슷한 정보를 이어서 정리한다는 이웃 추가 안내 ③댓글로 상황·질문을 남기게 하는 참여 유도. "
+                                                        "매번 다른 표현으로, 과장 없이")
+    next_teaser: str = Field(default="", description="'다음 글 주제'가 주어졌을 때만 그 글을 예고하는 한 문장. 날짜 약속 없이. 없으면 빈 문자열")
+    related: list[int] = Field(default=[], description="'내 블로그의 다른 글' 목록에서 이 글과 관련 있는 글 번호(최대 5개). 목록이 없거나 관련 글이 없으면 빈 목록")
+    links: list[str] = Field(default=[], description="비워 두세요 (프로그램이 채웁니다)")
+    updated: str = Field(default="", description="비워 두세요 (프로그램이 채웁니다)")
 
     def body_text(self) -> str:
         parts = list(self.intro)
@@ -126,11 +133,23 @@ class Post(BaseModel):
         out.extend(("photo", p) for i, p in enumerate(photos, 1) if i not in used)
         if media.get("summary_card"):
             out.append(("photo", media["summary_card"]))
+        if self.closing:
+            out.append(("text", "\n".join(c.strip() for c in self.closing if c.strip())))
+        if self.next_teaser.strip():
+            out.append(("text", self.next_teaser.strip()))
+        if self.links:  # 내 블로그 다른 글 (제목|주소)
+            lines = ["함께 보면 좋은 글"]
+            for item in self.links:
+                title, _, url = item.partition("|")
+                lines += [f"▶ {title.strip()}", url.strip()]
+            out.append(("text", "\n".join(lines)))
         if self.sources:
             has_links = any("http" in s for s in self.sources)
             out.append(("text", ("참고 자료\n" if has_links else "") + "\n".join(self.sources)))
         if stock:
             out.append(("text", "사진 출처: Pixabay"))
+        if self.updated:
+            out.append(("text", f"최종 수정: {self.updated} / 변경: 최초 작성"))
         out.append(("text", " ".join(f"#{t}" for t in self.tags)))
         return out
 
@@ -463,6 +482,28 @@ STYLE_RULES = """
   "~를 고려해야 합니다", "첫째·둘째·마지막으로", "결론적으로", "도움이 되셨기를 바랍니다".
 - 옆 사람에게 말하듯 "~해요", "~더라고요", "~하세요"로 끝냅니다. 같은 끝맺음이 세 번 연속 나오지 않게 합니다.
 
+[독자 니즈와 글 짜임]
+- 키워드를 반복하기보다 독자가 이 글을 찾은 이유(불안, 결정해야 할 일)에 맞춰 짭니다.
+  독자가 지금 어느 단계인지(처음 알아보는 중 / 방법을 찾는 중 / 비교하는 중 / 결정·신청 직전) 하나를 정하고 거기에 집중합니다.
+- 도입 둘째 줄에는 왜 지금 이 정보가 중요한지(제도 변경, 신청 시기, 가격 변화 등)를 넣습니다.
+- 핵심 질문(Primary)에 답한 뒤, 독자가 이어서 궁금해할 질문(Secondary) 하나를 소제목 하나로 더 다룹니다.
+- 단순 정보 나열로 끝내지 않습니다. 비교(A와 B 중 누구에게 무엇이 맞는지), 주의할 점(리스크), 행동 기준
+  ("이런 경우라면 ~부터 확인")을 담습니다. 전문가·실무자라고 자칭하거나 없는 경력을 암시하지 않습니다.
+- 날짜는 "올해", "다음 달" 대신 "2026년 11월 5일"처럼 정확히 씁니다. 조사 자료로 확인되지 않은 최신 정보는
+  "아직 확정되지 않았어요"처럼 불확실하다고 밝힙니다.
+- 키워드는 제목, 도입, 소제목 하나 이상에 자연스럽게 넣고, 본문에서 억지로 반복하지 않습니다.
+
+[문장 리듬]
+- 짧은 문장, 중간 문장, 조금 긴 문장을 섞되 같은 순서를 되풀이하지 않습니다.
+- "그리고, 또한, 하지만" 같은 접속어를 연달아 쓰지 않습니다. 이어지는 문단을 같은 말로 시작하지 않습니다.
+- 같은 단어를 가까운 세 문장에 연달아 쓰지 않습니다. 소제목 길이도 들쭉날쭉하게.
+- "이웃분들이 많이 물어보셔서" 같은 말은 작성자 메모에 그런 사실이 있을 때만 씁니다.
+
+[마무리]
+- closing 세 문장은 매번 다른 말로 씁니다. 같은 인사·같은 문장을 글마다 반복하지 않습니다.
+- '내 블로그의 다른 글' 목록이 주어지면 이 글과 정말 관련 있는 글만 related에 고릅니다. 본문에서 "○○는 따로 정리해 뒀어요"처럼
+  그 글 제목을 자연스럽게 한두 번 언급해도 됩니다. 주소는 프로그램이 글 끝에 붙입니다.
+
 [핵심 한 줄]
 - 소제목마다 key_line에 독자가 꼭 기억할 한 줄(금액, 날짜, 조건, 핵심 팁)을 paragraphs 안에서 글자 그대로 골라 적습니다.
   이 줄은 색과 밑줄로 강조됩니다. 강조할 만한 줄이 없으면 빈 문자열."""
@@ -505,7 +546,9 @@ def checklist(post: "Post", memo: str, cfg: dict) -> list[tuple[str, bool, str]]
         ("검증 지표", bool(confirmed), f"확인 {len(confirmed)}개 / 확인 필요 {len(post.metrics) - len(confirmed)}개"),
         ("핵심 정보", post.answer_found, "조사로 찾음" if post.answer_found else f"못 찾음: {post.missing}"),
         ("출처", bool(post.sources), ", ".join(post.sources)[:60] or "없음"),
-        ("Q&A", len(post.qa) >= 2, f"{len(post.qa)}개"),
+        ("Q&A", len(post.qa) >= 4, f"{len(post.qa)}개 (목표 4~6)"),
+        ("마무리 3문장", len(post.closing) >= 3, f"{len(post.closing)}문장"),
+        ("내 글 링크", bool(post.links), f"{len(post.links)}개" if post.links else "없음 (관련 글이 쌓이면 붙어요)"),
         ("태그 한 줄", 3 <= len(post.tags) <= 15, f"{len(post.tags)}개"),
         ("금지어", not banned, "없음" if not banned else ", ".join(banned)),
         ("AI 말투", not ai, "없음" if not ai else ", ".join(ai)),
@@ -556,7 +599,28 @@ def banned_in(post: "Post") -> list[str]:
     return [w for w in BANNED_WORDS if w in text]
 
 
-def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Post:
+def my_posts(blog_id: str, limit: int = 30) -> list[tuple[str, str]]:
+    """내 블로그 최근 글 (제목, 주소). 네이버 블로그 RSS를 읽는다. 실패하면 빈 목록"""
+    import urllib.request
+    import xml.etree.ElementTree as ET
+    try:
+        req = urllib.request.Request(f"https://rss.blog.naver.com/{blog_id}.xml",
+                                     headers={"User-Agent": "Mozilla/5.0 naver-blog-helper/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            root = ET.fromstring(r.read())
+    except Exception:
+        return []
+    out = []
+    for item in root.iter("item"):
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip().split("?")[0]
+        if title and link:
+            out.append((title, link))
+    return out[:limit]
+
+
+def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
+                  mine: list[tuple[str, str]] = (), next_keyword: str = "") -> Post:
     client = anthropic.Anthropic(api_key=_api_key())
     notes, found = "", {}
     if cfg.get("research", True):
@@ -583,6 +647,8 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Pos
         f"첨부 사진: {len(photos)}장\n\n"
         f"문체: {cfg['tone']}\n"
         f"본문 분량: 공백 포함 {cfg['min_chars']}~{cfg['max_chars']}자"
+        + (f"\n\n내 블로그의 다른 글:\n" + "\n".join(f"{i}. {t}" for i, (t, _) in enumerate(mine, 1)) if mine else "")
+        + (f"\n\n다음 글 주제: {next_keyword}" if next_keyword else "")
         + (f"\n\n조사 자료:\n{notes}" if notes else "")
     )})
     response = client.beta.messages.parse(
@@ -632,6 +698,10 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict) -> Pos
             print(f"  ⚠ 금지 표현·AI 말투가 남아 있어요({', '.join(left)}). 발행 전에 확인하세요.")
 
     fix_key_lines(post)
+    post.links = [f"{mine[i - 1][0]}|{mine[i - 1][1]}" for i in dict.fromkeys(post.related) if 1 <= i <= len(mine)][:5]
+    post.updated = time.strftime("%Y-%m-%d")
+    if not next_keyword:
+        post.next_teaser = ""
 
     if short:
         # 짧은 호흡 문체는 소제목 앞에 1. 2. 3. 번호

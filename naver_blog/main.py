@@ -20,7 +20,8 @@ from pathlib import Path
 import urllib.error
 
 import images
-from generate import NotEnoughInfo, Post, SearchFailed, checklist, find_photos, generate_post, make_threads
+from generate import (NotEnoughInfo, Post, SearchFailed, checklist, find_photos, generate_post, make_threads,
+                      my_posts)
 
 ROOT = Path(__file__).parent
 KEYWORDS = ROOT / "keywords.csv"
@@ -203,6 +204,9 @@ def main():
     if not args.no_wait and not args.dry_run:
         sleep_minutes(pub["start_jitter_minutes"], "시작 전 랜덤 대기")
 
+    mine = my_posts(cfg["naver"]["blog_id"])  # 내 블로그 최근 글 (내부 링크용)
+    if mine:
+        print(f"내 블로그 최근 글 {len(mine)}개를 확인했어요 (관련 글을 글 끝에 연결)")
     made = 0
     for row in pending:
         if made >= budget:
@@ -225,7 +229,9 @@ def main():
                 reused = True
                 print("  ♻ 오늘 이미 써 둔 글이 있어서 새로 쓰지 않고 그대로 씁니다 (Claude 비용 없음)")
             else:
-                post = generate_post(keyword, row.get("memo", ""), photos, cfg["writing"])
+                later = [r["keyword"] for r in pending if r is not row]
+                post = generate_post(keyword, row.get("memo", ""), photos, cfg["writing"],
+                                     mine, later[0] if later else "")
         except SearchFailed as e:
             # 주제 탓이 아니므로 건너뜀 표시를 하지 않고 다음 실행 때 다시 쓴다
             print(f"  ⏸ 웹 검색 도구 오류({e})로 조사를 못 했어요. 이 키워드는 그대로 두고 다음 실행 때 다시 씁니다.")

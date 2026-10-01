@@ -108,6 +108,9 @@ TREND_URLS = [
     "https://creator-advisor.naver.com/naver_blog/{id}/trends",
 ]
 # 화면이 '주제별 인기유입검색어'를 그릴 때 받아 오는 데이터 주소 (로그인한 상태로 직접 읽는다)
+# 주제별 인기 유입 검색어 (화면의 주제 카드가 실제로 받아 오는 주소). categories에 주제 이름을 쉼표로
+CATEGORY_KEYWORDS_API = ("https://creator-advisor.naver.com/api/v6/trend/category?categories={cats}"
+                         "&contentType=text&date={date}&hasRankChange=true&interval=day&limit=20&service=naver_blog")
 CATEGORY_RANKS_API = ("https://creator-advisor.naver.com/api/v6/trend/category-inflow-ranks"
                       "?contentType=text&date={date}&interval=day&service=naver_blog")
 KEY_FIELDS = ("query", "keyword", "searchKeyword", "searchQuery", "word")
@@ -194,22 +197,41 @@ def fetch_trending(blog_id: str, tcfg_topics: list[str] = CA_TOPICS) -> list[tup
         if "nid.naver.com" in page.url:
             browser.close()
             raise RuntimeError("로그인이 풀렸어요. 2_login.bat을 다시 실행해 주세요.")
+        import urllib.parse as _up
+        wanted = [t for t in ALL_TOPICS if map_category(t, DEFAULT_MAP)]
+        ref = {"Referer": TREND_URLS[0].format(id=blog_id)}
         last_raw = ""
+
+        def ask(cat: str, day: str) -> list[tuple[str, str]]:
+            nonlocal last_raw
+            r = page.request.get(CATEGORY_KEYWORDS_API.format(cats=_up.quote(cat), date=day), headers=ref, timeout=20000)
+            last_raw = f"[{day} {cat}] HTTP {r.status}\n" + r.text()[:3000]
+            if not r.ok:
+                return []
+            got = parse_trend_json([(cat, r.json())])
+            return [(cat, kw) for _, kw in got if kw != cat and kw not in ALL_TOPICS]
+
+        # 통계는 하루 이틀 늦게 올라오므로, 첫 주제로 데이터가 있는 가장 최근 날짜를 찾는다 (어제부터 최대 5일 전)
+        day_ok, items = None, []
         for back in range(1, 6):
             day = (_dt.date.today() - _dt.timedelta(days=back)).isoformat()
             try:
-                r = page.request.get(CATEGORY_RANKS_API.format(date=day),
-                                     headers={"Referer": TREND_URLS[0].format(id=blog_id)}, timeout=20000)
-                last_raw = f"[{day}] HTTP {r.status}\n" + r.text()[:4000]
-                if not r.ok:
-                    continue
-                data = r.json()
-                items = parse_trend_json([("", data)])
+                first = ask(wanted[0], day)
             except Exception as e:
                 last_raw = f"[{day}] 오류: {e}"
                 continue
+            if first:
+                day_ok, items = day, first
+                break
+        if day_ok:
+            for cat in wanted[1:]:
+                try:
+                    items += ask(cat, day_ok)
+                except Exception:
+                    continue
+                page.wait_for_timeout(300)
             if items:
-                print(f"  {day} 기준 인기 유입 검색어 {len(items)}개를 읽었어요")
+                print(f"  {day_ok} 기준 주제별 인기 유입 검색어 {len(items)}개를 읽었어요")
                 browser.close()
                 return items
         OUTPUT.mkdir(exist_ok=True)

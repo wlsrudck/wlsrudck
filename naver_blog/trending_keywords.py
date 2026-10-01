@@ -389,6 +389,26 @@ def balanced(rows: list[dict], limit: int) -> list[dict]:
     return out
 
 
+def written_titles(blog_id: str) -> list[str]:
+    """이미 쓴 글 제목: 내 블로그 최근 글(RSS) + 이 프로그램이 만든 글(output/*.json)"""
+    import json
+    from generate import my_posts
+    titles = [t for t, _ in my_posts(blog_id, limit=200)]
+    for f in (Path(__file__).parent / "output").glob("*.json"):
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            titles.append(d.get("title", "") if isinstance(d, dict) else "")
+        except Exception:
+            pass
+    return [t.replace(" ", "") for t in titles if t]
+
+
+def already_written(kw: str, titles: list[str]) -> bool:
+    """키워드가 이미 쓴 글 제목에 들어 있으면 (띄어쓰기 무시) 쓴 글로 본다"""
+    k = kw.replace(" ", "")
+    return len(k) >= 2 and any(k in t for t in titles)
+
+
 def map_category(topic: str, mapping: dict) -> str:
     return next((cat for key, cat in mapping.items() if key and key in topic), "")
 
@@ -405,9 +425,13 @@ def main():
         print("\n⚠ 인기 키워드를 읽지 못했어요. output 폴더의 trend_debug.png 와 trend_debug.txt 를 캡처해서 보내 주세요.")
         return
     have = {r["keyword"].replace(" ", "") for r in load_rows()}
-    rows = []
+    titles = written_titles(cfg["naver"]["blog_id"])
+    rows, done = [], []
     for topic, kw in items:
         if kw.replace(" ", "") in have or SHOPPING.search(kw) or LYRICS.search(kw):
+            continue
+        if already_written(kw, titles):
+            done.append(kw)
             continue
         rows.append({"keyword": kw, "topic": topic, "category": map_category(topic, mapping) if topic else ""})
     known = any(any(t in r["topic"] for t in ALL_TOPICS) for r in rows)
@@ -416,6 +440,8 @@ def main():
     skipped = len(rows) - len(mine)
     rows = balanced(mine, 40)
     print(f"인기 키워드 {len(items)}개 중 내 블로그 주제에 맞는 {len(rows)}개" + (f" (다른 주제 {skipped}개 제외)" if skipped else ""))
+    if done:
+        print(f"이미 쓴 글과 겹쳐서 뺀 키워드 {len(done)}개: " + ", ".join(done[:10]) + (" ..." if len(done) > 10 else ""))
 
     keys = load_keys()
     if keys.get("ad_access_license") and keys.get("ad_secret_key") and keys.get("ad_customer_id"):

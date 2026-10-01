@@ -327,6 +327,14 @@ def main():
         failed = [f"{name}({detail})" for name, ok, detail in checks if not ok]
         print(f"  발행 전 점검: {len(checks) - len(failed)}/{len(checks)} 통과"
               + (f" - 확인할 것: {', '.join(failed)}" if failed else ""))
+        if cfg.get("images", {}).get("card_news", True):
+            try:
+                from card_news import make_card_news
+                cn_dir = OUTPUT / f"{dt.date.today()}_{slug}_카드뉴스"
+                cards = make_card_news(post, cn_dir, slug, cfg["naver"].get("blog_name", ""))
+                print(f"  카드뉴스 저장: {cn_dir.name} ({len(cards)}장 + 캡션.txt)")
+            except Exception as e:
+                print(f"  카드뉴스는 건너뜀: {e}")
         if cfg["writing"].get("threads", True) and not reused:
             try:
                 posts = make_threads(post, cfg["writing"])

@@ -488,12 +488,72 @@ def _clear_mark(page: Page, editor, mark: str, replace_with: str = "") -> bool:
     return True
 
 
+# 글 서식(본문 ▾) 목록을 여는 버튼: 지금 서식 이름(본문·소제목 등)이 적힌 툴바 버튼
+_MARK_FORMAT_OPENER = """() => {
+    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const vis = e => e.getClientRects().length > 0;
+    const txt = e => (e.textContent || "").replace(/\\s+/g, " ").trim();
+    const inDoc = e => e.closest(".se-component, .se-components-wrap, .se-content");
+    const btns = [...document.querySelectorAll("button")].filter(e => vis(e) && !inDoc(e));
+    const el = btns.find(e => /(text-format|paragraph-style|format-select)/i.test(e.className) && !/(font|color|size|align)/i.test(e.className))
+        || btns.find(e => ["본문", "소제목", "인용구"].includes(txt(e)));
+    if (!el) return "";
+    window.__nbSeen = new Set([...document.querySelectorAll("button, li, a, span")].filter(vis));  // 지금 보이는 것만
+    el.setAttribute("data-nb-pick", "1");
+    return (el.className || "button") + " | " + txt(el);
+}"""
+
+# 열린 서식 목록에서 '소제목'(없으면 제목2 등)을 표시한다. 못 찾으면 새로 보이는 항목 이름들을 돌려준다(기록용)
+_MARK_FORMAT_OPTION = """(words) => {
+    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const vis = e => e.getClientRects().length > 0;
+    const txt = e => (e.textContent || "").replace(/\\s+/g, " ").trim();
+    const inDoc = e => e.closest(".se-component, .se-components-wrap, .se-content");
+    const seen = window.__nbSeen || new Set();
+    const fresh = [...document.querySelectorAll("button, li, a, span")].filter(e => vis(e) && !inDoc(e) && !seen.has(e));
+    for (const w of words) {
+        const hit = fresh.find(e => txt(e) === w) || fresh.find(e => txt(e).startsWith(w) && txt(e).length < w.length + 8);
+        if (hit) {
+            const el = hit.closest("button, li, a") || hit;
+            el.setAttribute("data-nb-pick", "1");
+            return "OK " + txt(el);
+        }
+    }
+    return "NONE " + [...new Set(fresh.map(txt).filter(t => t && t.length < 20))].slice(0, 30).join(" / ");
+}"""
+HEADING_FORMATS = ["소제목", "제목2", "제목 2", "제목3", "제목 3"]
+
+
+def _heading_format(page: Page, editor, length: int, log: list) -> bool:
+    """방금 친 소제목(커서 앞 length 글자)을 편집기의 '소제목' 서식으로 바꾼다 (검색엔진이 소제목으로 알아보게)"""
+    for _ in range(length):
+        page.keyboard.press("Shift+ArrowLeft")
+    opener = editor.evaluate(_MARK_FORMAT_OPENER)
+    if not opener:
+        log.append("[소제목 서식] 서식(본문 ▾) 버튼 못 찾음\n" + editor.evaluate(_DUMP_BUTTONS))
+        page.keyboard.press("End")
+        return False
+    editor.locator("[data-nb-pick]").first.click(timeout=5000)
+    _pause(0.3, 0.6)
+    picked = editor.evaluate(_MARK_FORMAT_OPTION, HEADING_FORMATS)
+    if not picked.startswith("OK"):
+        log.append(f"[소제목 서식] 목록에서 소제목 못 찾음. 버튼: {opener} / 보인 항목: {picked[5:]}")
+        page.keyboard.press("Escape")
+        page.keyboard.press("End")
+        return False
+    editor.locator("[data-nb-pick]").first.click(timeout=5000)
+    _pause(0.3, 0.6)
+    page.keyboard.press("End")
+    return True
+
+
 def _insert_heading_parts(page: Page, editor, heads, st: dict, screenshot_dir: Path | None) -> list[str]:
     """소제목 위 구분선, 소제목 상자(버티컬 라인 인용구)를 넣는다. 상자로 못 넣은 소제목은 굵은 글씨로 되돌리고 그 목록을 돌려준다."""
     divider, box = int(st.get("divider_style") or 0), (st.get("heading_box") or "").strip()
     log, fallback = [], []
-    ok_div = ok_box = 0
-    fails = {"div": 0, "box": 0}
+    ok_div = ok_box = ok_fmt = 0
+    fails = {"div": 0, "box": 0, "fmt": 0}
+    use_fmt = bool(st.get("heading_format", True))
     for n, heading in heads:
         if divider:
             mark = f"§D{n}§"
@@ -515,6 +575,17 @@ def _insert_heading_parts(page: Page, editor, heads, st: dict, screenshot_dir: P
                         and _write_in_component(page, editor, heading, mark, log):
                     boxed = True
                     ok_box += 1
+                    # 편집기 '소제목' 서식을 먼저 (서식을 바꾸면 크기가 바뀔 수 있어 크기·색은 그다음에)
+                    if use_fmt and fails["fmt"] < 2:
+                        try:
+                            if _heading_format(page, editor, len(heading), log):
+                                ok_fmt += 1
+                            else:
+                                fails["fmt"] += 1
+                        except Exception as e:
+                            fails["fmt"] += 1
+                            log.append(f"[소제목 서식] 오류: {str(e).splitlines()[0]}")
+                            page.keyboard.press("Escape")
                     # 상자 안 소제목도 크기·색을 맞춘다 (방금 친 글자를 Shift+← 로 선택)
                     for _ in range(len(heading)):
                         page.keyboard.press("Shift+ArrowLeft")
@@ -542,7 +613,9 @@ def _insert_heading_parts(page: Page, editor, heads, st: dict, screenshot_dir: P
         print(f"  구분선: {ok_div}/{len(heads)}개")
     if box:
         print(f"  소제목 상자({box}): {ok_box}/{len(heads)}개")
-    if ok_div < len(heads) * bool(divider) or ok_box < len(heads) * bool(box):
+    if box and use_fmt:
+        print(f"  소제목 서식(검색엔진용): {ok_fmt}/{ok_box}개" + ("" if ok_fmt == ok_box else " (editor_heading.txt 참고)"))
+    if ok_div < len(heads) * bool(divider) or ok_box < len(heads) * bool(box) or (box and use_fmt and ok_fmt < ok_box):
         _save_log(editor, screenshot_dir, "editor_heading.txt", log)
     return fallback
 

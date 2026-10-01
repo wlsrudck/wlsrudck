@@ -78,6 +78,7 @@ class Post(BaseModel):
     related: list[int] = Field(description="'내 블로그의 다른 글' 목록에서 이 글과 관련 있는 글 번호(최대 5개). 목록이 없거나 관련 글이 없으면 빈 목록")
     # 아래 둘은 프로그램이 채운다 (Claude에게 보내는 답 형식에서는 빠진다)
     links: SkipJsonSchema[list[str]] = []
+    suggest: SkipJsonSchema[list[str]] = []  # 네이버 검색창 자동완성 연관 키워드 (점검표용)
     updated: SkipJsonSchema[str] = ""
 
     @classmethod
@@ -592,6 +593,8 @@ def checklist(post: "Post", memo: str, cfg: dict) -> list[tuple[str, bool, str]]
         ("출처", bool(post.sources), ", ".join(post.sources)[:60] or "없음"),
         ("Q&A", len(post.qa) >= 4, f"{len(post.qa)}개 (목표 4~6)"),
         ("마무리 3문장", len(post.closing) >= 3, f"{len(post.closing)}문장"),
+        ("연관 키워드 제목", bool(title_uses_suggest(post)) or not post.suggest,
+         ", ".join(title_uses_suggest(post)) or ("못 넣음" if post.suggest else "연관 키워드 없음")),
         ("내 글 링크", bool(post.links), f"{len(post.links)}개" if post.links else "없음 (관련 글이 쌓이면 붙어요)"),
         ("태그 한 줄", 3 <= len(post.tags) <= 15, f"{len(post.tags)}개"),
         ("금지어", not banned, "없음" if not banned else ", ".join(banned)),
@@ -674,6 +677,42 @@ def choose_photo(heading: str, context: str, previews: list[Path], cfg: dict) ->
         return 0
 
 
+def naver_suggest(keyword: str, limit: int = 10) -> list[str]:
+    """네이버 검색창에 키워드를 칠 때 아래로 딸려 나오는 자동완성 연관 키워드. 실패하면 빈 목록"""
+    import json
+    import urllib.request
+    url = "https://ac.search.naver.com/nx/ac?" + urllib.parse.urlencode({
+        "q": keyword, "con": "1", "frm": "nv", "ans": "2", "r_format": "json", "r_enc": "UTF-8",
+        "r_unicode": "0", "t_koreng": "1", "run": "2", "rev": "4", "q_enc": "UTF-8", "st": "100"})
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.naver.com/"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except Exception:
+        return []
+    out = []
+
+    def walk(o):
+        if isinstance(o, str):
+            t = o.strip()
+            if re.search(r"[가-힣A-Za-z]", t) and t != keyword.strip() and t not in out and len(t) <= 40:
+                out.append(t)
+        elif isinstance(o, list):
+            for v in o:
+                if isinstance(v, list) and v and isinstance(v[0], str):
+                    walk(v[0])  # [글자, 종류번호, ...] 꼴이면 글자만
+                else:
+                    walk(v)
+    walk(data.get("items", []))
+    return out[:limit]
+
+
+def title_uses_suggest(post: "Post") -> list[str]:
+    """제목에 자연스럽게 들어간 연관 키워드 (띄어쓰기 무시, 각 단어가 제목에 다 있으면 들어간 것으로 본다)"""
+    title = post.title.replace(" ", "")
+    return [s for s in post.suggest if all(w in title for w in s.split())]
+
+
 def my_posts(blog_id: str, limit: int = 30) -> list[tuple[str, str]]:
     """내 블로그 최근 글 (제목, 주소). 네이버 블로그 RSS를 읽는다. 실패하면 빈 목록"""
     import urllib.request
@@ -733,6 +772,9 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
                   mine: list[tuple[str, str]] = (), next_keyword: str = "") -> Post:
     # 서버가 붐빌 때(529) 조금씩 더 기다리며 여러 번 다시 시도한다
     client = anthropic.Anthropic(api_key=_api_key(), max_retries=6)
+    suggest = naver_suggest(keyword) if cfg.get("suggest", True) else []
+    if suggest:
+        print(f"  네이버 연관 키워드: {', '.join(suggest[:8])}")
     notes, found = "", {}
     if cfg.get("research", True):
         try:
@@ -758,6 +800,10 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
         f"첨부 사진: {len(photos)}장\n\n"
         f"문체: {cfg['tone']}\n"
         f"본문 분량: 공백 포함 {cfg['min_chars']}~{cfg['max_chars']}자"
+        + (f"\n\n네이버 검색창 연관 키워드(키워드를 칠 때 아래로 함께 뜨는 말): {', '.join(suggest)}\n"
+           "제목은 핵심 키워드에 이 중 글 내용과 맞는 1~2개를 붙여 자연스러운 한 문장으로 만드세요. "
+           "키워드를 쉼표로 나열하지 말고, 본문에서 실제로 답하는 것만 넣습니다(본문에 없는 말로 낚지 않기). "
+           "제목에 못 넣은 것 중 맞는 것은 소제목이나 태그에 씁니다." if suggest else "")
         + (f"\n\n내 블로그의 다른 글:\n" + "\n".join(f"{i}. {t}" for i, (t, _) in enumerate(mine, 1)) if mine else "")
         + (f"\n\n다음 글 주제: {next_keyword}" if next_keyword else "")
         + (f"\n\n조사 자료:\n{notes}" if notes else "")
@@ -814,6 +860,7 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
 
     dedupe_intro(post)
     fix_key_lines(post)
+    post.suggest = suggest
     post.links = [f"{mine[i - 1][0]}|{mine[i - 1][1]}" for i in dict.fromkeys(post.related) if 1 <= i <= len(mine)][:5]
     post.updated = time.strftime("%Y-%m-%d")
     if not next_keyword:

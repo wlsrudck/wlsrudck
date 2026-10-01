@@ -92,6 +92,18 @@ _SCROLL_TO_TOPIC = r"""(t) => {
     el.scrollIntoView({block: "center", inline: "center"});
     return true;
 }"""
+# 주제 카드를 옆으로 넘기는 화살표(›, 다음)의 가운데 좌표
+_NEXT_ARROW_POINT = r"""() => {
+    const vis = e => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
+    const all = [...document.querySelectorAll("button, a, [role=button], span, i, div")].filter(vis);
+    const hit = all.find(e => /다음|next/i.test((e.getAttribute("aria-label") || "") + " " + (e.className || "")) && !/date|day|calendar/i.test(e.className || "")
+                     && e.getBoundingClientRect().top > 300)
+        || all.find(e => ["›", ">", "〉", "❯"].includes((e.textContent || "").trim()) && e.getBoundingClientRect().top > 300);
+    if (!hit) return null;
+    hit.scrollIntoView({block: "center"});
+    const b = hit.getBoundingClientRect();
+    return {x: b.left + b.width / 2, y: b.top + b.height / 2};
+}"""
 TREND_URLS = [
     "https://creator-advisor.naver.com/naver_blog/{id}/trends",
 ]
@@ -243,31 +255,57 @@ def fetch_trending(blog_id: str, tcfg_topics: list[str] = CA_TOPICS) -> list[tup
                 page.mouse.click(pt["x"], pt["y"])  # 진짜 마우스로 누른다 (화면이 확실히 알아채게)
                 urls.append(f"(이전 날짜 누름: {pt['how']} {int(pt['x'])},{int(pt['y'])})")
                 page.wait_for_timeout(3500)
-            # 카드는 화면에 보일 때 키워드를 불러온다: 내 주제 카드를 하나씩 화면 가운데로 옮기며 기다린다
-            for topic in ALL_TOPICS:
-                if not map_category(topic, DEFAULT_MAP):
-                    continue
+            # 카드는 화면에 보일 때 키워드를 불러온다. 내 주제 카드를 화면 가운데로 옮기고,
+            # 옆으로 넘기는 화살표(›)도 눌러 가며 읽은 키워드를 모은다
+            collected: dict[tuple[str, str], None] = {}
+
+            def wait_loaded(sec):
+                for _ in range(sec):
+                    if "불러오고 있습니다" not in page.inner_text("body"):
+                        return
+                    page.wait_for_timeout(1000)
+
+            def read_now():
+                try:
+                    found = page.evaluate(_READ_CARDS, ALL_TOPICS)
+                except Exception:
+                    return
+                for topic, kw in found:
+                    ui = kw in ("유입순 보기", "설정순 보기", "주제 설정", "검색 유입 트렌드", "주제별 인기유입검색어") \
+                        or "|" in kw or "데이터가 없" in kw or "불러오" in kw or kw.endswith("습니다.")
+                    if not ui:
+                        collected[(topic, kw)] = None
+
+            wanted = [t for t in ALL_TOPICS if map_category(t, DEFAULT_MAP)]
+            for topic in wanted:
                 try:
                     if page.evaluate(_SCROLL_TO_TOPIC, topic):
                         page.wait_for_timeout(1200)
                 except Exception:
                     pass
-            for _ in range(20):  # '불러오고 있습니다'가 사라질 때까지 최대 20초
-                if "불러오고 있습니다" not in page.inner_text("body"):
+            wait_loaded(15)
+            read_now()
+            for _ in range(15):  # 옆으로 넘기기
+                have = {t for t, _ in collected}
+                if all(t in have for t in wanted if page.evaluate(_SCROLL_TO_TOPIC, t)):
                     break
-                page.wait_for_timeout(1000)
-            try:
-                cards = [tuple(x) for x in page.evaluate(_READ_CARDS, ALL_TOPICS)]
-            except Exception:
-                cards = []
-            if cards:  # 주제 카드에서 바로 읽었으면 단추를 누를 필요가 없다
-                seen, items = set(), []
-                for topic, kw in cards:
-                    ui = kw in ("유입순 보기", "설정순 보기", "주제 설정", "검색 유입 트렌드", "주제별 인기유입검색어") \
-                        or "|" in kw or "데이터가 없" in kw or "불러오" in kw or kw.endswith("습니다.")
-                    if (topic, kw) not in seen and not ui:
-                        seen.add((topic, kw))
-                        items.append((topic, kw))
+                pt = page.evaluate(_NEXT_ARROW_POINT)
+                if not pt:
+                    break
+                page.mouse.click(pt["x"], pt["y"])
+                page.wait_for_timeout(1800)
+                wait_loaded(8)
+                read_now()
+            if collected:
+                items = list(collected)
+                counts = {}
+                for t, _ in items:
+                    counts[t] = counts.get(t, 0) + 1
+                print("  읽은 주제 카드: " + ", ".join(f"{t} {n}개" for t, n in counts.items()))
+                OUTPUT.mkdir(exist_ok=True)
+                (OUTPUT / "trend_debug.txt").write_text(
+                    "읽은 주제 카드: " + ", ".join(f"{t} {n}" for t, n in counts.items())
+                    + "\n\n받은 데이터 주소:\n" + "\n".join(urls[-80:]), encoding="utf-8")
                 browser.close()
                 return items
             texts = []

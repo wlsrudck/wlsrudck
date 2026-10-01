@@ -115,3 +115,10 @@ keyword,memo,status,category
 실행 창의 `소제목 서식(검색엔진용): ○/○개`로 결과를 볼 수 있고, 안 되면 `output/editor_heading.txt`에 이유가 남습니다.
 끄려면 `config.toml` `[style]`에 `heading_format = false`.
 
+## 지금 뜨는 키워드 (11_trending_keywords.bat)
+
+네이버 크리에이터 어드바이저의 '주제별 인기 유입 검색어'를 읽어, 내 블로그 주제(경제·생활·연예 등)에 맞는 것만
+검색량·경쟁도로 S/A/B/C 등급을 매겨 보여 줍니다. 번호를 고르면 `keywords.csv`에 카테고리와 함께 들어갑니다.
+로그인은 `2_login.bat`으로 저장한 세션을 씁니다. 못 읽으면 `output/trend_debug.png`, `trend_debug.txt`를 캡처해 보내 주세요.
+주제 → 카테고리 연결을 바꾸려면 `config.toml`에 `[trending.map]` 칸을 만들고 `"여행" = "리뷰,후기"`처럼 적습니다.
+

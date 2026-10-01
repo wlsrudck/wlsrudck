@@ -367,6 +367,28 @@ def fetch_trending(blog_id: str, tcfg_topics: list[str] = CA_TOPICS) -> list[tup
     return items
 
 
+# 노래 가사 글은 가사를 옮겨 적게 되어 저작권·저품질 위험이 있으므로 뺀다
+LYRICS = re.compile(r"(가사|노래방|악보|lyrics)$", re.I)
+
+
+def balanced(rows: list[dict], limit: int) -> list[dict]:
+    """한 카테고리(연예 등)가 자리를 다 차지하지 않도록, 카테고리 → 주제 순서로 돌아가며 하나씩 뽑는다.
+    연예·이슈는 영화·음악·드라마·방송·스타 다섯 주제라서, 앞에서부터 자르면 연예 키워드로만 가득 찬다"""
+    groups: dict[str, dict[str, list[dict]]] = {}
+    for r in rows:
+        groups.setdefault(r["category"], {}).setdefault(r["topic"], []).append(r)
+    queues = {}
+    for c, topics in groups.items():  # 카테고리 안에서도 주제별로 번갈아 (영화 1위, 음악 1위, 드라마 1위, 영화 2위 ...)
+        lists = list(topics.values())
+        queues[c] = [x[i] for i in range(max(map(len, lists))) for x in lists if i < len(x)]
+    out: list[dict] = []
+    while len(out) < limit and any(queues.values()):
+        for q in queues.values():
+            if q and len(out) < limit:
+                out.append(q.pop(0))
+    return out
+
+
 def map_category(topic: str, mapping: dict) -> str:
     return next((cat for key, cat in mapping.items() if key and key in topic), "")
 
@@ -385,14 +407,14 @@ def main():
     have = {r["keyword"].replace(" ", "") for r in load_rows()}
     rows = []
     for topic, kw in items:
-        if kw.replace(" ", "") in have or SHOPPING.search(kw):
+        if kw.replace(" ", "") in have or SHOPPING.search(kw) or LYRICS.search(kw):
             continue
         rows.append({"keyword": kw, "topic": topic, "category": map_category(topic, mapping) if topic else ""})
     known = any(any(t in r["topic"] for t in ALL_TOPICS) for r in rows)
     # 주제 이름을 알아볼 수 없으면(숫자 코드 등) 거르지 않고 전부 보여 준다
     mine = [r for r in rows if r["category"] or not r["topic"] or not known]
     skipped = len(rows) - len(mine)
-    rows = mine[:40]
+    rows = balanced(mine, 40)
     print(f"인기 키워드 {len(items)}개 중 내 블로그 주제에 맞는 {len(rows)}개" + (f" (다른 주제 {skipped}개 제외)" if skipped else ""))
 
     keys = load_keys()

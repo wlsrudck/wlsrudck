@@ -61,6 +61,21 @@ _READ_CARDS = r"""(topics) => {
     }
     return out;
 }"""
+# 날짜(2026. 10. 01.) 왼쪽의 '이전 날짜' 단추를 누른다
+_CLICK_PREV_DAY = r"""() => {
+    const re = /^\d{4}\.\s?\d{1,2}\.\s?\d{1,2}\.?$/;
+    const el = [...document.querySelectorAll("*")].find(e => re.test((e.textContent || "").trim()) && e.children.length <= 3);
+    if (!el) return "no-date";
+    let box = el.parentElement;
+    for (let i = 0; i < 4 && box; i++) {
+        // 날짜보다 앞(왼쪽)에 있는 단추 = 이전 날짜 (오른쪽의 달력·다음 날짜 단추는 제외)
+        const btns = [...box.querySelectorAll("button, a")].filter(b => !b.contains(el) && !el.contains(b)
+            && (b.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING));
+        if (btns.length) { btns[btns.length - 1].click(); return "clicked"; }
+        box = box.parentElement;
+    }
+    return "no-button";
+}"""
 TREND_URLS = [
     "https://creator-advisor.naver.com/naver_blog/{id}/trends",
 ]
@@ -160,7 +175,24 @@ def fetch_trending(blog_id: str, tcfg_topics: list[str] = CA_TOPICS) -> list[tup
                 last_raw = f"[{day}] HTTP {r.status}\n" + r.text()[:4000]
                 if not r.ok:
                     continue
-                items = parse_trend_json([("", r.json())])
+                data = r.json()
+                items = parse_trend_json([("", data)])
+                cats = data.get("data") if isinstance(data, dict) else None
+                if not items and isinstance(cats, list) and cats and all(isinstance(c, str) for c in cats):
+                    # 주제 이름 목록만 왔으면, 주제마다 같은 주소에 category를 붙여 키워드 순위를 받아 본다
+                    import urllib.parse as _up
+                    for cat in cats:
+                        if not any(k in cat for k in DEFAULT_MAP):
+                            continue  # 내 블로그 주제가 아닌 것은 건너뜀
+                        rr = page.request.get(CATEGORY_RANKS_API.format(date=day) + "&category=" + _up.quote(cat),
+                                              headers={"Referer": TREND_URLS[0].format(id=blog_id)}, timeout=20000)
+                        if rr.ok:
+                            try:
+                                got = parse_trend_json([(cat, rr.json())])
+                            except Exception:
+                                got = []
+                            items += [(cat, kw) for _, kw in got if kw != cat]
+                        last_raw += f"\n[{cat}] HTTP {rr.status}\n" + rr.text()[:800]
             except Exception as e:
                 last_raw = f"[{day}] 오류: {e}"
                 continue
@@ -205,16 +237,9 @@ def fetch_trending(blog_id: str, tcfg_topics: list[str] = CA_TOPICS) -> list[tup
                 body = page.inner_text("body")
                 if "데이터가 없습니다" not in body:
                     break
-                moved = False
-                for css in ("button[class*='prev']", "[aria-label*='이전']", "button[class*='Prev']", "a[class*='prev']"):
-                    b = page.locator(css).first
-                    if b.count() and b.is_visible():
-                        b.click(timeout=3000)
-                        page.wait_for_timeout(2500)
-                        moved = True
-                        break
-                if not moved:
+                if page.evaluate(_CLICK_PREV_DAY) != "clicked":
                     break
+                page.wait_for_timeout(3000)
             try:
                 cards = [tuple(x) for x in page.evaluate(_READ_CARDS, ALL_TOPICS)]
             except Exception:

@@ -26,9 +26,11 @@ DEFAULT_MAP = {
     "상품리뷰": "리뷰,후기",
 }
 
-# 크리에이터 어드바이저 트렌드 → '주제별 트렌드' 탭에서 차례로 눌러 볼 주제 (화면의 주제 이름 그대로)
-CA_TOPICS = ["비즈니스·경제", "IT·컴퓨터", "사회·정치", "건강·의학", "육아·결혼", "상품리뷰",
-             "스타·연예인", "방송", "드라마"]
+# 크리에이터 어드바이저 트렌드 → '검색 유입 트렌드' 탭의 주제 단추를 차례로 누른다 (화면의 주제 이름 그대로).
+# 화면에는 '주제 설정'에서 고른 주제만 단추로 나오므로, 있는 것만 눌리고 나머지는 건너뛴다.
+# 내 블로그 주제가 아닌 것(게임, 여행 등)은 눌러도 나중에 걸러진다.
+CA_TOPICS = ["비즈니스·경제", "IT·컴퓨터", "사회·정치", "건강·의학", "육아·결혼", "상품리뷰", "교육·학문",
+             "스타·연예인", "방송", "드라마", "영화", "음악", "요리·레시피", "일상·생각"]
 TREND_URLS = [
     "https://creator-advisor.naver.com/naver_blog/{id}/trends",
     "https://creator-advisor.naver.com/naver_blog/{id}/trend",
@@ -120,7 +122,7 @@ def fetch_trending(blog_id: str, tcfg_topics: list[str] = CA_TOPICS) -> list[tup
                 browser.close()
                 raise RuntimeError("로그인이 풀렸어요. 2_login.bat을 다시 실행해 주세요.")
             blobs.clear()  # 내 블로그 통계(검색 유입 등)가 섞이지 않게, 주제별 트렌드부터 새로 모은다
-            for label in ("주제별 트렌드", "주제별 인기 유입 검색어", "주제별 인기유입검색어"):
+            for label in ("검색 유입 트렌드", "주제별 인기 유입 검색어", "주제별 인기유입검색어", "주제별 트렌드"):
                 try:
                     el = page.get_by_text(label, exact=True).first
                     if el.count():

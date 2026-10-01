@@ -31,6 +31,36 @@ DEFAULT_MAP = {
 # 내 블로그 주제가 아닌 것(게임, 여행 등)은 눌러도 나중에 걸러진다.
 CA_TOPICS = ["비즈니스·경제", "IT·컴퓨터", "사회·정치", "건강·의학", "육아·결혼", "상품리뷰", "교육·학문",
              "스타·연예인", "방송", "드라마", "영화", "음악", "요리·레시피", "일상·생각"]
+# 크리에이터 어드바이저의 주제 이름 전부 (주제별 인기유입검색어 카드 제목)
+ALL_TOPICS = ["문학·책", "영화", "미술·디자인", "공연·전시", "음악", "드라마", "스타·연예인", "만화·애니", "방송",
+              "일상·생각", "육아·결혼", "반려동물", "좋은글·이미지", "패션·미용", "인테리어·DIY", "요리·레시피", "상품리뷰",
+              "원예·재배", "게임", "스포츠", "사진", "자동차", "취미", "국내여행", "세계여행", "맛집",
+              "IT·컴퓨터", "사회·정치", "건강·의학", "비즈니스·경제", "어학·외국어", "교육·학문"]
+
+# 주제 카드(제목 + 키워드 목록)를 화면에서 읽는다. 제목 글자에서 위로 올라가며 키워드 줄이 충분한 상자를 카드로 본다.
+_READ_CARDS = r"""(topics) => {
+    const out = [];
+    const lines = e => (e.innerText || "").split("\n").map(x => x.trim()).filter(Boolean);
+    const isMark = l => /^[▲▼▴▾↑↓+\-]?\s*\d+$/.test(l) || /^new$/i.test(l);
+    const clean = l => l.replace(/\s*(new|NEW|[▲▼▴▾↑↓]\s*\d+)$/, "").trim();
+    for (const el of document.querySelectorAll("h1, h2, h3, h4, h5, strong, b, p, span, div")) {
+        const t = (el.textContent || "").trim();
+        if (!topics.includes(t) || el.querySelector("li")) continue;
+        // 다른 주제 제목이 섞이기 직전까지 위로 올라간 상자 = 이 주제의 카드
+        let c = el;
+        for (let i = 0; i < 8 && c.parentElement; i++) {
+            const up = c.parentElement;
+            if (lines(up).some(l => l !== t && topics.includes(l))) break;
+            c = up;
+        }
+        for (const raw of lines(c)) {
+            const l = clean(raw);
+            if (!l || l === t || isMark(raw) || topics.includes(l) || l.length > 30) continue;
+            out.push([t, l]);
+        }
+    }
+    return out;
+}"""
 TREND_URLS = [
     "https://creator-advisor.naver.com/naver_blog/{id}/trends",
     "https://creator-advisor.naver.com/naver_blog/{id}/trend",
@@ -153,6 +183,20 @@ def fetch_trending(blog_id: str, tcfg_topics: list[str] = CA_TOPICS) -> list[tup
                         break
                 if not moved:
                     break
+            try:
+                cards = [tuple(x) for x in page.evaluate(_READ_CARDS, ALL_TOPICS)]
+            except Exception:
+                cards = []
+            if cards:  # 주제 카드에서 바로 읽었으면 단추를 누를 필요가 없다
+                seen, items = set(), []
+                for topic, kw in cards:
+                    ui = kw in ("유입순 보기", "설정순 보기", "주제 설정", "검색 유입 트렌드", "주제별 인기유입검색어") \
+                        or "|" in kw or "데이터가 없" in kw
+                    if (topic, kw) not in seen and not ui:
+                        seen.add((topic, kw))
+                        items.append((topic, kw))
+                browser.close()
+                return items
             texts = []
             for topic in tcfg_topics:
                 topic_now[0] = topic

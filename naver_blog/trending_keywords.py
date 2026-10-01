@@ -63,9 +63,10 @@ _READ_CARDS = r"""(topics) => {
 }"""
 TREND_URLS = [
     "https://creator-advisor.naver.com/naver_blog/{id}/trends",
-    "https://creator-advisor.naver.com/naver_blog/{id}/trend",
-    "https://creator-advisor.naver.com/naver_blog/trends",
 ]
+# 화면이 '주제별 인기유입검색어'를 그릴 때 받아 오는 데이터 주소 (로그인한 상태로 직접 읽는다)
+CATEGORY_RANKS_API = ("https://creator-advisor.naver.com/api/v6/trend/category-inflow-ranks"
+                      "?contentType=text&date={date}&interval=day&service=naver_blog")
 KEY_FIELDS = ("query", "keyword", "searchKeyword", "searchQuery", "word")
 CAT_FIELDS = ("category", "categoryName", "topic", "topicName", "subject", "subjectName", "title", "name")
 
@@ -138,6 +139,37 @@ def fetch_trending(blog_id: str, tcfg_topics: list[str] = CA_TOPICS) -> list[tup
                 pass
         page.on("response", on_response)
         text = ""
+
+        # 1순위: 데이터 주소를 직접 읽기. 통계는 하루 이틀 늦게 올라오므로 어제부터 하루씩 앞으로 (최대 5일)
+        import datetime as _dt
+        import json as _json
+        try:
+            page.goto(TREND_URLS[0].format(id=blog_id), wait_until="domcontentloaded", timeout=40000)
+            page.wait_for_timeout(2000)
+        except Exception:
+            pass
+        if "nid.naver.com" in page.url:
+            browser.close()
+            raise RuntimeError("로그인이 풀렸어요. 2_login.bat을 다시 실행해 주세요.")
+        last_raw = ""
+        for back in range(1, 6):
+            day = (_dt.date.today() - _dt.timedelta(days=back)).isoformat()
+            try:
+                r = page.request.get(CATEGORY_RANKS_API.format(date=day),
+                                     headers={"Referer": TREND_URLS[0].format(id=blog_id)}, timeout=20000)
+                last_raw = f"[{day}] HTTP {r.status}\n" + r.text()[:4000]
+                if not r.ok:
+                    continue
+                items = parse_trend_json([("", r.json())])
+            except Exception as e:
+                last_raw = f"[{day}] 오류: {e}"
+                continue
+            if items:
+                print(f"  {day} 기준 인기 유입 검색어 {len(items)}개를 읽었어요")
+                browser.close()
+                return items
+        OUTPUT.mkdir(exist_ok=True)
+        (OUTPUT / "trend_debug.json").write_text(last_raw, encoding="utf-8")
 
         def tagged():
             return [(t, b) for t, b in blobs]
@@ -255,7 +287,9 @@ def main():
         if kw.replace(" ", "") in have or SHOPPING.search(kw):
             continue
         rows.append({"keyword": kw, "topic": topic, "category": map_category(topic, mapping) if topic else ""})
-    mine = [r for r in rows if r["category"] or not r["topic"]]
+    known = any(any(t in r["topic"] for t in ALL_TOPICS) for r in rows)
+    # 주제 이름을 알아볼 수 없으면(숫자 코드 등) 거르지 않고 전부 보여 준다
+    mine = [r for r in rows if r["category"] or not r["topic"] or not known]
     skipped = len(rows) - len(mine)
     rows = mine[:40]
     print(f"인기 키워드 {len(items)}개 중 내 블로그 주제에 맞는 {len(rows)}개" + (f" (다른 주제 {skipped}개 제외)" if skipped else ""))

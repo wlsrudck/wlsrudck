@@ -131,6 +131,28 @@ def fetch_trending(blog_id: str, tcfg_topics: list[str] = CA_TOPICS) -> list[tup
                         break
                 except Exception:
                     pass
+            try:  # 검색 유입 트렌드 안의 '주제별 인기유입검색어' 작은 탭
+                el = page.get_by_text("주제별 인기유입검색어", exact=True).first
+                if el.count():
+                    el.click(timeout=4000)
+                    page.wait_for_timeout(2000)
+            except Exception:
+                pass
+            # 오늘·어제 데이터가 아직 없으면('조회한 기간의 데이터가 없습니다') 날짜를 하루씩 앞으로 (최대 3일)
+            for _ in range(3):
+                body = page.inner_text("body")
+                if "데이터가 없습니다" not in body:
+                    break
+                moved = False
+                for css in ("button[class*='prev']", "[aria-label*='이전']", "button[class*='Prev']", "a[class*='prev']"):
+                    b = page.locator(css).first
+                    if b.count() and b.is_visible():
+                        b.click(timeout=3000)
+                        page.wait_for_timeout(2500)
+                        moved = True
+                        break
+                if not moved:
+                    break
             texts = []
             for topic in tcfg_topics:
                 topic_now[0] = topic

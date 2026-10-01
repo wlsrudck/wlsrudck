@@ -26,6 +26,9 @@ DEFAULT_MAP = {
     "상품리뷰": "리뷰,후기",
 }
 
+# 크리에이터 어드바이저 트렌드 → '주제별 트렌드' 탭에서 차례로 눌러 볼 주제 (화면의 주제 이름 그대로)
+CA_TOPICS = ["비즈니스·경제", "IT·컴퓨터", "사회·정치", "건강·의학", "육아·결혼", "상품리뷰",
+             "스타·연예인", "방송", "드라마"]
 TREND_URLS = [
     "https://creator-advisor.naver.com/naver_blog/{id}/trends",
     "https://creator-advisor.naver.com/naver_blog/{id}/trend",
@@ -36,7 +39,8 @@ CAT_FIELDS = ("category", "categoryName", "topic", "topicName", "subject", "subj
 
 
 def parse_trend_json(blobs: list) -> list[tuple[str, str]]:
-    """API 응답(JSON)들에서 (주제, 키워드)를 모은다. 구조를 몰라도 되도록 키워드처럼 생긴 칸을 찾아 내려간다."""
+    """API 응답(JSON)들에서 (주제, 키워드)를 모은다. 구조를 몰라도 되도록 키워드처럼 생긴 칸을 찾아 내려간다.
+    blobs의 항목이 (주제, JSON) 꼴이면 그 주제를 기본으로 쓴다 (어느 주제를 눌렀을 때 받은 데이터인지)"""
     found: list[tuple[str, str]] = []
 
     def walk(o, cat=""):
@@ -51,13 +55,16 @@ def parse_trend_json(blobs: list) -> list[tuple[str, str]]:
             for v in o:
                 walk(v, cat)
     for b in blobs:
-        walk(b)
-    seen, out = set(), []
+        if isinstance(b, tuple):
+            walk(b[1], b[0])
+        else:
+            walk(b)
+    best: dict[str, tuple[str, str]] = {}  # 같은 키워드는 주제가 붙은 쪽을 남긴다
     for cat, kw in found:
-        if kw.replace(" ", "") not in seen:
-            seen.add(kw.replace(" ", ""))
-            out.append((cat, kw))
-    return out
+        k = kw.replace(" ", "")
+        if k not in best or (cat and not best[k][0]):
+            best[k] = (cat, kw)
+    return list(best.values())
 
 
 def parse_trend_text(text: str) -> list[tuple[str, str]]:
@@ -79,12 +86,12 @@ def parse_trend_text(text: str) -> list[tuple[str, str]]:
     return out
 
 
-def fetch_trending(blog_id: str) -> list[tuple[str, str]]:
+def fetch_trending(blog_id: str, tcfg_topics: list[str] = CA_TOPICS) -> list[tuple[str, str]]:
     from playwright.sync_api import sync_playwright
     from login import STATE_PATH
     if not STATE_PATH.exists():
         raise RuntimeError("로그인 정보가 없어요. 2_login.bat을 먼저 실행해 주세요.")
-    blobs, urls = [], []
+    blobs, urls, topic_now = [], [], [""]
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         ctx = browser.new_context(storage_state=str(STATE_PATH), locale="ko-KR")
@@ -94,11 +101,15 @@ def fetch_trending(blog_id: str) -> list[tuple[str, str]]:
             try:
                 if "creator-advisor" in r.url and "json" in (r.headers.get("content-type") or ""):
                     urls.append(r.url)
-                    blobs.append(r.json())
+                    blobs.append((topic_now[0], r.json()))
             except Exception:
                 pass
         page.on("response", on_response)
         text = ""
+
+        def tagged():
+            return [(t, b) for t, b in blobs]
+
         for u in TREND_URLS:
             try:
                 page.goto(u.format(id=blog_id), wait_until="domcontentloaded", timeout=40000)
@@ -108,19 +119,43 @@ def fetch_trending(blog_id: str) -> list[tuple[str, str]]:
             if "nid.naver.com" in page.url:
                 browser.close()
                 raise RuntimeError("로그인이 풀렸어요. 2_login.bat을 다시 실행해 주세요.")
-            for label in ("주제별 인기유입검색어", "주제별 인기 유입검색어", "주제별 인기 유입 검색어", "인기 유입 검색어", "트렌드"):
+            blobs.clear()  # 내 블로그 통계(검색 유입 등)가 섞이지 않게, 주제별 트렌드부터 새로 모은다
+            for label in ("주제별 트렌드", "주제별 인기 유입 검색어", "주제별 인기유입검색어"):
                 try:
-                    el = page.get_by_text(label, exact=False).first
+                    el = page.get_by_text(label, exact=True).first
                     if el.count():
-                        el.click(timeout=3000)
-                        page.wait_for_timeout(2500)
+                        el.click(timeout=4000)
+                        page.wait_for_timeout(3000)
                         break
                 except Exception:
                     pass
-            text = "\n".join(f.inner_text("body") for f in page.frames if f.url.startswith("http"))
-            if parse_trend_json(blobs) or parse_trend_text(text):
+            texts = []
+            for topic in tcfg_topics:
+                topic_now[0] = topic
+                try:
+                    el = page.get_by_text(topic, exact=True).first
+                    if not el.count() or not el.is_visible():
+                        # 주제가 펼침 목록 안에 있으면 목록부터 연다
+                        for opener in ("select", "[role=combobox]", "button[aria-haspopup]"):
+                            o = page.locator(opener).first
+                            if o.count() and o.is_visible():
+                                if opener == "select":
+                                    o.select_option(label=topic)
+                                else:
+                                    o.click(timeout=3000)
+                                page.wait_for_timeout(800)
+                                break
+                        el = page.get_by_text(topic, exact=True).first
+                    if el.count() and el.is_visible():
+                        el.click(timeout=4000)
+                    page.wait_for_timeout(2500)
+                    texts.append(f"{topic}\n" + "\n".join(f.inner_text("body") for f in page.frames if f.url.startswith("http")))
+                except Exception:
+                    continue
+            text = "\n".join(texts)
+            if parse_trend_json(tagged()) or parse_trend_text(text):
                 break
-        items = parse_trend_json(blobs) or parse_trend_text(text)
+        items = parse_trend_json(tagged()) or parse_trend_text(text)
         if not items:
             OUTPUT.mkdir(exist_ok=True)
             page.screenshot(path=str(OUTPUT / "trend_debug.png"), full_page=True)
@@ -142,7 +177,7 @@ def main():
     tcfg = cfg.get("trending", {})
     mapping = {**DEFAULT_MAP, **tcfg.get("map", {})}
     print("크리에이터 어드바이저에서 지금 뜨는 키워드를 읽는 중... (30초~1분)")
-    items = fetch_trending(cfg["naver"]["blog_id"])
+    items = fetch_trending(cfg["naver"]["blog_id"], tcfg.get("topics", CA_TOPICS))
     if not items:
         print("\n⚠ 인기 키워드를 읽지 못했어요. output 폴더의 trend_debug.png 와 trend_debug.txt 를 캡처해서 보내 주세요.")
         return

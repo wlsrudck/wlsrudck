@@ -147,8 +147,14 @@ def load_rows():
     lines = [r for r in csv.reader(io.StringIO(text, newline="")) if r and r[0].strip()]
     if lines and lines[0][0].strip().lower() == "keyword":  # 칸 이름 줄: keyword,memo,status,category
         lines = lines[1:]
-    return [{"keyword": r[0].strip(), "memo": r[1] if len(r) > 1 else "", "status": r[2] if len(r) > 2 else "",
+    rows = [{"keyword": r[0].strip(), "memo": r[1] if len(r) > 1 else "", "status": r[2] if len(r) > 2 else "",
              "category": r[3].strip() if len(r) > 3 else ""} for r in lines]
+    for r in rows:
+        # 메모를 카테고리 칸 뒤에 `생활정보 "메모"` 처럼 붙여 적은 경우: 따옴표 안은 메모, 앞은 카테고리
+        m = re.fullmatch(r'\s*([^"]*?)\s*"(.*)"?\s*', r["category"], re.S)
+        if m and not r["memo"].strip():
+            r["category"], r["memo"] = m.group(1).strip(), m.group(2).rstrip('"').strip()
+    return rows
 
 
 def mark_done(keyword: str, status: str) -> None:

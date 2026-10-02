@@ -154,6 +154,25 @@ def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | N
     return out
 
 
+def _select_back(page: Page, editor, text: str, log: list) -> bool:
+    """캐럿 바로 앞에 친 text 를 Shift+← 로 선택한다. 한꺼번에 빨리 누르면 편집기가 몇 번을 놓쳐 일부만 선택될 때가 있어
+    (예: '쪽파 300g, 절임 없이 완성' 중 '임 없이 완성'만), 한 번씩 누르며 선택된 글자를 확인한다."""
+    want = re.sub(r"\s+", "", text)
+    page.keyboard.press("End")
+    time.sleep(0.15)
+    for _ in range(len(text) + 8):
+        page.keyboard.press("Shift+ArrowLeft")
+        time.sleep(0.03)
+        got = re.sub(r"\s+", "", editor.evaluate("() => String(window.getSelection())"))
+        if got == want:
+            return True
+        if len(got) > len(want):
+            break
+    log.append(f"글자 선택이 맞지 않음: '{got[:20]}' (원래 '{want[:20]}')")
+    page.keyboard.press("End")
+    return False
+
+
 def _pick(page: Page, editor, button_css: str, mark_js: str, arg, log: list) -> str:
     """툴바 버튼을 눌러 목록을 열고, 표시해 둔 항목을 클릭한다. 실패하면 그때 화면의 버튼 목록을 log에 남긴다"""
     btn = editor.locator(button_css).first
@@ -429,13 +448,11 @@ def _insert_quote_after(page: Page, editor, text: str, anchor: str, style: dict 
             try:
                 for pick, arg, css in ((_MARK_SIZE_OPTION, st["quote_size"], "font_size_btn"),
                                        (_MARK_COLOR_OPTION, st["heading_color"], "font_color_btn")):
-                    for _ in range(len(text)):
-                        page.keyboard.press("Shift+ArrowLeft")
-                    _pick(page, editor, SELECTORS[css], pick, arg, log)
+                    if _select_back(page, editor, text, log):
+                        _pick(page, editor, SELECTORS[css], pick, arg, log)
                     page.keyboard.press("End")
-                for _ in range(len(text)):
-                    page.keyboard.press("Shift+ArrowLeft")
-                page.keyboard.press("Control+B")
+                if _select_back(page, editor, text, log):
+                    page.keyboard.press("Control+B")
                 page.keyboard.press("End")
             except Exception as e:
                 log.append(f"인용구 글자 꾸미기 오류: {str(e).splitlines()[0]}")
@@ -587,13 +604,11 @@ def _insert_heading_parts(page: Page, editor, heads, st: dict, screenshot_dir: P
                             log.append(f"[소제목 서식] 오류: {str(e).splitlines()[0]}")
                             page.keyboard.press("Escape")
                     # 상자 안 소제목도 크기·색을 맞춘다 (방금 친 글자를 Shift+← 로 선택)
-                    for _ in range(len(heading)):
-                        page.keyboard.press("Shift+ArrowLeft")
-                    _pick(page, editor, SELECTORS["font_size_btn"], _MARK_SIZE_OPTION, st["heading_size"], log)
+                    if _select_back(page, editor, heading, log):
+                        _pick(page, editor, SELECTORS["font_size_btn"], _MARK_SIZE_OPTION, st["heading_size"], log)
                     page.keyboard.press("End")
-                    for _ in range(len(heading)):
-                        page.keyboard.press("Shift+ArrowLeft")
-                    _pick(page, editor, SELECTORS["font_color_btn"], _MARK_COLOR_OPTION, st["heading_color"], log)
+                    if _select_back(page, editor, heading, log):
+                        _pick(page, editor, SELECTORS["font_color_btn"], _MARK_COLOR_OPTION, st["heading_color"], log)
                     page.keyboard.press("End")
                 else:
                     fails["box"] += 1

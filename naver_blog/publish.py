@@ -576,7 +576,7 @@ def _insert_heading_parts(page: Page, editor, heads, st: dict, screenshot_dir: P
     log, fallback = [], []
     ok_div = ok_box = ok_fmt = 0
     fails = {"div": 0, "box": 0, "fmt": 0}
-    use_fmt = bool(st.get("heading_format", True))
+    use_fmt = bool(st.get("heading_format", False))  # 편집기 소제목 서식은 상자를 풀어 버려서 기본은 끔
     for n, heading in heads:
         if divider:
             mark = f"§D{n}§"

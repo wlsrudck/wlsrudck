@@ -400,21 +400,22 @@ def written_titles(blog_id: str) -> list[str]:
             titles.append(d.get("title", "") if isinstance(d, dict) else "")
         except Exception:
             pass
-    return [t.replace(" ", "") for t in titles if t]
+    return [t.strip() for t in titles if t and t.strip()]
 
 
-def already_written(kw: str, titles: list[str]) -> bool:
-    """키워드가 이미 쓴 글 제목에 들어 있으면 (띄어쓰기 무시) 쓴 글로 본다"""
+def already_written(kw: str, titles: list[str]) -> str:
+    """키워드가 들어 있는 내 글 제목 (없으면 ""). 빼지 않고 표시만 한다 — '삼성전자'처럼 넓은 키워드는
+    같은 말이 든 글이 있어도 다른 내용으로 또 쓸 수 있으므로 쓸지 말지는 사람이 고른다"""
     k = re.sub(r"[^0-9A-Za-z가-힣]", "", kw).lower()
     if len(k) < 2:
-        return False
+        return ""
     # 제목에 그대로 있거나, 키워드의 두 글자 조각 대부분이 한 제목에 들어 있으면 (예: '독감예방접종' ↔ '독감 무료 예방 접종') 쓴 글로 본다
     pieces = {k[i:i + 2] for i in range(len(k) - 1)}
-    for t in titles:
-        t = re.sub(r"[^0-9A-Za-z가-힣]", "", t).lower()
+    for title in titles:
+        t = re.sub(r"[^0-9A-Za-z가-힣]", "", title).lower()
         if k in t or (len(pieces) >= 3 and sum(p in t for p in pieces) / len(pieces) >= 0.8):
-            return True
-    return False
+            return title
+    return ""
 
 
 def map_category(topic: str, mapping: dict) -> str:
@@ -434,15 +435,13 @@ def main():
         return
     have = {r["keyword"].replace(" ", "") for r in load_rows()}
     titles = written_titles(cfg["naver"]["blog_id"])
-    rows, done = [], []
+    rows = []
     for topic, kw in items:
         if kw.replace(" ", "") in have or SHOPPING.search(kw) or LYRICS.search(kw):
             continue
         have.add(kw.replace(" ", ""))  # 같은 키워드가 여러 주제에 올라와도 한 번만
-        if already_written(kw, titles):
-            done.append(kw)
-            continue
-        rows.append({"keyword": kw, "topic": topic, "category": map_category(topic, mapping) if topic else ""})
+        rows.append({"keyword": kw, "topic": topic, "category": map_category(topic, mapping) if topic else "",
+                     "written": already_written(kw, titles)})
     known = any(any(t in r["topic"] for t in ALL_TOPICS) for r in rows)
     # 주제 이름을 알아볼 수 없으면(숫자 코드 등) 거르지 않고 전부 보여 준다
     mine = [r for r in rows if r["category"] or not r["topic"] or not known]
@@ -450,8 +449,6 @@ def main():
     rows = balanced(mine, 40)
     print(f"인기 키워드 {len(items)}개 중 내 블로그 주제에 맞는 {len(rows)}개" + (f" (다른 주제 {skipped}개 제외)" if skipped else ""))
     print(f"이미 쓴 글 {len(titles)}개와 비교했어요" + ("" if titles else " (내 글 목록을 못 읽었어요)"))
-    if done:
-        print(f"이미 쓴 글과 겹쳐서 뺀 키워드 {len(done)}개: " + ", ".join(done[:10]) + (" ..." if len(done) > 10 else ""))
 
     keys = load_keys()
     if keys.get("ad_access_license") and keys.get("ad_secret_key") and keys.get("ad_customer_id"):
@@ -482,13 +479,15 @@ def main():
         vol = f"월 {r['volume']:,}" if r.get("volume") else "검색량 ?"
         where = f"{r['topic']} → {r['category'] or '기본 카테고리'}" if r["topic"] else (r["category"] or "")
         print(f"  {i:2d}. [{r['grade']}] {r['keyword']}  ({vol}, 경쟁 {r['comp'] or '?'}) {where}")
-    ans = input("\nkeywords.csv에 넣을 번호 (예: 1,3,5 / 엔터 = S·A 등급 전부 / 0 = 넣지 않음): ").strip()
+        if r["written"]:
+            print(f"        └ 비슷한 글 있음: {r['written'][:40]}")
+    ans = input("\nkeywords.csv에 넣을 번호 (예: 1,3,5 / 엔터 = 비슷한 글 없는 S·A 등급 전부 / 0 = 넣지 않음): ").strip()
     if ans == "0":
         return
     if ans:
         picked = [rows[int(x) - 1] for x in re.split(r"[,\s]+", ans) if x.isdigit() and 1 <= int(x) <= len(rows)]
     else:
-        picked = [r for r in rows if r["grade"] in ("S", "A")]
+        picked = [r for r in rows if r["grade"] in ("S", "A") and not r["written"]]
     if not picked:
         print("넣을 키워드가 없어요.")
         return

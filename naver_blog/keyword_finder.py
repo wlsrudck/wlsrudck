@@ -123,14 +123,10 @@ def find_candidates(topic: str, cfg: dict, blog: str) -> list[Candidate]:
 KEYS_TEMPLATE = """# 네이버 API 키 (비워 두면 검색량·문서 수 없이 후보만 보여 줍니다)
 # 이 파일은 다른 사람에게 보여 주거나 캡처하지 마세요.
 
-# 네이버클라우드 콘솔 > Services > NAVER API HUB > 앱 등록 (API: 검색 - 블로그) 의 Client ID / Client Secret
+# 네이버클라우드 콘솔 > Services > NAVER API HUB > 앱 등록 (API: 검색 - 블로그, 검색어트렌드) 의 Client ID / Client Secret
 # (예전 네이버 개발자센터 검색 API 키도 그대로 넣으면 됩니다)
 search_client_id=
 search_client_secret=
-
-# (선택) 평생 키워드의 2년 검색 흐름용: developers.naver.com > Application 등록 > 사용 API '데이터랩 (검색어트렌드)'
-datalab_client_id=
-datalab_client_secret=
 
 # 네이버 검색광고 > 도구 > API 사용 관리
 ad_customer_id=

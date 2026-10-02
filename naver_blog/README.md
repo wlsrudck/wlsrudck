@@ -133,11 +133,7 @@ keyword,memo,status,category
   - 올해 검색이 작년 절반도 안 되거나(식는 중), 한 달만 반짝한 키워드는 뺍니다.
 - 씨앗 키워드는 `config.toml`에 `[evergreen]` 아래 `seeds = { "생활정보" = ["...", "..."] }` 처럼 바꿀 수 있습니다.
 
-검색 흐름은 **네이버 데이터랩(검색어트렌드) API**로 봅니다. 화면에 "데이터랩을 쓸 수 없어서"가 나오면:
-1. developers.naver.com 에서 **Application 등록** → 사용 API에서 **데이터랩 (검색어트렌드)** 선택, 환경은 WEB 설정 + `http://localhost`
-2. 만들어진 Client ID / Client Secret 을 naver_keys.txt 에 아래 두 줄로 넣기
-   ```
-   datalab_client_id=여기에ID
-   datalab_client_secret=여기에Secret
-   ```
+검색 흐름은 **네이버 데이터랩(검색어트렌드) API**로 봅니다. 2026년부터 이 API는 NAVER API HUB로 옮겨졌습니다.
+화면에 "데이터랩을 쓸 수 없어서"가 나오면 네이버클라우드 콘솔 > NAVER API HUB 에서 블로그 검색을 쓰던 그 앱에
+**검색어트렌드(데이터랩)** API를 추가해 주세요. 키는 그대로(search_client_id / search_client_secret) 씁니다.
 켜지 않아도 '방법·조건·효능' 같은 말로 짐작해서 [평생?]으로 보여 줍니다.

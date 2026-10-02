@@ -45,7 +45,7 @@ ISSUE_WORDS = re.compile(r"논란|사건|사고|근황|열애|결혼발표|이�
                          r"넷째주|이번주|오늘|내일|전단|특가|라이브|중계|하이라이트|몇부작|출연진|결말")
 
 DATALAB_URLS = [
-    ("https://naverapihub.apigw.ntruss.com/datalab/v1/search", "X-NCP-APIGW-API-KEY-ID", "X-NCP-APIGW-API-KEY"),
+    ("https://naverapihub.apigw.ntruss.com/search-trend/v1/search", "X-NCP-APIGW-API-KEY-ID", "X-NCP-APIGW-API-KEY"),
     ("https://openapi.naver.com/v1/datalab/search", "X-Naver-Client-Id", "X-Naver-Client-Secret"),
 ]
 

@@ -39,7 +39,8 @@ def trending_candidates(cfg: dict) -> list[dict]:
         print(f"  (지금 뜨는 키워드 읽기 실패: {str(e).splitlines()[0][:80]})")
         return []
     good = [r for r in rows if _ok(r)]
-    good.sort(key=lambda r: ENTERTAINMENT in (r.get("category") or ""))  # 연예는 뒤로 (그 안의 순서는 유지)
+    if not cfg.get("autofill", {}).get("entertainment", False):  # 연예·사람 이슈는 금방 식고 사실 확인이 어려워 기본은 뺀다
+        good = [r for r in good if ENTERTAINMENT not in (r.get("category") or "")]
     return good
 
 
@@ -81,7 +82,7 @@ def fill(cfg: dict, need: int) -> list[str]:
 if __name__ == "__main__":
     from main import load_config
     cfg = load_config()
-    n = int(cfg.get("autofill", {}).get("count", 0) or cfg["publish"].get("max_posts_per_day", 2))
+    n = min(int(cfg.get("autofill", {}).get("count", 0) or cfg["publish"].get("max_posts_per_day", 2)), 5)
     got = fill(cfg, n)
     if got:
         print(f"\n{len(got)}개를 keywords.csv 에 넣었어요. 메모 칸에 직접 겪은 일을 적어 두면 글이 더 좋아져요.")

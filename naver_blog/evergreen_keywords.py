@@ -42,7 +42,8 @@ EVERGREEN_WORDS = re.compile(
     r"보관|손질|칼로리|주기|시기|팁|요령|확인")
 # 금방 지나가는 말 (사건·발표·이번 주 행사)
 ISSUE_WORDS = re.compile(r"논란|사건|사고|근황|열애|결혼발표|이혼|사망|별세|체포|구속|속보|발표|첫째주|둘째주|셋째주|"
-                         r"넷째주|이번주|오늘|내일|전단|특가|라이브|중계|하이라이트|몇부작|출연진|결말")
+                         r"넷째주|이번주|오늘|내일|전단|특가|라이브|중계|하이라이트|몇부작|출연진|결말|혼인신고|동반행보|결별|♥|"
+                         r"\d+기$|팬카페|공식팬")
 
 DATALAB_URLS = [
     ("https://naverapihub.apigw.ntruss.com/search-trend/v1/search", "X-NCP-APIGW-API-KEY-ID", "X-NCP-APIGW-API-KEY"),

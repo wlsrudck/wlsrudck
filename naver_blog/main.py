@@ -250,7 +250,7 @@ def main():
     if not pending and cfg.get("autofill", {}).get("enabled", True) and not args.make_folders:
         from autofill import fill
         acfg = cfg.get("autofill", {})
-        if fill(cfg, int(acfg.get("count", 0) or pub.get("max_posts_per_day", 2))):
+        if fill(cfg, min(int(acfg.get("count", 0) or pub.get("max_posts_per_day", 2)), 5)):  # 한 번에 많이 쌓지 않게 최대 5개
             rows = load_rows()
             pending = [r for r in rows if not (r.get("status") or "").strip()]
     if not pending:

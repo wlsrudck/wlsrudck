@@ -368,7 +368,7 @@ def fetch_trending(blog_id: str, tcfg_topics: list[str] = CA_TOPICS) -> list[tup
 
 
 # 노래 가사 글은 가사를 옮겨 적게 되어 저작권·저품질 위험이 있으므로 뺀다
-LYRICS = re.compile(r"(가사|노래방|악보|lyrics)$", re.I)
+LYRICS = re.compile(r"가사|노래방|악보|lyrics|음원\s*추출|음원\s*다운|mp3", re.I)  # 저작권 문제가 생길 수 있는 글감
 
 
 def balanced(rows: list[dict], limit: int) -> list[dict]:

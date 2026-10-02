@@ -249,6 +249,8 @@ def grade(volume: int | None, docs: int | None, comp: str = "") -> str:
             return "A"
         return "B" if comp != "높음" else "C"
     ratio = docs / volume  # 검색 1건당 문서 수. 낮을수록 빈틈
+    if volume > BIG:  # 문서가 적어 보여도 큰 키워드는 언론·대형 블로그가 위를 차지해 초보에게 불리
+        return "B" if ratio < 10 else "C"
     if volume >= 500 and ratio < 1:
         return "S"
     if volume >= 300 and ratio < 3:

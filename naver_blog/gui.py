@@ -126,6 +126,7 @@ class KeywordTab(ttk.Frame):
         ttk.Button(btns, text="선택한 줄 고치기", command=self.update_row).pack(side="left", padx=3)
         ttk.Button(btns, text="다시 쓰게 하기 (상태 비우기)", command=self.reset_status).pack(side="left", padx=3)
         ttk.Button(btns, text="선택한 줄 지우기", command=self.delete).pack(side="left", padx=3)
+        ttk.Button(btns, text="안 맞는 키워드 정리", command=self.prune).pack(side="left", padx=3)
         ttk.Button(btns, text="새로 고침", command=self.reload).pack(side="left", padx=3)
         self.reload()
 
@@ -194,6 +195,20 @@ class KeywordTab(ttk.Frame):
         i = self.selected()
         if i is not None:
             self.rows[i]["status"] = ""
+            self.save()
+
+    def prune(self):
+        """아직 안 쓴 줄 중 가사·음원·연예·사람 이슈 키워드, 큰 키워드를 한 번에 지운다 (메모를 적은 줄은 남긴다)"""
+        from evergreen_keywords import ISSUE_WORDS
+        from trending_keywords import LYRICS
+        bad = [r for r in self.rows if not r["status"].strip() and not r["memo"].strip()
+               and (LYRICS.search(r["keyword"]) or ISSUE_WORDS.search(r["keyword"]) or "연예" in r["category"])]
+        if not bad:
+            messagebox.showinfo("정리", "지울 키워드가 없어요.")
+            return
+        names = ", ".join(r["keyword"] for r in bad[:15]) + (" ..." if len(bad) > 15 else "")
+        if messagebox.askyesno("정리", f"아직 안 쓴 키워드 중 {len(bad)}개를 지울까요?\n(가사·음원, 연예·사람 이슈 / 메모 적은 줄은 남겨요)\n\n{names}"):
+            self.rows = [r for r in self.rows if r not in bad]
             self.save()
 
     def delete(self):

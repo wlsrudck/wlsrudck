@@ -128,6 +128,10 @@ KEYS_TEMPLATE = """# 네이버 API 키 (비워 두면 검색량·문서 수 없�
 search_client_id=
 search_client_secret=
 
+# (선택) 평생 키워드의 2년 검색 흐름용: developers.naver.com > Application 등록 > 사용 API '데이터랩 (검색어트렌드)'
+datalab_client_id=
+datalab_client_secret=
+
 # 네이버 검색광고 > 도구 > API 사용 관리
 ad_customer_id=
 ad_access_license=

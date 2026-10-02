@@ -61,7 +61,12 @@ def _months() -> tuple[str, str]:
 def datalab_trends(keywords: list[str], keys: dict) -> dict[str, list[float]]:
     """{키워드: 지난 24달 월별 검색 비율}. 데이터랩을 못 쓰면 빈 dict.
     한 번에 5개까지 묻는다. 비율은 묶음 안에서 매겨지지만 한 키워드 안의 흐름(고른지, 몰리는지)을 보는 데는 문제없다."""
-    if not (keys.get("search_client_id") and keys.get("search_client_secret")):
+    # 데이터랩 전용 키(네이버 개발자센터에서 따로 만든 것)가 있으면 먼저, 없으면 검색 API 키로 시도
+    pairs = [(keys.get(a, ""), keys.get(b, "")) for a, b in
+             (("datalab_client_id", "datalab_client_secret"), ("search_client_id", "search_client_secret"))]
+    tries = [(u, ih, sh, cid, sec) for cid, sec in dict.fromkeys(pairs) if cid and sec
+             for u, ih, sh in DATALAB_URLS]
+    if not tries:
         return {}
     start, end = _months()
     out: dict[str, list[float]] = {}
@@ -70,10 +75,9 @@ def datalab_trends(keywords: list[str], keys: dict) -> dict[str, list[float]]:
         chunk = keywords[i:i + 5]
         body = json.dumps({"startDate": start, "endDate": end, "timeUnit": "month",
                            "keywordGroups": [{"groupName": k, "keywords": [k]} for k in chunk]}).encode()
-        for url, id_h, secret_h in ([url_ok] if url_ok else DATALAB_URLS):
+        for url, id_h, secret_h, cid, sec in ([url_ok] if url_ok else tries):
             req = urllib.request.Request(url, data=body, method="POST", headers={
-                **HEADERS, "Content-Type": "application/json",
-                id_h: keys["search_client_id"], secret_h: keys["search_client_secret"]})
+                **HEADERS, "Content-Type": "application/json", id_h: cid, secret_h: sec})
             try:
                 with urllib.request.urlopen(req, timeout=20) as r:
                     data = json.load(r)
@@ -83,7 +87,7 @@ def datalab_trends(keywords: list[str], keys: dict) -> dict[str, list[float]]:
                 if e.code == 400 and url_ok:
                     break  # 받아 주지 않는 키워드가 든 묶음만 건너뛴다
                 raise
-            url_ok = (url, id_h, secret_h)
+            url_ok = (url, id_h, secret_h, cid, sec)
             for res in data.get("results", []):
                 months = {d["period"][:7]: float(d["ratio"]) for d in res.get("data", [])}
                 out[res.get("title", "")] = [months.get(m, 0.0) for m in _month_keys(start)]

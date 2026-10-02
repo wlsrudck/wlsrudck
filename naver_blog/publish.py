@@ -396,8 +396,9 @@ _BOX_AFTER = """([anchor, mode, text]) => {
 _DOC_LENGTH = "() => document.body.innerText.length"
 
 
-def _write_in_component(page: Page, editor, text: str, anchor: str, log: list) -> bool:
+def _write_in_component(page: Page, editor, text: str, anchor: str, log: list, pre=None) -> bool:
     """anchor 문단 바로 뒤에 방금 넣은 인용구 상자 안에 글자를 쓴다. 상자의 글 칸을 직접 누른 뒤에만 쓴다.
+    pre: 글자를 치기 직전에 부를 함수 (크기·색·굵게를 먼저 골라 두면 그 모양으로 쳐진다 — 친 뒤에 선택해서 바꾸는 것보다 확실).
     안 들어가면 한 번 더 시도하고, 그래도 안 되면 빈 상자를 지운다(빈 상자가 글에 남지 않게)."""
     for attempt in (1, 2):
         target = ""
@@ -412,6 +413,12 @@ def _write_in_component(page: Page, editor, text: str, anchor: str, log: list) -
         editor.locator("[data-nb-pick]").first.click(timeout=5000)
         _pause(0.2, 0.4)
         length = editor.evaluate(_DOC_LENGTH)
+        if pre and attempt == 1:
+            try:
+                pre()
+            except Exception as e:
+                log.append(f"글자 모양 미리 고르기 오류: {str(e).splitlines()[0]}")
+                page.keyboard.press("Escape")
         page.keyboard.insert_text(text)
         _pause(0.4, 0.7)
         if editor.evaluate(_BOX_AFTER, [anchor, "has", text]):
@@ -447,17 +454,23 @@ def _insert_quote_after(page: Page, editor, text: str, anchor: str, style: dict 
     kind = st["quote_style"]
     log = []
     try:
-        if _insert_component(page, editor, anchor, "인용구", "quotation", kind, log) and _write_in_component(page, editor, text, anchor, log):
+        qcolor = st.get("quote_color") or st["heading_color"]
+
+        def quote_pre():
+            _pick(page, editor, SELECTORS["font_size_btn"], _MARK_SIZE_OPTION, st["quote_size"], log)
+            _pick(page, editor, SELECTORS["font_color_btn"], _MARK_COLOR_OPTION, qcolor, log)
+            page.keyboard.press("Control+B")
+
+        if _insert_component(page, editor, anchor, "인용구", "quotation", kind, log) \
+                and _write_in_component(page, editor, text, anchor, log, pre=quote_pre):
             # 인용구 안 글자도 크게+색+굵게 (소제목 상자와 같은 방법: 방금 친 글자를 Shift+← 로 선택)
             try:
+                # 미리 고른 모양이 안 먹었을 때를 위해 친 글자를 선택해 크기·색을 한 번 더 (굵게는 다시 누르면 풀리므로 하지 않음)
                 for pick, arg, css in ((_MARK_SIZE_OPTION, st["quote_size"], "font_size_btn"),
-                                       (_MARK_COLOR_OPTION, st.get("quote_color") or st["heading_color"], "font_color_btn")):
+                                       (_MARK_COLOR_OPTION, qcolor, "font_color_btn")):
                     if _select_back(page, editor, text, log):
                         _pick(page, editor, SELECTORS[css], pick, arg, log)
                     page.keyboard.press("End")
-                if _select_back(page, editor, text, log):
-                    page.keyboard.press("Control+B")
-                page.keyboard.press("End")
             except Exception as e:
                 log.append(f"인용구 글자 꾸미기 오류: {str(e).splitlines()[0]}")
                 page.keyboard.press("Escape")
@@ -594,8 +607,12 @@ def _insert_heading_parts(page: Page, editor, heads, st: dict, screenshot_dir: P
             mark = f"§H{n}§"
             boxed = False
             try:
+                def heading_pre():
+                    _pick(page, editor, SELECTORS["font_size_btn"], _MARK_SIZE_OPTION, st["heading_size"], log)
+                    _pick(page, editor, SELECTORS["font_color_btn"], _MARK_COLOR_OPTION, st["heading_color"], log)
+
                 if fails["box"] < 2 and _insert_component(page, editor, mark, "인용구", "quotation", box, log) \
-                        and _write_in_component(page, editor, heading, mark, log):
+                        and _write_in_component(page, editor, heading, mark, log, pre=heading_pre):
                     boxed = True
                     ok_box += 1
                     # 편집기 '소제목' 서식을 먼저 (서식을 바꾸면 크기가 바뀔 수 있어 크기·색은 그다음에)

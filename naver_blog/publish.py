@@ -117,7 +117,33 @@ _MARK_COLOR_OPTION = """(hex) => {
     }
     if (!best) return false;
     best.setAttribute("data-nb-pick", "1");
-    return (best.className || best.tagName) + " | " + best.getAttribute("data-color");
+    return (bestD === 0 ? "EXACT " : "NEAR ") + best.getAttribute("data-color");
+}"""
+
+# 색 목록에 똑같은 색이 없을 때: 색 고르는 창의 '직접 입력' 칸(#코드)을 찾아 표시한다. 없으면 '더보기' 같은 버튼을 표시한다.
+_MARK_COLOR_INPUT = """() => {
+    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const vis = e => e.getClientRects().length > 0;
+    const sw = [...document.querySelectorAll("[data-color]")].filter(vis)[0];
+    if (!sw) return "";
+    let layer = sw; for (let i = 0; i < 6 && layer.parentElement; i++) layer = layer.parentElement;
+    const inp = [...layer.querySelectorAll("input")].filter(vis)
+        .find(e => !e.type || e.type === "text" || e.type === "search");
+    if (inp) { inp.setAttribute("data-nb-pick", "1"); return "INPUT " + (inp.className || ""); }
+    const more = [...layer.querySelectorAll("button")].filter(vis)
+        .find(b => /더보기|직접|사용자|custom|more|\+/i.test((b.innerText || "") + " " + (b.className || "") + " " + (b.getAttribute("aria-label") || "")));
+    if (more) { more.setAttribute("data-nb-pick", "1"); return "MORE " + (more.className || ""); }
+    return "";
+}"""
+
+_COLOR_LAYER_DUMP = """() => {
+    const vis = e => e.getClientRects().length > 0;
+    const sw = [...document.querySelectorAll("[data-color]")].filter(vis)[0];
+    if (!sw) return "(색 목록 없음)";
+    let layer = sw; for (let i = 0; i < 6 && layer.parentElement; i++) layer = layer.parentElement;
+    return [...layer.querySelectorAll("button, input")].filter(vis)
+        .map(e => e.tagName + " " + (e.className || "") + " | " + ((e.innerText || e.value || "").trim().slice(0, 15))
+             + (e.getAttribute("data-color") ? " | " + e.getAttribute("data-color") : "")).join("\n");
 }"""
 
 # 버튼을 못 찾았을 때 고칠 수 있게 보이는 버튼 이름을 파일로 남긴다
@@ -177,6 +203,30 @@ def _select_back(page: Page, editor, text: str, log: list) -> bool:
     return True
 
 
+def _type_color(page: Page, editor, hexv: str, log: list) -> str:
+    """색 고르는 창에서 #코드를 직접 넣는다 (목록에 똑같은 색이 없을 때). 성공하면 설명 글자, 못 하면 "" """
+    found = editor.evaluate(_MARK_COLOR_INPUT)
+    if found.startswith("MORE"):
+        editor.locator("[data-nb-pick]").first.click(timeout=5000)
+        _pause(0.3, 0.5)
+        found = editor.evaluate(_MARK_COLOR_INPUT)
+    if not found.startswith("INPUT"):
+        if not getattr(_type_color, "dumped", False):
+            log.append("[색 직접 입력 칸 못 찾음] 색 창 안 버튼:\n" + editor.evaluate(_COLOR_LAYER_DUMP))
+            _type_color.dumped = True
+        return ""
+    box = editor.locator("[data-nb-pick]").first
+    box.click(timeout=5000)
+    box.fill(hexv.lstrip("#"))
+    page.keyboard.press("Enter")
+    _pause(0.2, 0.4)
+    # 입력 뒤 '적용/확인' 버튼이 있으면 누른다
+    btn = editor.evaluate("""() => { const vis = e => e.getClientRects().length > 0;
+        const b = [...document.querySelectorAll("button")].filter(vis).find(b => /^(적용|확인|OK)$/.test((b.innerText||"").trim()));
+        if (b) { b.click(); return true; } return false; }""")
+    return f"EXACT {hexv} (직접 입력{', 적용' if btn else ''})"
+
+
 def _pick(page: Page, editor, button_css: str, mark_js: str, arg, log: list) -> str:
     """툴바 버튼을 눌러 목록을 열고, 표시해 둔 항목을 클릭한다. 실패하면 그때 화면의 버튼 목록을 log에 남긴다"""
     btn = editor.locator(button_css).first
@@ -186,6 +236,13 @@ def _pick(page: Page, editor, button_css: str, mark_js: str, arg, log: list) -> 
     btn.click(timeout=5000)
     _pause(0.3, 0.6)
     picked = editor.evaluate(mark_js, arg)
+    if mark_js is _MARK_COLOR_OPTION and picked and picked.startswith("NEAR"):
+        exact = _type_color(page, editor, str(arg), log)
+        if exact:
+            return exact
+        log.append(f"[색 {arg}] 목록에 없어 가장 비슷한 {picked[5:]} 로 넣음")
+        if not editor.evaluate("() => !!document.querySelector('[data-nb-pick]')"):
+            editor.evaluate(mark_js, arg)  # 직접 입력을 찾다가 표시가 지워졌으면 다시 표시
     if not picked:
         log.append(f"[목록에서 {arg} 못 찾음] {button_css} 누른 뒤 화면\n" + editor.evaluate(_DUMP_BUTTONS))
         page.keyboard.press("Escape")

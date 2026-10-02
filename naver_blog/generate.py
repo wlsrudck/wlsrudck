@@ -565,6 +565,7 @@ STYLE_RULES = """
 
 [마무리]
 - closing 세 문장은 매번 다른 말로 씁니다. 같은 인사·같은 문장을 글마다 반복하지 않습니다.
+- 다음 글에 무엇을 쓰겠다는 예고·약속("다음 글에서는 ~를 정리할게요")은 어디에도 쓰지 않습니다.
 - '내 블로그의 다른 글' 목록이 주어지면 이 글과 정말 관련 있는 글만 related에 고릅니다. 본문에서 "○○는 따로 정리해 뒀어요"처럼
   그 글 제목을 자연스럽게 한두 번 언급해도 됩니다. 주소는 프로그램이 글 끝에 붙입니다.
 
@@ -757,9 +758,44 @@ def _system(cfg: dict) -> str:
     return SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else SEARCH) + (SHORT_VOICE if short else "") + STYLE_RULES
 
 
+MOBILE_WIDTH = 24  # 네이버 모바일 화면(본문 19 크기)에서 한 줄에 편하게 들어가는 글자 수
+
+
+def _wrap_line(line: str, width: int = MOBILE_WIDTH) -> list[str]:
+    """긴 한 줄을 모바일에서 어색하게 끊기지 않도록 의미 단위(쉼표 > 띄어쓰기)로 나눈다. 가운데에 가까운 곳에서 끊는다"""
+    line = line.strip()
+    if len(line) <= width or " " not in line:
+        return [line]
+    mid = len(line) / 2
+    # 문장 끝(. ) > 쉼표 뒤 띄어쓰기(, ) > 띄어쓰기 순. 숫자 속 쉼표(14,500)에서는 끊지 않는다
+    ends = [i + 1 for i in range(len(line) - 1) if line[i] in ".?!" and line[i + 1] == " " and 6 <= i + 1 <= len(line) - 6]
+    commas = ends or [i + 1 for i in range(len(line) - 1) if line[i] == "," and line[i + 1] == " " and 6 <= i + 1 <= len(line) - 6]
+    spaces = [i for i, ch in enumerate(line) if ch == " " and 6 <= i <= len(line) - 6]
+    cands = commas or spaces
+    if not cands:
+        return [line]
+    cut = min(cands, key=lambda i: abs(i - mid))
+    return _wrap_line(line[:cut], width) + _wrap_line(line[cut:], width)
+
+
+def mobile_wrap(post: "Post", width: int = MOBILE_WIDTH) -> None:
+    """본문 문단의 긴 줄을 모바일 폭에 맞게 나눈다. 핵심 한 줄(key_line)은 글자 꾸미기 대상이라 그대로 둔다"""
+    for sec in post.sections:
+        keep = sec.key_line.strip()
+        new = []
+        for para in sec.paragraphs:
+            lines = []
+            for ln in para.split("\n"):
+                lines += [ln] if ln.strip() == keep else _wrap_line(ln, width)
+            new.append("\n".join(lines))
+        sec.paragraphs = new
+
+
 def polish_saved(post: Post, memo: str, cfg: dict) -> Post:
     """저장해 둔 글을 다시 쓸 때도(♻) 규칙 점검을 한 번 더 한다: 도입 중복 빼기, 지어낸 경험·금지어·AI 말투 고치기"""
     dedupe_intro(post)
+    post.next_teaser = ""
+    mobile_wrap(post)
     hits, ai_hits = banned_in(post), ai_phrases_in(post)
     fake = [] if experience_memo(memo) else fake_experience_in(post)
     if not (hits or ai_hits or fake):
@@ -824,7 +860,6 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
            "키워드를 쉼표로 나열하지 말고, 본문에서 실제로 답하는 것만 넣습니다(본문에 없는 말로 낚지 않기). "
            "제목에 못 넣은 것 중 맞는 것은 소제목이나 태그에 씁니다." if suggest else "")
         + (f"\n\n내 블로그의 다른 글:\n" + "\n".join(f"{i}. {t}" for i, (t, _) in enumerate(mine, 1)) if mine else "")
-        + (f"\n\n다음 글 주제: {next_keyword}" if next_keyword else "")
         + (f"\n\n조사 자료:\n{notes}" if notes else "")
     )})
     response = client.beta.messages.parse(
@@ -882,8 +917,8 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
     post.suggest = suggest
     post.links = [f"{mine[i - 1][0]}|{mine[i - 1][1]}" for i in dict.fromkeys(post.related) if 1 <= i <= len(mine)][:5]
     post.updated = time.strftime("%Y-%m-%d")
-    if not next_keyword:
-        post.next_teaser = ""
+    post.next_teaser = ""  # 다음 글 예고는 쓰지 않는다 (실제로 무엇을 쓸지 정해진 게 아니므로)
+    mobile_wrap(post)
 
     if short:
         # 짧은 호흡 문체는 소제목 앞에 1. 2. 3. 번호

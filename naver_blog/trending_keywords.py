@@ -423,17 +423,16 @@ def map_category(topic: str, mapping: dict) -> str:
     return next((cat for key, cat in mapping.items() if key and key in topic), "")
 
 
-def main():
+def find_trending(cfg: dict) -> list[dict] | None:
+    """지금 뜨는 키워드를 읽어 등급까지 매긴 목록 (좋은 순). 못 읽으면 None"""
     from keyword_finder import SHOPPING, blog_doc_count, grade, load_keys, monthly_volumes
-    from main import load_config, load_rows, save_rows
-    cfg = load_config()
+    from main import load_rows
     tcfg = cfg.get("trending", {})
     mapping = {**DEFAULT_MAP, **tcfg.get("map", {})}
     print("크리에이터 어드바이저에서 지금 뜨는 키워드를 읽는 중... (30초~1분)")
     items = fetch_trending(cfg["naver"]["blog_id"], tcfg.get("topics", CA_TOPICS))
     if not items:
-        print("\n⚠ 인기 키워드를 읽지 못했어요. output 폴더의 trend_debug.png 와 trend_debug.txt 를 캡처해서 보내 주세요.")
-        return
+        return None
     have = {r["keyword"].replace(" ", "") for r in load_rows()}
     titles = written_titles(cfg["naver"]["blog_id"])
     rows = []
@@ -474,6 +473,16 @@ def main():
             r["volume"], r["comp"], r["grade"] = None, "", "?"
     order = {"S": 0, "A": 1, "B": 2, "?": 3, "C": 4}
     rows.sort(key=lambda r: (order.get(r["grade"], 5), -(r["volume"] or 0)))
+    return rows
+
+
+def main():
+    from main import load_config, load_rows, save_rows
+    cfg = load_config()
+    rows = find_trending(cfg)
+    if rows is None:
+        print("\n⚠ 인기 키워드를 읽지 못했어요. output 폴더의 trend_debug.png 와 trend_debug.txt 를 캡처해서 보내 주세요.")
+        return
 
     print()
     for i, r in enumerate(rows, 1):

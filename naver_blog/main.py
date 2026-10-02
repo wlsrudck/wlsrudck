@@ -247,6 +247,12 @@ def main():
 
     rows = load_rows()
     pending = [r for r in rows if not (r.get("status") or "").strip()]
+    if not pending and cfg.get("autofill", {}).get("enabled", True) and not args.make_folders:
+        from autofill import fill
+        acfg = cfg.get("autofill", {})
+        if fill(cfg, int(acfg.get("count", 0) or pub.get("max_posts_per_day", 2))):
+            rows = load_rows()
+            pending = [r for r in rows if not (r.get("status") or "").strip()]
     if not pending:
         print("처리할 키워드가 없습니다. keywords.csv에 추가하세요.")
         return

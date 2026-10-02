@@ -132,32 +132,9 @@ def classify(series: list[float] | None, kw: str) -> tuple[str, str]:
     return "시즌", f"매년 {peak_month}월에 많이 찾음 → {(peak_month - 3) % 12 + 1}월쯤 미리 써 두기"
 
 
-def seeds_from(cfg: dict) -> dict[str, list[str]]:
-    seeds = cfg.get("evergreen", {}).get("seeds")
-    return seeds if isinstance(seeds, dict) and seeds else DEFAULT_SEEDS
-
-
-def main():
-    from main import load_config, load_rows, save_rows
-    cfg = load_config()
-    keys = load_keys()
-    if not (keys.get("ad_access_license") and keys.get("ad_secret_key") and keys.get("ad_customer_id")):
-        raise RuntimeError("naver_keys.txt 에 검색광고 API 키가 있어야 해요 (6_keyword_finder 와 같은 키).")
-
-    seeds = seeds_from(cfg)
-    arg = " ".join(sys.argv[1:]).strip()
-    if arg:
-        plan = [(arg, next((c for c, ss in seeds.items() if arg in ss), ""))]
-    else:
-        print("평생 키워드 찾기 — 씨앗 키워드를 직접 넣거나, 엔터를 누르면 돈이 되는 주제에서 골고루 골라요.")
-        ans = input("씨앗 키워드 (예: 연말정산 / 엔터 = 자동): ").strip()
-        if ans:
-            plan = [(ans, next((c for c, ss in seeds.items() if ans in ss), ""))]
-        else:
-            rnd = random.Random()
-            plan = [(s, c) for c, ss in seeds.items() for s in rnd.sample(ss, min(2, len(ss)))]
-    print("씨앗: " + ", ".join(s for s, _ in plan))
-
+def find_evergreen(cfg: dict, keys: dict, plan: list[tuple[str, str]]) -> list[dict]:
+    """씨앗 (키워드, 카테고리) 목록에서 평생 키워드 후보를 모아 흐름·등급을 매긴 목록 (좋은 순)"""
+    from main import load_rows
     # 1) 연관 키워드 모으기
     print("네이버 연관 키워드 모으는 중...")
     have = {r["keyword"].replace(" ", "") for r in load_rows()}
@@ -175,8 +152,7 @@ def main():
                 continue
             cands.setdefault(name, {"keyword": name, "volume": vol, "comp": comp, "seed": seed, "category": cat})
     if not cands:
-        print("후보를 찾지 못했어요. 다른 씨앗 키워드로 해 보세요.")
-        return
+        return []
     # 목적이 드러나는 말(방법·조건·효능 ...)이 든 것을 먼저, 그다음 검색량 순으로 60개까지
     rows = sorted(cands.values(), key=lambda r: (not EVERGREEN_WORDS.search(r["keyword"]), -r["volume"]))[:60]
     print(f"후보 {len(cands)}개 중 {len(rows)}개의 1년 검색 흐름을 확인해요...")
@@ -208,7 +184,41 @@ def main():
     grade_order = {"S": 0, "A": 1, "B": 2, "?": 3, "C": 4}
     rows = [r for r in rows if r["grade"] != "C"]
     rows.sort(key=lambda r: (grade_order.get(r["grade"], 5), kind_order.get(r["kind"], 5), -r["volume"]))
-    rows = rows[:40]
+    return rows[:40]
+
+
+
+def seeds_from(cfg: dict) -> dict[str, list[str]]:
+    seeds = cfg.get("evergreen", {}).get("seeds")
+    return seeds if isinstance(seeds, dict) and seeds else DEFAULT_SEEDS
+
+
+def random_plan(seeds: dict[str, list[str]], per_cat: int = 2) -> list[tuple[str, str]]:
+    rnd = random.Random()
+    return [(s, c) for c, ss in seeds.items() for s in rnd.sample(ss, min(per_cat, len(ss)))]
+
+
+def main():
+    from main import load_config, load_rows, save_rows
+    cfg = load_config()
+    keys = load_keys()
+    if not (keys.get("ad_access_license") and keys.get("ad_secret_key") and keys.get("ad_customer_id")):
+        raise RuntimeError("naver_keys.txt 에 검색광고 API 키가 있어야 해요 (6_keyword_finder 와 같은 키).")
+
+    seeds = seeds_from(cfg)
+    arg = " ".join(sys.argv[1:]).strip()
+    if arg:
+        plan = [(arg, next((c for c, ss in seeds.items() if arg in ss), ""))]
+    else:
+        print("평생 키워드 찾기 — 씨앗 키워드를 직접 넣거나, 엔터를 누르면 돈이 되는 주제에서 골고루 골라요.")
+        ans = input("씨앗 키워드 (예: 연말정산 / 엔터 = 자동): ").strip()
+        if ans:
+            plan = [(ans, next((c for c, ss in seeds.items() if ans in ss), ""))]
+        else:
+            plan = random_plan(seeds)
+    print("씨앗: " + ", ".join(s for s, _ in plan))
+
+    rows = find_evergreen(cfg, keys, plan)
     if not rows:
         print("쓸 만한 평생 키워드를 찾지 못했어요. 다른 씨앗 키워드로 해 보세요.")
         return

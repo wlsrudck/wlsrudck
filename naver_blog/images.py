@@ -133,7 +133,14 @@ def make_metrics_card(metrics: list, basis: str, out: Path, seed: str, brand: st
     d.rectangle([72, 110 + 76 * 0.55, 88 + hw, 110 + 76 * 1.08], fill=marker)
     d.text((80, 110), "핵심 지표", font=head, fill=ink)
     if basis:
-        d.text((1000, 110 + 76 * 0.8), basis, font=_font(30), fill=muted, anchor="rm")
+        # 기준·출처: 짧으면 제목 오른쪽, 길면 제목 아래 줄에 (제목과 겹치지 않게)
+        bf = _font(30)
+        if d.textlength(basis, font=bf) <= 1000 - (100 + hw) - 20:
+            d.text((1000, 110 + 76 * 0.8), basis, font=bf, fill=muted, anchor="rm")
+        else:
+            sz = next((z for z in range(30, 21, -2) if d.textlength(basis, font=_font(z)) <= 920), 22)
+            line = _wrap(d, basis, _font(sz), 920)[0]
+            d.text((80, 232), line, font=_font(sz), fill=muted, anchor="lm")
 
     metrics = metrics[:4]
     cols = 2 if len(metrics) == 4 else 1

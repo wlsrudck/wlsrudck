@@ -155,45 +155,26 @@ def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | N
 
 
 def _select_back(page: Page, editor, text: str, log: list) -> bool:
-    """캐럿 바로 앞에 친 text 를 선택한다. Shift+← 를 한꺼번에 빨리 누르면 편집기가 몇 번을 놓쳐 일부만 선택될 때가 있어
-    (예: '쪽파 300g, 절임 없이 완성' 중 '임 없이 완성'만), 한 번씩 누르며 선택된 글자를 확인한다.
-    편집기는 눈에 안 보이는 글자(\u200b 등)를 끼워 두므로 비교할 때 뺀다. 키보드로 안 되면 그 문단 글자를 직접 선택한다."""
+    """캐럿 바로 앞에 친 text 를 Shift+← 로 선택한다.
+    한꺼번에 빨리 누르면 편집기가 몇 번을 놓쳐 일부만 선택되므로(예: '쪽파 300g, 절임 없이 완성' 중 '임 없이 완성'만)
+    한 번씩 쉬어 가며 누른다. 네이버 편집기는 자체 선택 표시를 써서 브라우저 선택으로는 확인이 안 될 때가 많으므로,
+    확인은 브라우저가 알려 줄 때만 참고하고 (어긋나면 더 천천히 한 번 더), 문단 전체를 고르는 식의 넓은 선택은 하지 않는다."""
     norm = lambda t: re.sub(r"[\s\u200b-\u200f\ufeff]+", "", t or "")
     want = norm(text)
-    sel = lambda: norm(editor.evaluate("() => String(window.getSelection())"))
-    page.keyboard.press("End")
-    time.sleep(0.15)
-    got = ""
-    for _ in range(len(text) + 8):
-        page.keyboard.press("Shift+ArrowLeft")
-        time.sleep(0.03)
-        got = sel()
-        if want in got:
+    for delay in (0.04, 0.09):
+        page.keyboard.press("End")
+        time.sleep(0.15)
+        for _ in range(len(text)):
+            page.keyboard.press("Shift+ArrowLeft")
+            time.sleep(delay)
+        try:
+            got = norm(editor.evaluate("() => String(window.getSelection())"))
+        except Exception:
+            got = ""
+        if not got or got == want:
             return True
-        if len(got) > len(want) + 3:
-            break
-    # 키보드 선택이 맞지 않으면: 캐럿이 있던 문단에서 그 글자를 찾아 직접 선택
-    page.keyboard.press("End")
-    ok = editor.evaluate("""(want) => {
-        const s = window.getSelection(); if (!s.rangeCount) return false;
-        let el = s.anchorNode; el = el && el.nodeType === 3 ? el.parentElement : el;
-        while (el && !/^(P|DIV|LI)$/.test(el.tagName)) el = el.parentElement;
-        if (!el) return false;
-        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-        const nodes = []; let n; while ((n = walker.nextNode())) if (n.data.replace(/[\s\u200b-\u200f\ufeff]/g, '')) nodes.push(n);
-        if (!nodes.length) return false;
-        const r = document.createRange();
-        r.setStart(nodes[0], 0); r.setEnd(nodes[nodes.length - 1], nodes[nodes.length - 1].data.length);
-        s.removeAllRanges(); s.addRange(r);
-        document.dispatchEvent(new Event('selectionchange'));
-        return true;
-    }""", want)
-    if ok and want in sel():
-        log.append("키보드 선택이 어긋나 문단 글자를 직접 선택함")
-        return True
-    log.append(f"글자 선택이 맞지 않음: '{got[:20]}' (원래 '{want[:20]}')")
-    page.keyboard.press("End")
-    return False
+        log.append(f"선택이 어긋남({delay}): '{got[:20]}' (원래 '{want[:20]}')")
+    return True
 
 
 def _pick(page: Page, editor, button_css: str, mark_js: str, arg, log: list) -> str:
@@ -482,7 +463,7 @@ def _insert_quote_after(page: Page, editor, text: str, anchor: str, style: dict 
                 page.keyboard.press("Escape")
             if log:
                 _save_log(editor, screenshot_dir, "editor_quote.txt", log)
-            return f"{kind} 인용구로 넣음" + (" (글자 꾸미기 일부 실패: output/editor_quote.txt)" if any("맞지 않음" in l for l in log) else "")
+            return f"{kind} 인용구로 넣음" + (" (글자 꾸미기 일부 실패: output/editor_quote.txt)" if any("어긋남" in l for l in log) else "")
     except Exception as e:
         log.append(f"오류: {str(e).splitlines()[0]}")
         page.keyboard.press("Escape")

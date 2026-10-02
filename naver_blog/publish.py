@@ -203,6 +203,27 @@ def _select_back(page: Page, editor, text: str, log: list) -> bool:
     return True
 
 
+# true면 색 목록에 없는 색을 색 창의 직접 입력 칸에 #코드로 넣어 본다 (편집기에 따라 꾸미기가 멈출 수 있어 기본은 끔).
+# 끄면 목록에서 가장 비슷한 색을 쓴다. 정확한 색을 원하면 프로그램 창 '글자 색' 탭에서 네이버 색 목록 중에 고른다.
+EXACT_COLOR = False
+PALETTE_FILE = Path(__file__).parent / "palette.json"
+
+
+def _save_palette(editor) -> None:
+    """네이버 글자색 목록(색 칸들의 #코드)을 palette.json 에 저장 — 프로그램 창이 이 색들만 고르게 보여 준다"""
+    try:
+        cols = editor.evaluate("""() => [...new Set([...document.querySelectorAll("[data-color]")]
+            .filter(e => e.getClientRects().length > 0).map(e => (e.getAttribute("data-color") || "").toLowerCase())
+            .filter(c => /^#[0-9a-f]{6}$/.test(c)))]""")
+        if len(cols) >= 8:
+            import json
+            old = json.loads(PALETTE_FILE.read_text(encoding="utf-8")) if PALETTE_FILE.exists() else []
+            if old != cols:
+                PALETTE_FILE.write_text(json.dumps(cols), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _type_color(page: Page, editor, hexv: str, log: list) -> str:
     """색 고르는 창에서 #코드를 직접 넣는다 (목록에 똑같은 색이 없을 때). 성공하면 설명 글자, 못 하면 "" """
     found = editor.evaluate(_MARK_COLOR_INPUT)
@@ -236,7 +257,9 @@ def _pick(page: Page, editor, button_css: str, mark_js: str, arg, log: list) -> 
     btn.click(timeout=5000)
     _pause(0.3, 0.6)
     picked = editor.evaluate(mark_js, arg)
-    if mark_js is _MARK_COLOR_OPTION and picked and picked.startswith("NEAR"):
+    if mark_js is _MARK_COLOR_OPTION:
+        _save_palette(editor)
+    if mark_js is _MARK_COLOR_OPTION and picked and picked.startswith("NEAR") and EXACT_COLOR:
         try:
             exact = _type_color(page, editor, str(arg), log)
         except Exception as e:

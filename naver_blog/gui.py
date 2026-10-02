@@ -243,8 +243,26 @@ class ColorTab(ttk.Frame):
             sw.grid(row=n, column=1, sticky="w")
             sw.bind("<Button-1>", lambda _e, k=key: self.pick(k))
             self.swatches[key] = sw
-        ttk.Label(self, text="자주 쓰는 색: 청록 #00756a · 남색 #1c3d6e · 빨강 #c92a2a · 주황 #d9480f · 검정 #222222",
-                  foreground="#666").grid(row=len(STYLE_KEYS) + 1, column=0, columnspan=3, sticky="w", pady=(12, 0))
+        self.note = ttk.Label(self, foreground="#666", justify="left")
+        self.note.grid(row=len(STYLE_KEYS) + 1, column=0, columnspan=3, sticky="w", pady=(12, 0))
+        self.refresh_note()
+
+    @staticmethod
+    def palette() -> list[str]:
+        try:
+            return json.loads((ROOT / "palette.json").read_text(encoding="utf-8"))
+        except Exception:
+            return []
+
+    def refresh_note(self):
+        pal = self.palette()
+        if not pal:
+            self.note.configure(text="글을 한 번 쓰면 네이버 글자색 목록을 읽어 와서, 다음부터는 그 색들 중에서 고르게 돼요.\n"
+                                     "(네이버 목록에 없는 색은 가장 비슷한 색으로 들어가요)")
+            return
+        off = [lbl for key, lbl, _ in STYLE_KEYS if self.swatches[key].cget("text").lower() not in pal]
+        self.note.configure(text="네이버 글자색 목록에 있는 색만 정확히 들어가요."
+                                 + (f"\n⚠ 목록에 없는 색: {', '.join(off)} → 가장 비슷한 색으로 들어가요. 다시 골라 주세요." if off else ""))
 
     @staticmethod
     def _ink(hex_color: str) -> str:
@@ -256,7 +274,11 @@ class ColorTab(ttk.Frame):
 
     def pick(self, key: str):
         sw = self.swatches[key]
-        _, hx = colorchooser.askcolor(color=sw.cget("text"), title="색 고르기")
+        pal = self.palette()
+        if pal:
+            hx = self.pick_from_palette(pal, sw.cget("text"))
+        else:
+            _, hx = colorchooser.askcolor(color=sw.cget("text"), title="색 고르기")
         if not hx:
             return
         try:
@@ -265,6 +287,25 @@ class ColorTab(ttk.Frame):
             messagebox.showerror("저장 실패", "config.toml 이 다른 프로그램에 열려 있으면 닫고 다시 해 주세요.")
             return
         sw.configure(text=hx.lower(), bg=hx, fg=self._ink(hx))
+        self.refresh_note()
+
+    def pick_from_palette(self, pal: list[str], current: str) -> str:
+        """네이버 글자색 목록과 같은 색 칸을 보여 주고 하나를 고르게 한다"""
+        win = tk.Toplevel(self)
+        win.title("네이버 글자색 목록에서 고르기")
+        win.transient(self.winfo_toplevel())
+        win.grab_set()
+        chosen = {"v": ""}
+        cols = 10
+        for i, c in enumerate(pal):
+            b = tk.Button(win, bg=c, activebackground=c, width=3, height=1, cursor="hand2",
+                          relief="sunken" if c == current.lower() else "raised", bd=3 if c == current.lower() else 1,
+                          command=lambda v=c: (chosen.update(v=v), win.destroy()))
+            b.grid(row=i // cols, column=i % cols, padx=2, pady=2)
+        ttk.Label(win, text="칸을 누르면 바로 저장돼요.", foreground="#666").grid(
+            row=len(pal) // cols + 1, column=0, columnspan=cols, pady=6)
+        win.wait_window()
+        return chosen["v"]
 
 
 # ── 창 ──────────────────────────────────────────────────────────

@@ -19,8 +19,8 @@ import re
 import sys
 import time
 import tomllib
-import urllib.parse
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -179,29 +179,49 @@ def _count(value) -> int:
     return 5 if "<" in str(value) else int(str(value).replace(",", "") or 0)
 
 
+def _ad_name(k: str) -> str:
+    """검색광고 API가 받는 모양: 띄어쓰기·특수문자(♥, ·, & 등) 없이 한글·영문·숫자만, 소문자"""
+    return re.sub(r"[^0-9A-Za-z가-힣]", "", k).lower()
+
+
 def monthly_volumes(keywords: list[str], keys: dict, topic: str = "") -> tuple[dict, list]:
     """{키워드: (월간 검색량 PC+모바일, 광고 경쟁 정도 높음/중간/낮음)}.
     검색광고 API는 띄어쓰기 없는 키워드로 돌려주므로 띄어쓰기를 뺀 이름으로 맞춘다."""
     out = {}
     uri = "/keywordstool"
     hints = ([topic] if topic else []) + keywords  # 큰 주제도 넣으면 실제로 많이 찾는 연관 키워드가 함께 온다
-    for i in range(0, len(hints), 5):  # 한 번에 5개까지
-        chunk = hints[i:i + 5]
+    hints = [h for h in dict.fromkeys(_ad_name(h) for h in hints) if h]
+
+    def ask(chunk: list[str]) -> None:
         ts = str(int(time.time() * 1000))
         sign = base64.b64encode(hmac.new(keys["ad_secret_key"].encode(), f"{ts}.GET.{uri}".encode(),
                                          hashlib.sha256).digest()).decode()
         url = "https://api.searchad.naver.com" + uri + "?" + urllib.parse.urlencode(
-            {"hintKeywords": ",".join(k.replace(" ", "") for k in chunk), "showDetail": 1})
+            {"hintKeywords": ",".join(chunk), "showDetail": 1})
         data = _get_json(url, {"X-Timestamp": ts, "X-API-KEY": keys["ad_access_license"],
                                "X-Customer": keys["ad_customer_id"], "X-Signature": sign})
         for row in data.get("keywordList", []):
-            name = str(row.get("relKeyword", "")).replace(" ", "").lower()
+            name = _ad_name(str(row.get("relKeyword", "")))
             out[name] = (_count(row.get("monthlyPcQcCnt", 0)) + _count(row.get("monthlyMobileQcCnt", 0)),
                          str(row.get("compIdx", "")).strip())
         time.sleep(0.3)
-    matched = {k: out.get(k.replace(" ", "").lower()) for k in keywords}
+
+    for i in range(0, len(hints), 5):  # 한 번에 5개까지
+        chunk = hints[i:i + 5]
+        try:
+            ask(chunk)
+        except urllib.error.HTTPError as e:
+            if e.code != 400 or len(chunk) == 1:
+                raise
+            for one in chunk:  # 받아 주지 않는 키워드 하나 때문에 전부 실패하지 않도록, 하나씩 다시 묻고 안 되는 것만 건너뛴다
+                try:
+                    ask([one])
+                except urllib.error.HTTPError as e2:
+                    if e2.code != 400:
+                        raise
+    matched = {k: out.get(_ad_name(k)) for k in keywords}
     # 연관 키워드: 네이버가 알려 준, 실제로 검색되는 말 (검색량 순)
-    asked = {k.replace(" ", "").lower() for k in hints}
+    asked = set(hints)
     related = sorted(((name, v, c) for name, (v, c) in out.items() if name not in asked), key=lambda r: -r[1])
     return matched, related
 

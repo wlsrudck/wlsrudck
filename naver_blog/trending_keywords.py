@@ -405,8 +405,16 @@ def written_titles(blog_id: str) -> list[str]:
 
 def already_written(kw: str, titles: list[str]) -> bool:
     """키워드가 이미 쓴 글 제목에 들어 있으면 (띄어쓰기 무시) 쓴 글로 본다"""
-    k = kw.replace(" ", "")
-    return len(k) >= 2 and any(k in t for t in titles)
+    k = re.sub(r"[^0-9A-Za-z가-힣]", "", kw).lower()
+    if len(k) < 2:
+        return False
+    # 제목에 그대로 있거나, 키워드의 두 글자 조각 대부분이 한 제목에 들어 있으면 (예: '독감예방접종' ↔ '독감 무료 예방 접종') 쓴 글로 본다
+    pieces = {k[i:i + 2] for i in range(len(k) - 1)}
+    for t in titles:
+        t = re.sub(r"[^0-9A-Za-z가-힣]", "", t).lower()
+        if k in t or (len(pieces) >= 3 and sum(p in t for p in pieces) / len(pieces) >= 0.8):
+            return True
+    return False
 
 
 def map_category(topic: str, mapping: dict) -> str:
@@ -430,6 +438,7 @@ def main():
     for topic, kw in items:
         if kw.replace(" ", "") in have or SHOPPING.search(kw) or LYRICS.search(kw):
             continue
+        have.add(kw.replace(" ", ""))  # 같은 키워드가 여러 주제에 올라와도 한 번만
         if already_written(kw, titles):
             done.append(kw)
             continue
@@ -440,6 +449,7 @@ def main():
     skipped = len(rows) - len(mine)
     rows = balanced(mine, 40)
     print(f"인기 키워드 {len(items)}개 중 내 블로그 주제에 맞는 {len(rows)}개" + (f" (다른 주제 {skipped}개 제외)" if skipped else ""))
+    print(f"이미 쓴 글 {len(titles)}개와 비교했어요" + ("" if titles else " (내 글 목록을 못 읽었어요)"))
     if done:
         print(f"이미 쓴 글과 겹쳐서 뺀 키워드 {len(done)}개: " + ", ".join(done[:10]) + (" ..." if len(done) > 10 else ""))
 

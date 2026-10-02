@@ -183,7 +183,7 @@ class Post(BaseModel):
             if kind == "quote":  # 네이버 '포스트잇' 인용구 모양: 회색 테두리 상자 + 오른쪽 아래 접힌 모서리
                 body.append('<p style="position:relative;background:#f7f7f7;border:3px solid #d6d6d6;padding:26px 30px;'
                             f'margin:28px 40px;text-align:center;font-size:{st["quote_size"]}px;font-weight:bold;'
-                            f'color:{st["heading_color"]}">{html.escape(value)}'
+                            f'color:{st.get("quote_color") or st["heading_color"]}">{html.escape(value)}'
                             '<span style="position:absolute;right:-3px;bottom:-3px;border-style:solid;border-width:0 0 36px 36px;'
                             'border-color:transparent transparent #fff #bdbdbd"></span></p>')
             elif kind == "text" and value.startswith("목차\n"):

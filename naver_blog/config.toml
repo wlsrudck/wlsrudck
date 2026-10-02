@@ -42,6 +42,8 @@ divider_style = 3              # 소제목 위 구분선 모양 (구분선 목�
 heading_box = "버티컬 라인"      # 소제목을 넣을 인용구 모양 ("" 이면 상자 없이 글자만)
 key_color = "#d9480f"          # 소제목마다 핵심 한 줄 색 (주황)
 key_underline = true           # 핵심 한 줄 밑줄
+quote_size = 19                # 인용구(포스트잇) 안 글자 크기
+quote_color = "#00756a"        # 인용구 안 글자 색 (비우면 소제목 색과 같게)
 
 [clip]
 # true면 글을 쓸 때마다 네이버 클립용 세로 영상(mp4)도 같이 만든다. 따로 만들려면 8_make_clip.bat

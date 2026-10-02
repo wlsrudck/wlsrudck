@@ -470,7 +470,7 @@ def _insert_quote_after(page: Page, editor, text: str, anchor: str, style: dict 
             # 인용구 안 글자도 크게+색+굵게 (소제목 상자와 같은 방법: 방금 친 글자를 Shift+← 로 선택)
             try:
                 for pick, arg, css in ((_MARK_SIZE_OPTION, st["quote_size"], "font_size_btn"),
-                                       (_MARK_COLOR_OPTION, st["heading_color"], "font_color_btn")):
+                                       (_MARK_COLOR_OPTION, st.get("quote_color") or st["heading_color"], "font_color_btn")):
                     if _select_back(page, editor, text, log):
                         _pick(page, editor, SELECTORS[css], pick, arg, log)
                     page.keyboard.press("End")

@@ -413,7 +413,8 @@ def already_written(kw: str, titles: list[str]) -> str:
     pieces = {k[i:i + 2] for i in range(len(k) - 1)}
     for title in titles:
         t = re.sub(r"[^0-9A-Za-z가-힣]", "", title).lower()
-        if k in t or (len(pieces) >= 3 and sum(p in t for p in pieces) / len(pieces) >= 0.8):
+        if k in t or (len(pieces) >= 3 and sum(p in t for p in pieces) / len(pieces) >= 0.8
+                      and all(n in t for n in re.findall(r"\d+", k))):  # 숫자는 꼭 같아야 (s27 ↔ s25 는 다른 글)
             return title
     return ""
 

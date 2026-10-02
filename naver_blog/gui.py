@@ -276,7 +276,8 @@ def main():
         name = load_config().get("naver", {}).get("blog_name", "")
     except Exception:
         name = ""
-    root.title(f"{name or '네이버 블로그'} 자동화")
+    from version import VERSION
+    root.title(f"{name or '네이버 블로그'} 자동화  (버전 {VERSION})")
     root.geometry("940x640")
     try:
         ttk.Style().theme_use("vista" if os.name == "nt" else "clam")

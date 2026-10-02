@@ -239,6 +239,8 @@ def main():
     ap.add_argument("--no-wait", action="store_true")
     ap.add_argument("--make-folders", action="store_true")
     args = ap.parse_args()
+    from version import VERSION
+    print(f"[프로그램 버전 {VERSION}]  폴더: {ROOT}")
 
     cfg = load_config()
     pub = cfg["publish"]

@@ -121,7 +121,7 @@ _MARK_COLOR_OPTION = """(hex) => {
 }"""
 
 # 색 목록에 똑같은 색이 없을 때: 색 고르는 창의 '직접 입력' 칸(#코드)을 찾아 표시한다. 없으면 '더보기' 같은 버튼을 표시한다.
-_MARK_COLOR_INPUT = """() => {
+_MARK_COLOR_INPUT = r"""() => {
     document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
     const vis = e => e.getClientRects().length > 0;
     const sw = [...document.querySelectorAll("[data-color]")].filter(vis)[0];
@@ -136,7 +136,7 @@ _MARK_COLOR_INPUT = """() => {
     return "";
 }"""
 
-_COLOR_LAYER_DUMP = """() => {
+_COLOR_LAYER_DUMP = r"""() => {
     const vis = e => e.getClientRects().length > 0;
     const sw = [...document.querySelectorAll("[data-color]")].filter(vis)[0];
     if (!sw) return "(색 목록 없음)";
@@ -237,7 +237,15 @@ def _pick(page: Page, editor, button_css: str, mark_js: str, arg, log: list) -> 
     _pause(0.3, 0.6)
     picked = editor.evaluate(mark_js, arg)
     if mark_js is _MARK_COLOR_OPTION and picked and picked.startswith("NEAR"):
-        exact = _type_color(page, editor, str(arg), log)
+        try:
+            exact = _type_color(page, editor, str(arg), log)
+        except Exception as e:
+            exact = ""
+            log.append(f"[색 직접 입력 오류] {str(e).splitlines()[0]}")
+            page.keyboard.press("Escape")
+            btn.click(timeout=5000)  # 색 창을 다시 연다
+            _pause(0.3, 0.5)
+            editor.evaluate(mark_js, arg)
         if exact:
             return exact
         log.append(f"[색 {arg}] 목록에 없어 가장 비슷한 {picked[5:]} 로 넣음")

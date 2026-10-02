@@ -369,6 +369,25 @@ def _api_key() -> str | None:
     return keys[0]
 
 
+QUESTION_PREFIX = "궁금한 점:"  # 키워드 자동 채우기가 적는 메모. 작성자의 경험이 아니라 독자가 궁금해할 점
+
+
+def experience_memo(memo: str) -> bool:
+    """작성자가 직접 적은 경험 메모인가 (자동으로 적힌 '궁금한 점:' 메모는 경험이 아님)"""
+    m = (memo or "").strip()
+    return bool(m) and not m.startswith(QUESTION_PREFIX)
+
+
+def memo_for_prompt(memo: str) -> str:
+    m = (memo or "").strip()
+    if not m:
+        return "(없음)"
+    if m.startswith(QUESTION_PREFIX):
+        return ("(작성자 경험 없음 — 경험·후기처럼 쓰지 말 것) 독자가 궁금해할 점: "
+                + m[len(QUESTION_PREFIX):].strip() + " → 이 질문들에 답이 되도록 소제목·Q&A를 구성")
+    return m
+
+
 RESEARCH_PROMPT = """네이버 블로그 글을 쓰기 전에 사실 확인용 자료를 조사해 주세요.
 주제: {keyword}
 작성자 메모: {memo}
@@ -398,7 +417,7 @@ class SearchFailed(Exception):
 def research(client: anthropic.Anthropic, keyword: str, memo: str, cfg: dict) -> tuple[str, dict]:
     """웹 검색으로 최신 사실을 조사해 (정리한 메모, 출처 URL 목록)을 돌려준다."""
     messages = [{"role": "user", "content": RESEARCH_PROMPT.format(
-        keyword=keyword, memo=memo or "(없음)", max_searches=cfg.get("max_searches", 5))}]
+        keyword=keyword, memo=memo_for_prompt(memo), max_searches=cfg.get("max_searches", 5))}]
     tools = [{
         "type": "web_search_20260209", "name": "web_search", "max_uses": cfg.get("max_searches", 5),
         "user_location": {"type": "approximate", "country": "KR", "timezone": "Asia/Seoul"},
@@ -584,7 +603,7 @@ def checklist(post: "Post", memo: str, cfg: dict) -> list[tuple[str, bool, str]]
     headings = [s for s in post.sections if s.heading.strip()]
     confirmed = [m for m in post.metrics if not m.pending]
     banned, ai = banned_in(post), ai_phrases_in(post)
-    has_memo = bool((memo or "").strip())
+    has_memo = experience_memo(memo)
     return [
         ("도입 3줄", len(post.intro) == 3 and not greet, "인사말이 들어 있어요" if greet else f"{len(post.intro)}줄"),
         ("목차", len(headings) >= 2, f"소제목 {len(headings)}개"),
@@ -742,7 +761,7 @@ def polish_saved(post: Post, memo: str, cfg: dict) -> Post:
     """저장해 둔 글을 다시 쓸 때도(♻) 규칙 점검을 한 번 더 한다: 도입 중복 빼기, 지어낸 경험·금지어·AI 말투 고치기"""
     dedupe_intro(post)
     hits, ai_hits = banned_in(post), ai_phrases_in(post)
-    fake = [] if (memo or "").strip() else fake_experience_in(post)
+    fake = [] if experience_memo(memo) else fake_experience_in(post)
     if not (hits or ai_hits or fake):
         return post
     print(f"  저장해 둔 글에서 고칠 표현 발견({', '.join(hits + ai_hits + fake)}) → 고쳐 쓰는 중")
@@ -752,7 +771,7 @@ def polish_saved(post: Post, memo: str, cfg: dict) -> Post:
         model=cfg["model"], max_tokens=16000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
         system=_system(cfg),
         messages=[{"role": "user", "content": (
-            f"작성자 메모: {memo or '(없음)'}\n\n아래 글을 규칙에 맞게 고쳐 같은 형식으로 주세요. 사실·숫자·구성은 그대로 둡니다.\n"
+            f"작성자 메모: {memo_for_prompt(memo)}\n\n아래 글을 규칙에 맞게 고쳐 같은 형식으로 주세요. 사실·숫자·구성은 그대로 둡니다.\n"
             + (f"- 광고처럼 보이는 표현: {', '.join(hits)}\n" if hits else "")
             + (f"- AI 말투: {', '.join(ai_hits)}\n" if ai_hits else "")
             + (f"- 메모에 없는데 글쓴이가 직접 겪은 것처럼 쓴 표현: {', '.join(fake)} → 독자의 궁금증이나 사실 서술로\n"
@@ -796,7 +815,7 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
         content.append(_image_block(path))
     content.append({"type": "text", "text": (
         f"검색 키워드: {keyword}\n"
-        f"작성자 메모: {memo or '(없음)'}\n"
+        f"작성자 메모: {memo_for_prompt(memo)}\n"
         f"첨부 사진: {len(photos)}장\n\n"
         f"문체: {cfg['tone']}\n"
         f"본문 분량: 공백 포함 {cfg['min_chars']}~{cfg['max_chars']}자"
@@ -828,7 +847,7 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
     # 금지 표현이 남아 있으면 한 번만 고쳐 쓰게 한다 (공식 명칭 등 꼭 필요한 경우는 남을 수 있다)
     hits = banned_in(post)
     ai_hits = ai_phrases_in(post)
-    fake = [] if (memo or "").strip() else fake_experience_in(post)
+    fake = [] if experience_memo(memo) else fake_experience_in(post)
     if hits or ai_hits or fake:
         print(f"  금지 표현·AI 말투·지어낸 경험 발견({', '.join(hits + ai_hits + fake)}) → 고쳐 쓰는 중")
         fixed = client.beta.messages.parse(

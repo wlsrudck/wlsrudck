@@ -23,7 +23,7 @@ import urllib.error
 
 import images
 from generate import (NotEnoughInfo, Post, SearchFailed, checklist, choose_photo, find_photos, generate_post,
-                      make_threads, my_posts, polish_saved)
+                      make_threads, my_posts, polish_saved, experience_memo)
 
 ROOT = Path(__file__).parent
 KEYWORDS = ROOT / "keywords.csv"
@@ -291,7 +291,7 @@ def main():
         slug = slugify(keyword)
         photos = find_photos(PHOTOS / slug)
         print(f"[생성] {keyword} (사진 {len(photos)}장)")
-        if not (row.get("memo") or "").strip():
+        if not experience_memo(row.get("memo", "")):
             print("  💡 메모가 비어 있어요. keywords.csv 메모 칸에 직접 겪은 한두 줄을 적으면 글이 더 좋아져요 (경험은 지어내지 않아요)")
         saved_json = OUTPUT / f"{dt.date.today()}_{slug}.json"
         reused = False

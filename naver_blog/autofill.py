@@ -44,6 +44,18 @@ def trending_candidates(cfg: dict) -> list[dict]:
     return good
 
 
+def question_memo(keyword: str) -> str:
+    """메모 칸에 '궁금한 점: ...' 을 적는다. 네이버 자동완성(사람들이 실제로 이어서 검색하는 말)에서 3개.
+    경험이 아니라 질문이므로 글에 경험처럼 쓰이지 않는다. 직접 겪은 일이 있으면 이 메모를 지우고 적으면 된다."""
+    from generate import QUESTION_PREFIX, naver_suggest
+    try:
+        base = keyword.replace(" ", "")
+        qs = [q for q in naver_suggest(keyword, 10) if q.replace(" ", "") != base][:3]
+    except Exception:
+        qs = []
+    return f"{QUESTION_PREFIX} " + ", ".join(qs) if qs else ""
+
+
 def fill(cfg: dict, need: int) -> list[str]:
     """need 개를 골라 keywords.csv 에 넣고, 넣은 키워드 목록을 돌려준다"""
     from main import load_rows, save_rows
@@ -71,18 +83,39 @@ def fill(cfg: dict, need: int) -> list[str]:
     if not picked:
         print("  자동으로 고를 만한 키워드를 찾지 못했어요. 11·12번으로 직접 찾아 주세요.")
         return []
-    save_rows(load_rows() + [{"keyword": r["keyword"], "memo": "", "status": "", "category": r.get("category", "")}
-                             for r in picked])
+    save_rows(load_rows() + [{"keyword": r["keyword"], "memo": question_memo(r["keyword"]), "status": "",
+                              "category": r.get("category", "")} for r in picked])
     for r in picked:
         kind = r.get("kind") or "지금 뜨는"
         print(f"  + [{r['grade']}] [{kind}] {r['keyword']} → {r.get('category') or '기본 카테고리'}")
+    print("  (메모 칸에는 사람들이 이어서 검색하는 '궁금한 점'을 적어 뒀어요. 직접 겪은 일이 있으면 바꿔 적어 주세요)")
     return [r["keyword"] for r in picked]
 
 
+def add_question_memos() -> int:
+    """아직 안 쓴 줄 중 메모가 빈 곳에 '궁금한 점'을 채운다"""
+    from main import load_rows, save_rows
+    rows, n = load_rows(), 0
+    for r in rows:
+        if not r["status"].strip() and not r["memo"].strip():
+            r["memo"] = question_memo(r["keyword"])
+            n += bool(r["memo"])
+    if n:
+        save_rows(rows)
+    return n
+
+
 if __name__ == "__main__":
-    from main import load_config
+    from main import load_config, load_rows
     cfg = load_config()
     n = min(int(cfg.get("autofill", {}).get("count", 0) or cfg["publish"].get("max_posts_per_day", 2)), 5)
-    got = fill(cfg, n)
-    if got:
-        print(f"\n{len(got)}개를 keywords.csv 에 넣었어요. 메모 칸에 직접 겪은 일을 적어 두면 글이 더 좋아져요.")
+    pending = [r for r in load_rows() if not r["status"].strip()]
+    if len(pending) < n:
+        got = fill(cfg, n - len(pending))
+        if got:
+            print(f"\n{len(got)}개를 keywords.csv 에 넣었어요.")
+    else:
+        print(f"아직 안 쓴 키워드가 {len(pending)}개 있어서 새로 채우지 않았어요.")
+    m = add_question_memos()
+    if m:
+        print(f"메모가 빈 키워드 {m}개에 '궁금한 점'을 적었어요.")

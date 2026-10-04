@@ -58,9 +58,32 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     if cfg.get("stock_photos", True) and not key:
         print("  (pixabay_key.txt가 없어 무료 사진은 건너뜁니다)")
 
+    # AI 이미지 (Google Gemini, google_key.txt 가 있을 때). 글 하나에 ai_max 장까지 (비용 조절)
+    import ai_images
+    ai_key = ai_images.load_key() if cfg.get("ai_images", True) and writing else ""
+    ai_left = int(cfg.get("ai_max", 5)) if ai_key else 0
+    ai_model = cfg.get("ai_model", "")
+
+    def ai_make(prompt: str, out: Path) -> Path | None:
+        nonlocal ai_left
+        if ai_left <= 0:
+            return None
+        try:
+            path = ai_images.generate(prompt, out, ai_key, ai_model)
+            ai_left -= 1
+            return path
+        except Exception as e:
+            print(f"  (AI 이미지 실패: {ai_images.explain(e)})")
+            if "403" in str(e) or "429" in str(e) or "400" in str(e):
+                ai_left = 0  # 키·결제 문제면 이번 글에서는 더 시도하지 않는다
+            return None
+
     used_ids: set[int] = set()
     thumb_photo = None
-    if cfg.get("thumbnail", True) and cfg.get("thumbnail_style", "auto") == "auto":
+    if ai_left and not photos and cfg.get("thumbnail", True):
+        thumb_photo = ai_make(f"블로그 글 '{post.title}'의 대표 이미지. 주제를 한눈에 보여 주는 장면.",
+                              folder / "ai_thumb.png")
+    if not thumb_photo and cfg.get("thumbnail", True) and cfg.get("thumbnail_style", "auto") == "auto":
         # 썸네일 배경: 직접 찍은 사진이 있으면 그걸, 없으면 무료 사진을 따로 찾는다
         if photos:
             thumb_photo = photos[0]
@@ -93,7 +116,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
 
     # 소제목마다 관련 이미지 하나: 직접 찍은 사진 → 정책브리핑·무료 사진(후보 여러 장 중 Claude가 내용에 맞는 것만) → 소제목 카드
     cand_dir = folder / "_candidates"
-    own_used, n_stock, n_card, n_policy = set(), 0, 0, 0
+    own_used, n_stock, n_card, n_policy, n_ai = set(), 0, 0, 0, 0
     for i, s in enumerate(post.sections):
         if not s.heading.strip():
             continue
@@ -101,7 +124,11 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             own_used.add(s.photo)
             continue
         picked = None
-        if policy and writing:
+        if ai_left:
+            picked = ai_make(ai_images.section_prompt(s.heading, s.key_line + " " + " ".join(s.paragraphs), keyword or post.title),
+                             folder / f"ai_{i + 1:02d}.png")
+            n_ai += bool(picked)
+        if not picked and policy and writing:
             try:
                 n = choose_photo(s.heading, " ".join(s.paragraphs), policy, writing)
                 if n:
@@ -151,7 +178,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
                                                    photo=thumb_photo, brand=brand)
     print(f"  이미지 준비: 썸네일 {('사진형' if thumb_photo else '매거진형') if 'thumbnail' in media else '없음'}, "
           f"지표 카드 {'만듦' if 'metrics_card' in media else '없음'}, "
-          f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 소제목 이미지: 정책브리핑 사진 {n_policy}장 + 내용에 맞는 무료 사진 {n_stock}장 + 소제목 카드 {n_card}장")
+          f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 소제목 이미지: AI {n_ai}장 + 정책브리핑 사진 {n_policy}장 + 내용에 맞는 무료 사진 {n_stock}장 + 소제목 카드 {n_card}장")
     return media
 
 
@@ -290,7 +317,7 @@ def main():
         cfg.setdefault("autofill", {})["enabled"] = False  # 상품 링크는 사람이 넣어야 해서 자동 채우기는 하지 않는다
         # 판매 글: 목차·지표 카드·요약 카드·무료 사진·카드뉴스·스레드 없이, 상품 사진 중심으로 짧게
         img = cfg.setdefault("images", {})
-        for k in ("metrics_card", "summary_card", "stock_photos", "section_cards", "card_news", "policy_photos"):
+        for k in ("metrics_card", "summary_card", "stock_photos", "section_cards", "card_news", "policy_photos", "ai_images"):
             img[k] = bool(shop.get(k, False))
         cfg["writing"]["threads"] = bool(shop.get("threads", False))
         cfg["writing"]["min_chars"] = shop.get("min_chars", 800)

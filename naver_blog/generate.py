@@ -177,6 +177,8 @@ class Post(BaseModel):
             credits.append("정책브리핑(공공누리 제1유형)")
         if any("pixabay" in Path(p).name for p in stock.values()):
             credits.append("Pixabay")
+        if any(Path(p).name.startswith("ai_") for p in stock.values()):
+            credits.append("일부 이미지는 AI로 만들었어요")
         if credits:
             out.append(("text", "사진 출처: " + ", ".join(credits)))
         if self.updated:

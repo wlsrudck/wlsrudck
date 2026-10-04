@@ -4,6 +4,7 @@ state.json
 api_key.txt
 photos/
 pixabay_key.txt
+google_key.txt
 run_log.txt
 naver_keys.txt
 music/*.mp3

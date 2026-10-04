@@ -336,7 +336,7 @@ def main():
                 from shop_fetch import fetch_product
                 print("  상품 페이지 읽는 중..." + ("" if row.get("info_link") else " (정보 링크가 없어 제휴 링크로 열어요)"))
                 tmp_dir = PHOTOS / "_fetch"
-                product = fetch_product(info_url, tmp_dir)
+                product = fetch_product(info_url, tmp_dir, model=cfg["writing"].get("model", ""))
                 if keyword.startswith(AUTO_KEYWORD):  # 링크만 넣은 줄: 상품명으로 키워드를 정한다
                     new_kw = re.sub(r"\s+", " ", re.sub(r"[\[\(].*?[\]\)]", "", product["name"])).strip()[:30]
                     rename_keyword(keyword, new_kw, row.get("link", ""))
@@ -352,7 +352,8 @@ def main():
                 own = [p for p in photos if not p.name.startswith("product_")]
                 photos = own + product["images"]
                 print(f"  상품: {product['name'][:40]}" + (f" / {product['price']}원" if product["price"] else "")
-                      + f" / 상품 사진 {len(product['images'])}장")
+                      + f" / 상품 사진 {len(product['images'])}장"
+                      + (" / 상세 이미지 글자 읽음" if product.get("detail_read") else ""))
             except Exception as e:
                 product = None
                 print(f"  ⚠ 상품 페이지를 읽지 못했어요 ({str(e).splitlines()[0][:80]}) → 키워드와 메모로만 써요")

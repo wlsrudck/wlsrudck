@@ -519,8 +519,18 @@ def source_name(url: str, title: str | None) -> str:
         if title and sep in title:
             name = title.rsplit(sep, 1)[1].strip()
             if 0 < len(name) <= 15:
-                return name
-    return urllib.parse.urlparse(url).netloc.removeprefix("www.")
+                return _plain_site(name)
+    return _plain_site(host)
+
+
+def _plain_site(name: str) -> str:
+    """'m.radiokorea.com' 처럼 주소 모양인 이름은 네이버 편집기가 링크 카드로 바꿔 엉뚱한 자리에 끼워 넣으므로
+    'radiokorea' 처럼 주소가 아닌 이름으로 바꾼다"""
+    if not re.fullmatch(r"[\w-]+(\.[\w-]+)+", name.strip()):
+        return name
+    generic = {"m", "www", "co", "com", "kr", "net", "org", "or", "go", "ac", "ne", "io", "news", "blog", "post"}
+    parts = [x for x in name.strip().lower().split(".") if x not in generic]
+    return max(parts, key=len) if parts else name.split(".")[0]
 
 
 # AI가 쓴 티가 나는 말투. 나오면 금지어처럼 한 번 고쳐 쓰게 한다

@@ -257,3 +257,50 @@ def fetch_product(url: str, img_dir: Path, headless: bool = False, model: str = 
     ] if x)
     return {"name": name, "price": price, "brand": brand, "reviews": reviews, "url": d.get("url", url), "facts": facts, "images": images,
             "detail_read": bool(detail_text), "detail_photos": len(detail_photos)}
+
+
+def fetch_product_safe(url: str, img_dir: Path, model: str = "", tries: int = 2) -> dict:
+    """상품 페이지를 따로 띄운 프로그램(별도 프로세스)에서 읽는다.
+    긴 상세페이지를 여러 번 읽으면 메모리가 모자라(MemoryError) 본 프로그램까지 흔들리므로, 읽기가 끝나면 메모리를 통째로 돌려준다.
+    실패하면 한 번 더 시도한다"""
+    import json
+    import subprocess
+    import sys
+    out = img_dir.parent / "_fetch_result.json"
+    last = ""
+    for n in range(1, tries + 1):
+        out.unlink(missing_ok=True)
+        try:
+            import os
+            r = subprocess.run([sys.executable, str(Path(__file__)), url, str(img_dir), model, str(out)],
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=420,
+                               env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            for line in (r.stdout or "").splitlines():  # 따로 띄운 쪽의 안내 문구도 보여 준다
+                if line.strip():
+                    print(line)
+            if out.exists():
+                d = json.loads(out.read_text(encoding="utf-8"))
+                if d.get("error"):
+                    last = d["error"]
+                else:
+                    d["images"] = [Path(p) for p in d["images"]]
+                    return d
+            else:
+                last = (r.stderr or r.stdout or "결과 없음").strip().splitlines()[-1][:150]
+        except subprocess.TimeoutExpired:
+            last = "7분 넘게 걸려 멈춤"
+        if n < tries:
+            print(f"  (상품 페이지 읽기 실패: {last[:80]} → 한 번 더)")
+    raise RuntimeError(last or "상품 페이지를 읽지 못했어요")
+
+
+if __name__ == "__main__":  # fetch_product_safe 가 부르는 입구: python shop_fetch.py 주소 사진폴더 모델 결과.json
+    import json
+    import sys
+    _url, _dir, _model, _out = sys.argv[1], Path(sys.argv[2]), sys.argv[3], Path(sys.argv[4])
+    try:
+        _d = fetch_product(_url, _dir, model=_model)
+        _d["images"] = [str(p) for p in _d["images"]]
+    except Exception as _e:
+        _d = {"error": f"{type(_e).__name__}: {str(_e).splitlines()[0][:150] if str(_e) else ''}"}
+    _out.write_text(json.dumps(_d, ensure_ascii=False), encoding="utf-8")

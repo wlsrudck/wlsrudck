@@ -937,7 +937,11 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
     if suggest:
         print(f"  네이버 연관 키워드: {', '.join(suggest[:8])}")
     notes, found = "", {}
-    if cfg.get("research", True):
+    # 쇼핑 글은 상품 상세페이지가 정답 자료다. 웹 검색은 다른 판매처 가격·비슷한 모델과 섞여 글을 흐리거나
+    # '핵심 정보를 못 찾음'으로 글을 건너뛰게 만들어서, 상세페이지를 읽었으면 검색하지 않는다
+    if cfg.get("shopping") and cfg.get("product_info"):
+        print("  상품 상세페이지 자료로 써요 (웹 검색 생략)")
+    elif cfg.get("research", True):
         try:
             notes, found = research(client, keyword, memo, cfg)
         except SearchFailed as e:

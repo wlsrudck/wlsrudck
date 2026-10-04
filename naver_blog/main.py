@@ -344,10 +344,10 @@ def main():
 
         if shop.get("enabled") and info_url and not reusable(OUTPUT / f"{dt.date.today()}_{slug}.json"):
             try:
-                from shop_fetch import fetch_product
+                from shop_fetch import fetch_product_safe
                 print("  상품 페이지 읽는 중..." + ("" if row.get("info_link") else " (정보 링크가 없어 제휴 링크로 열어요)"))
                 tmp_dir = PHOTOS / "_fetch"
-                product = fetch_product(info_url, tmp_dir, model=cfg["writing"].get("model", ""))
+                product = fetch_product_safe(info_url, tmp_dir, model=cfg["writing"].get("model", ""))
                 if keyword.startswith(AUTO_KEYWORD):  # 링크만 넣은 줄: 상품명으로 키워드를 정한다
                     new_kw = re.sub(r"\s+", " ", re.sub(r"[\[\(].*?[\]\)]", "", product["name"])).strip()[:30]
                     rename_keyword(keyword, new_kw, row.get("link", ""))

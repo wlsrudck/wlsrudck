@@ -271,6 +271,11 @@ def main():
 
     rows = load_rows()
     pending = [r for r in rows if not (r.get("status") or "").strip()]
+    if shop.get("enabled") and shop.get("require_link", True):  # 제휴 링크가 없는 상품 글은 수익이 안 잡히므로 기다린다
+        waiting = [r["keyword"] for r in pending if not (r.get("link") or "").strip()]
+        if waiting:
+            print(f"제휴 링크를 기다리는 상품 {len(waiting)}개 (건너뜀): " + ", ".join(waiting[:5]) + (" ..." if len(waiting) > 5 else ""))
+        pending = [r for r in pending if (r.get("link") or "").strip()]
     if not pending and cfg.get("autofill", {}).get("enabled", True) and not args.make_folders:
         from autofill import fill
         acfg = cfg.get("autofill", {})

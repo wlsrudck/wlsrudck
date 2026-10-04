@@ -29,6 +29,7 @@ BUTTONS = [
         ("주제로 키워드 찾기", "6_keyword_finder.bat", "큰 주제를 넣으면 롱테일 키워드를 찾아요"),
         ("시즌 키워드", "7_season_keywords.bat", "다가오는 계절·행사 키워드"),
         ("키워드 자동 채우기", "13_autofill_keywords.bat", "평생 + 지금 뜨는 키워드에서 좋은 것을 알아서 골라 넣어요"),
+        ("상품 자동 찾기 (쇼핑)", "15_find_products.bat", "카테고리별로 네이버 쇼핑에서 리뷰 많은 상품을 골라 넣어요"),
     ]),
     ("준비·설정", [
         ("네이버 로그인", "2_login.bat", "로그인이 풀렸을 때 다시 로그인해요"),
@@ -470,8 +471,10 @@ def main():
     nb.add(run, text="  실행  ")
     shop = is_shop()
     for col, (group, items) in enumerate(BUTTONS):
-        if shop:  # 쇼핑 블로그는 키워드를 직접 넣는다 (이슈·정보 키워드 찾기 버튼은 숨김)
+        if shop:  # 쇼핑 블로그는 이슈·정보 키워드 찾기 버튼을 숨긴다
             items = [it for it in items if it[1] not in SHOP_HIDDEN]
+        else:
+            items = [it for it in items if it[1] != "15_find_products.bat"]
         lf = ttk.LabelFrame(run, text=group, padding=10)
         lf.grid(row=0, column=col, sticky="nsew", padx=6)
         run.columnconfigure(col, weight=1)

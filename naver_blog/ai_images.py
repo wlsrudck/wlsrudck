@@ -7,6 +7,7 @@
 """
 
 import base64
+import re
 import json
 import urllib.error
 import urllib.request
@@ -25,7 +26,18 @@ _model_cache: dict[str, str] = {}
 
 
 def load_key() -> str:
-    return KEY_FILE.read_text(encoding="utf-8-sig").strip() if KEY_FILE.exists() else ""
+    """google_key.txt 에서 키를 읽는다. 메모장 저장 실수(google_key.txt.txt, 확장자 없음)도 받아 준다"""
+    for f in (KEY_FILE, ROOT / "google_key.txt.txt", ROOT / "google_key"):
+        if f.is_file():
+            for enc in ("utf-8-sig", "utf-16", "cp949"):
+                try:
+                    key = f.read_text(encoding=enc).strip()
+                except Exception:
+                    continue
+                m = re.search(r"AIza[0-9A-Za-z_\-]{20,}", key)
+                if m:
+                    return m.group(0)
+    return ""
 
 
 def _req(url: str, body: dict | None = None, timeout: int = 120) -> dict:
@@ -116,7 +128,8 @@ if __name__ == "__main__":  # 시험: python ai_images.py "주제"
     import sys
     k = load_key()
     if not k:
-        print("google_key.txt 에 Google AI Studio 키를 넣어 주세요.")
+        print("구글 키를 찾지 못했어요. 프로그램 창의 [구글 AI 키 넣기] 버튼으로 키를 붙여 넣어 주세요.")
+        print(f"(찾아본 곳: {KEY_FILE})")
         sys.exit(1)
     m = pick_model(k)
     print(f"쓸 모델: {m}")

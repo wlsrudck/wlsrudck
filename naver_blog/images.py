@@ -11,7 +11,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 FONT_CANDIDATES = [
     "C:/Windows/Fonts/malgunbd.ttf",   # 맑은 고딕 Bold (Windows 기본)
@@ -120,9 +120,30 @@ def _thumb_magazine(lines, out, marker: str, brand: str) -> Path:
     return out
 
 
-def make_metrics_card(metrics: list, basis: str, out: Path, seed: str, brand: str = "") -> Path:
+def _photo_bg(bg: Path, size: tuple[int, int], dim: int = 120) -> Image.Image:
+    """AI·사진 배경: 꽉 차게 자르고 살짝 흐리게, 어둡게 덮어 위의 글자 카드가 또렷하게 보이게"""
+    with Image.open(bg) as src:
+        im = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGB"), size, Image.LANCZOS)
+    im = im.filter(ImageFilter.GaussianBlur(4))
+    shade = Image.new("RGBA", size, (12, 14, 18, dim))
+    return Image.alpha_composite(im.convert("RGBA"), shade)
+
+
+def _panel(base: Image.Image, box, radius: int = 28, alpha: int = 238) -> None:
+    """반투명 흰 판 (유리 카드 느낌)"""
+    layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    ImageDraw.Draw(layer).rounded_rectangle(box, radius=radius, fill=(255, 255, 255, alpha))
+    base.alpha_composite(layer)
+
+
+def make_metrics_card(metrics: list, basis: str, out: Path, seed: str, brand: str = "", bg: Path | None = None) -> Path:
     """핵심 지표 카드: 타일마다 이름 / 큰 숫자 / 기준·출처 한 줄. 4개면 2x2, 1~3개면 넓은 타일을 한 줄에 하나씩.
     매거진형 썸네일·요약 카드와 같은 톤. 숫자는 진한 글자색, 확인 못 한 값("확인 필요")은 흐린 색."""
+    if bg:
+        try:
+            return _metrics_on_photo(metrics, basis, out, brand, bg)
+        except Exception:
+            pass
     marker = random.Random(seed).choice(MARKERS)  # 같은 글의 썸네일과 같은 색
     ink, sub, muted, rule = "#16181b", "#4a4e55", "#8a8d93", "#d9d5cc"
     im = Image.new("RGB", (1080, 1080), "#f6f4ef")
@@ -187,8 +208,77 @@ def make_metrics_card(metrics: list, basis: str, out: Path, seed: str, brand: st
     return out
 
 
-def make_summary_card(title: str, points: list[str], out: Path, seed: str, brand: str = "") -> Path:
+def _metrics_on_photo(metrics: list, basis: str, out: Path, brand: str, bg: Path) -> Path:
+    """사진 배경 위 지표 카드: 흐린 사진 + 흰 반투명 타일, 숫자는 크고 진하게 (글자는 프로그램이 정확히 씀)"""
+    W = H = 1080
+    im = _photo_bg(bg, (W, H))
+    d = ImageDraw.Draw(im)
+    d.text((80, 120), "핵심 지표", font=_font(72), fill="white")
+    if basis:
+        line = _wrap(d, basis, _font(30), 920)[0]
+        d.text((80, 220), line, font=_font(30), fill=(230, 232, 236), anchor="lm")
+    metrics = metrics[:4]
+    cols = 2 if len(metrics) == 4 else 1
+    rows = (len(metrics) + cols - 1) // cols
+    gap, left, top, bottom = 24, 80, 280, 140
+    tw = (W - left * 2 - gap * (cols - 1)) // cols
+    th = min(300, (H - top - bottom - gap * (rows - 1)) // rows)
+    top += (H - bottom - top - (th * rows + gap * (rows - 1))) // 2
+    pad, inner = 36, tw - 72
+    size = next((z for z in range(104, 40, -4) if all(d.textlength(m.value, font=_font(z)) <= inner for m in metrics)), 40)
+    for i, m in enumerate(metrics):
+        x, y = left + (i % cols) * (tw + gap), top + (i // cols) * (th + gap)
+        _panel(im, [x, y, x + tw, y + th])
+        d = ImageDraw.Draw(im)
+        d.text((x + pad, y + 48), _wrap(d, m.label, _font(32), inner)[0], font=_font(32), fill="#4a4e55", anchor="lm")
+        pending = m.value.strip() == "확인 필요"
+        vl = _wrap(d, m.value, _font(size), inner)[:2]
+        vy = y + th / 2 + 6 - (len(vl) - 1) * size * 0.6
+        for j, l in enumerate(vl):
+            d.text((x + pad, vy + j * size * 1.2), l, font=_font(size), fill="#8a8d93" if pending else "#111317", anchor="lm")
+        notes = _wrap(d, m.note, _font(26), inner)[:2]
+        for j, l in enumerate(notes):
+            d.text((x + pad, y + th - 36 - (len(notes) - 1 - j) * 32), l, font=_font(26), fill="#7a7e85", anchor="lm")
+    if brand:
+        d.text((80, H - 70), brand, font=_font(30), fill="white", anchor="lm")
+    im.convert("RGB").save(out, quality=92)
+    return out
+
+
+def _summary_on_photo(points: list[str], out: Path, brand: str, bg: Path) -> Path:
+    W = H = 1080
+    im = _photo_bg(bg, (W, H))
+    d = ImageDraw.Draw(im)
+    d.text((80, 120), "한눈에 정리", font=_font(72), fill="white")
+    points = points[:5]
+    body = _font(44)
+    wrapped = [_wrap(d, p, body, 760)[:2] for p in points]
+    heights = [56 * len(w) + 52 for w in wrapped]
+    box_h = sum(heights) + 60
+    y0 = max(260, (H - box_h) // 2 + 60)
+    _panel(im, [60, y0, W - 60, y0 + box_h])
+    d = ImageDraw.Draw(im)
+    y = y0 + 40
+    for i, (lines, h) in enumerate(zip(wrapped, heights), 1):
+        d.text((110, y + 4), f"{i:02d}", font=_font(38), fill="#9aa0a8")
+        for j, l in enumerate(lines):
+            d.text((200, y + j * 56), l, font=body, fill="#111317")
+        y += h
+        if i < len(points):
+            d.line([110, y - 26, W - 110, y - 26], fill="#e4e4e4", width=2)
+    if brand:
+        d.text((80, H - 70), brand, font=_font(30), fill="white", anchor="lm")
+    im.convert("RGB").save(out, quality=92)
+    return out
+
+
+def make_summary_card(title: str, points: list[str], out: Path, seed: str, brand: str = "", bg: Path | None = None) -> Path:
     """"한눈에 정리" 카드. 매거진형 썸네일과 같은 톤(미색 배경, 굵은 검정 글자, 같은 형광펜 색)."""
+    if bg:
+        try:
+            return _summary_on_photo(points, out, brand, bg)
+        except Exception:
+            pass
     marker = random.Random(seed).choice(MARKERS)  # 같은 글의 썸네일과 같은 색
     ink, muted, rule = "#16181b", "#8a8d93", "#d9d5cc"
     im = Image.new("RGB", (1080, 1080), "#f6f4ef")

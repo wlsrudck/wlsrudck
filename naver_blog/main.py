@@ -47,10 +47,6 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     folder = OUTPUT / f"{slug}_images"
     folder.mkdir(parents=True, exist_ok=True)
     media = {"stock": {}}
-    if cfg.get("metrics_card", True) and post.metrics:
-        media["metrics_card"] = images.make_metrics_card(post.metrics, post.metrics_basis, folder / "metrics.jpg", slug, brand)
-    if cfg.get("summary_card", True) and post.summary:
-        media["summary_card"] = images.make_summary_card(post.title, post.summary, folder / "summary.jpg", slug, brand)
 
     key_file = ROOT / "pixabay_key.txt"
     key = key_file.read_text(encoding="utf-8-sig").strip() if key_file.exists() else ""
@@ -77,6 +73,18 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             if "403" in str(e) or "429" in str(e) or "400" in str(e):
                 ai_left = 0  # 키·결제 문제면 이번 글에서는 더 시도하지 않는다
             return None
+
+    # 지표·요약 카드: AI 배경 한 장 위에 프로그램이 숫자·글자를 정확히 얹는다 (AI가 글자를 그리면 숫자가 틀릴 수 있어서)
+    card_bg = None
+    if ai_left and ((cfg.get("metrics_card", True) and post.metrics) or (cfg.get("summary_card", True) and post.summary)):
+        card_bg = ai_make(f"블로그 글 '{post.title}'의 정보 카드 배경. 주제와 어울리는 사물·공간을 은은하게, 넓은 여백, "
+                          "가운데는 비교적 단순하게.", folder / "ai_cardbg.png")
+    if cfg.get("metrics_card", True) and post.metrics:
+        media["metrics_card"] = images.make_metrics_card(post.metrics, post.metrics_basis, folder / "metrics.jpg", slug, brand,
+                                                         bg=card_bg)
+    if cfg.get("summary_card", True) and post.summary:
+        media["summary_card"] = images.make_summary_card(post.title, post.summary, folder / "summary.jpg", slug, brand,
+                                                         bg=card_bg)
 
     used_ids: set[int] = set()
     thumb_photo = None

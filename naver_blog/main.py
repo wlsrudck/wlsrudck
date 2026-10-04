@@ -22,7 +22,7 @@ from pathlib import Path
 import urllib.error
 
 import images
-from generate import (NotEnoughInfo, Post, SearchFailed, checklist, choose_photo, find_photos, generate_post,
+from generate import (UNKNOWN, NotEnoughInfo, Post, SearchFailed, checklist, choose_photo, find_photos, generate_post,
                       make_threads, my_posts, polish_saved, experience_memo)
 
 ROOT = Path(__file__).parent
@@ -57,7 +57,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     # AI 이미지 (Google Gemini, google_key.txt 가 있을 때). 글 하나에 ai_max 장까지 (비용 조절)
     import ai_images
     ai_key = ai_images.load_key() if cfg.get("ai_images", True) and writing else ""
-    ai_left = int(cfg.get("ai_max", 5)) if ai_key else 0
+    ai_left = int(cfg.get("ai_max", 7)) if ai_key else 0
     ai_model = cfg.get("ai_model", "")
 
     def ai_make(prompt: str, out: Path) -> Path | None:
@@ -173,8 +173,11 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
                         n_stock += 1
                 except Exception as e:
                     print(f"  무료 사진 고르기 실패({s.heading[:15]}): {str(e).splitlines()[0][:60]}")
-        if not picked and cfg.get("section_cards", True):
+        # 글자만 있는 소제목 카드는 AI 이미지를 쓸 때는 만들지 않는다 (사진 사이에 끼면 오히려 촌스럽다. 없으면 사진 없이)
+        if not picked and cfg.get("section_cards", True) and not ai_key:
             line = s.key_line.strip() or next((p.split("\n")[0] for p in s.paragraphs if p.strip()), "")
+            if UNKNOWN.search(line):
+                line = ""
             picked = images.make_section_card(s.heading, line, folder / f"section_{i + 1:02d}.jpg", slug, brand)
             n_card += 1
         if picked:

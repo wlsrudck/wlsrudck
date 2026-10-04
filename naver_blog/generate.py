@@ -17,6 +17,9 @@ from pydantic.json_schema import SkipJsonSchema
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
 
+UNKNOWN = re.compile(r"확인되지\s*않|확인\s*필요|알려지지\s*않|미정|정해지지\s*않|명확하지\s*않")
+
+
 class Section(BaseModel):
     heading: str = Field(description="소제목 (없으면 빈 문자열)")
     photo: int | None = Field(description="이 소제목 바로 아래에 넣을 사진 번호(1부터). 없으면 null")
@@ -25,7 +28,8 @@ class Section(BaseModel):
     alt_queries: list[str] = Field(default=[], description="stock_query로 못 찾을 때 쓸 다른 영어 검색어 2개 (더 넓은 말로)")
     paragraphs: list[str] = Field(description="문단 목록. 한 문단은 2~4문장")
     key_line: str = Field(default="", description="이 소제목에서 독자가 꼭 기억할 한 줄(가격·날짜·핵심 팁 등). "
-                                                  "paragraphs 안의 한 줄을 글자 그대로 복사. 없으면 빈 문자열")
+                                                  "paragraphs 안의 한 줄을 글자 그대로 복사. '아직 확인되지 않았다' 같은 "
+                                                  "모른다는 문장은 고르지 않음. 확인된 사실이 없으면 빈 문자열")
 
 
 # 소제목·Q&A 글자 꾸미기 기본값. config.toml의 [style]에서 바꿀 수 있다
@@ -189,7 +193,7 @@ class Post(BaseModel):
         return out
 
     def key_lines(self) -> list[str]:
-        return [s.key_line.strip() for s in self.sections if s.key_line.strip()]
+        return [s.key_line.strip() for s in self.sections if s.key_line.strip() and not UNKNOWN.search(s.key_line)]
 
     def to_html(self, photos: list[Path], out_dir: Path, media: dict | None = None, style: dict | None = None,
                 checks: list | None = None) -> str:

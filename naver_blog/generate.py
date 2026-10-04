@@ -125,10 +125,13 @@ class Post(BaseModel):
         out = []
         if self.disclosure.strip():
             out.append(("text", self.disclosure.strip()))
-        if media.get("thumbnail"):
+        # 썸네일은 도입 바로 뒤. 광고 표기 문장은 글 끝에도 똑같이 있어서 그 뒤를 기준으로 삼으면 사진이 글 끝으로 가 버린다
+        if media.get("thumbnail") and not (self.disclosure.strip() and self.intro):
             out.append(("photo", media["thumbnail"]))
         if self.intro:
             out.append(("text", "\n".join(self.intro)))
+            if media.get("thumbnail") and self.disclosure.strip():
+                out.append(("photo", media["thumbnail"]))
         if self.pull_quote.strip():
             out.append(("quote", self.pull_quote.strip()))  # 네이버 인용구(포스트잇)로 들어간다
         if self.shop_links:  # 판매 글: 도입 바로 뒤에 구매 링크 한 번

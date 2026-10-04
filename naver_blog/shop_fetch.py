@@ -22,11 +22,17 @@ _READ = r"""() => {
         try { ld.push(JSON.parse(s.textContent)); } catch (e) {}
     }
     const imgs = [], detail = [];
+    // 상세 설명 영역(스마트스토어 '상세정보', 스마트에디터 본문 등). 이 안의 그림은 '상세 그림'으로 따로 모은다
+    const DETAIL = '#INTRODUCE, [id*="INTRODUCE"], [id*="detail"], [class*="detail_area"], [class*="productDetail"], ' +
+                   '[class*="DetailContent"], [class*="detail_content"], .se-main-container, .se_component_wrap';
     for (const im of document.images) {
-        const src = im.currentSrc || im.src || "";
-        const w = im.naturalWidth, h = im.naturalHeight;
-        if (!src.startsWith("http") || w < 400 || h < 400) continue;
+        const src = im.currentSrc || im.src || im.getAttribute("data-src") || "";
+        if (!src.startsWith("http") || src.startsWith("data:")) continue;
+        const w = im.naturalWidth || +im.getAttribute("width") || 0, h = im.naturalHeight || +im.getAttribute("height") || 0;
         const top = im.getBoundingClientRect().top + scrollY;
+        const inDetail = !!im.closest(DETAIL);
+        if (inDetail && (w === 0 || w >= 300)) { detail.push({src, w, h, top}); continue; }
+        if (w < 400 || h < 400) continue;
         if (h > w * 2.2) { detail.push({src, w, h, top}); continue; }  // 상세페이지 통이미지(아주 긴 그림): 글자만 읽는다
         imgs.push({src, w, h, top});
     }
@@ -52,7 +58,18 @@ def _ld_product(ld) -> dict:
     return {}
 
 
-MAX_DETAIL = 3     # 읽을 상세페이지 통이미지 수
+MAX_DETAIL = 8     # 읽을 상세페이지 그림 수 (조각 수 한도는 MAX_SLICES)
+
+_EXPAND = r"""() => {
+    // '상세정보 펼쳐보기' 같은 접힌 상세 설명 열기 (구매·장바구니·리뷰 버튼은 건드리지 않음)
+    let n = 0;
+    for (const b of document.querySelectorAll("button, a")) {
+        const t = (b.innerText || "").replace(/\s+/g, " ").trim();
+        if (t.length > 20 || /구매|장바구니|리뷰|찜|문의|쿠폰|알림/.test(t)) continue;
+        if (/상세\s*정보.*(펼쳐|더\s*보기)|펼쳐\s*보기/.test(t) && b.offsetParent !== null) { b.click(); n++; }
+    }
+    return n;
+}"""
 MAX_SLICES = 12    # Claude에게 보낼 조각 수 (비용 한도)
 
 
@@ -153,6 +170,19 @@ def fetch_product(url: str, img_dir: Path, headless: bool = False, model: str = 
         for _ in range(6):  # 아래로 내려 가며 늦게 뜨는 사진·설명을 불러온다
             page.mouse.wheel(0, 1400)
             page.wait_for_timeout(700)
+        try:  # 접혀 있는 상세 설명을 펼치고 끝까지 내려 가며 상세 그림을 불러온다
+            if page.evaluate(_EXPAND):
+                page.wait_for_timeout(1500)
+            bottom = 0
+            for _ in range(40):
+                page.mouse.wheel(0, 1500)
+                page.wait_for_timeout(500)
+                if page.evaluate("() => scrollY + innerHeight >= document.body.scrollHeight - 20"):
+                    bottom += 1
+                    if bottom >= 2:
+                        break
+        except Exception:
+            pass
         try:
             page.evaluate("() => window.scrollTo(0, 0)")
         except Exception:
@@ -193,7 +223,15 @@ def fetch_product(url: str, img_dir: Path, headless: bool = False, model: str = 
         try:
             req = urllib.request.Request(s, headers={"User-Agent": "Mozilla/5.0", "Referer": d.get("url", url)})
             data = urllib.request.urlopen(req, timeout=20).read()
-            if len(data) < 6000:  # 아이콘·빈 그림 빼기
+            if len(data) < 6000 or "blur" in s.lower():  # 아이콘·빈 그림·흐린 미리보기 그림 빼기
+                continue
+            try:  # 작은 그림을 늘린 흐린 사진은 빼기 (늦게 뜨는 사진의 임시 그림)
+                import io
+                from PIL import Image
+                with Image.open(io.BytesIO(data)) as im:
+                    if min(im.size) < 400:
+                        continue
+            except Exception:
                 continue
             ext = ".png" if data[:4] == b"\x89PNG" else ".jpg"
             path = img_dir / f"product_{n}{ext}"

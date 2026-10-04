@@ -811,7 +811,8 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screens
         else:
             anchor = value.split("\n")[-1].strip() or anchor
     # 맨 앞 사진(썸네일)은 첫 글 덩어리(세 줄 도입) 바로 뒤에 넣는다
-    first_line = next(v.split("\n")[-1].strip() for _, v in texts)
+    first_line = next((v.split("\n")[-1].strip() for _, v in texts if not ("커넥트" in v and "수수료" in v)),
+                      texts[0][1].split("\n")[-1].strip())
 
     for i, (kind, value) in enumerate(texts):
         if kind == "heading":

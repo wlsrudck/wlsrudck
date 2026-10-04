@@ -267,6 +267,13 @@ def main():
     if shop.get("enabled"):
         cfg["writing"]["shopping"] = True
         cfg.setdefault("autofill", {})["enabled"] = False  # 상품 링크는 사람이 넣어야 해서 자동 채우기는 하지 않는다
+        # 판매 글: 목차·지표 카드·요약 카드·무료 사진·카드뉴스·스레드 없이, 상품 사진 중심으로 짧게
+        img = cfg.setdefault("images", {})
+        for k in ("metrics_card", "summary_card", "stock_photos", "section_cards", "card_news"):
+            img[k] = bool(shop.get(k, False))
+        cfg["writing"]["threads"] = bool(shop.get("threads", False))
+        cfg["writing"]["min_chars"] = shop.get("min_chars", 800)
+        cfg["writing"]["max_chars"] = shop.get("max_chars", 1400)
         print("[쇼핑 블로그 모드] 메모에 경험이 있으면 실사용 리뷰, 없으면 구매 가이드로 써요")
 
     rows = load_rows()
@@ -396,6 +403,7 @@ def main():
         if shop.get("enabled"):
             post.disclosure = shop.get("disclosure", "이 포스팅은 네이버 쇼핑 커넥트 활동의 일환으로, 판매 발생 시 수수료를 제공받습니다.")
             post.shop_links = links
+            post.simple = True
             post.shop_name = (product or {}).get("name", "")[:40]
             if product and product["images"] and not any("상품 이미지 출처" in x for x in post.sources):
                 post.sources.append("상품 이미지 출처: 판매처 상품 페이지")

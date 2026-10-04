@@ -83,6 +83,7 @@ class Post(BaseModel):
     disclosure: SkipJsonSchema[str] = ""  # 쇼핑커넥트 광고 표기 (글 맨 위)
     shop_links: SkipJsonSchema[list[str]] = []  # 쇼핑커넥트 링크
     shop_name: SkipJsonSchema[str] = ""  # 상품명 (링크 앞 안내 문장용)
+    simple: SkipJsonSchema[bool] = False  # 판매 글: 목차 없이 짧게
 
     @classmethod
     def load(cls, data: dict) -> "Post":
@@ -129,7 +130,9 @@ class Post(BaseModel):
             out.append(("text", "\n".join(self.intro)))
         if self.pull_quote.strip():
             out.append(("quote", self.pull_quote.strip()))  # 네이버 인용구(포스트잇)로 들어간다
-        if self.toc():
+        if self.shop_links:  # 판매 글: 도입 바로 뒤에 구매 링크 한 번
+            out.append(("text", f"👉 {self.shop_name or '제품'} 자세히 보기\n" + "\n".join(self.shop_links)))
+        if self.toc() and not self.simple:
             out.append(("text", self.toc()))
         if media.get("metrics_card"):
             out.append(("photo", media["metrics_card"]))
@@ -142,8 +145,6 @@ class Post(BaseModel):
             elif i in stock:
                 out.append(("photo", stock[i]))
             out.extend(("text", p) for p in s.paragraphs)
-        if self.shop_links:
-            out.append(("text", f"👉 {self.shop_name or '제품'} 자세히 보기\n" + "\n".join(self.shop_links)))
         if self.qa:
             out.append(("heading", "자주 묻는 질문"))
             for q in self.qa:
@@ -766,6 +767,17 @@ def my_posts(blog_id: str, limit: int = 30) -> list[tuple[str, str]]:
     return out[:limit]
 
 
+SHOP_SALES = """
+
+[판매 글 구성 - 쇼핑 블로그]
+이 블로그는 정보 블로그가 아니라 상품을 소개해 구매로 이어지게 하는 블로그입니다. 짧고 시원하게 씁니다.
+- 목차·통계·긴 배경 설명은 넣지 않습니다. 소제목은 3~4개면 충분합니다.
+- 흐름: ①이런 고민 있죠(독자 상황 한두 줄) → ②이 상품이 해결하는 점 3가지(구체적 사실: 용량·소재·구성·기능)
+  → ③이런 분께 맞아요 / 이런 분은 다른 걸 보세요 → ④가격·구성·구매 전 확인할 것.
+- pull_quote 는 상품의 가장 큰 장점 한 줄(가격 단정 금지). Q&A 는 2~3개만(사이즈, 세척, 배송 같은 실제 구매 질문).
+- metrics 는 상품 사양(용량, 무게 등)으로 1~2개만. 읽은 자료에 없는 수치는 '확인 필요'.
+- 리뷰 수가 자료에 있으면 '리뷰 ○○개가 쌓인 상품' 처럼 사실로만 언급합니다(리뷰 내용을 지어내지 않음)."""
+
 SHOP_GUIDE = """
 
 [쇼핑 블로그 - 구매 가이드 글]
@@ -797,7 +809,7 @@ def _system(cfg: dict, memo: str = "") -> str:
     short = cfg.get("voice", "short") == "short"
     shop = ""
     if cfg.get("shopping"):
-        shop = SHOP_REVIEW if experience_memo(memo) else SHOP_GUIDE
+        shop = SHOP_SALES + (SHOP_REVIEW if experience_memo(memo) else SHOP_GUIDE)
         style = (cfg.get("shop_style") or "").strip()
         if style in SHOP_STYLES and not (style == "후기형" and not experience_memo(memo)):
             shop += "\n- 글 스타일: " + SHOP_STYLES[style]

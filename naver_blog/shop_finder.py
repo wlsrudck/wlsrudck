@@ -43,7 +43,8 @@ def shop_search(query: str, keys: dict, n: int = 30) -> list[dict]:
             if e.code not in (401, 403, 404):
                 raise
     raise RuntimeError(f"쇼핑 검색 API를 쓸 수 없어요 (HTTP {getattr(last, 'code', '?')}). "
-                       "NAVER API HUB 앱에 '검색 - 쇼핑' API를 추가해 주세요.")
+                       "네이버 쇼핑 검색 API는 2026년 7월 31일에 종료되었어요. 브랜드커넥트에서 리뷰 많은 상품을 골라 "
+                       "쇼핑 창 '링크 여러 개 한 번에'로 넣어 주세요.")
 
 
 def clean(t: str) -> str:

@@ -70,7 +70,16 @@ def pick_model(key: str, wanted: str = "") -> str:
     except Exception:
         pass
     image_models = [n for n in names if "image" in n or n.startswith("imagen")]
-    model = next((p for p in PREFERRED if p in image_models), image_models[0] if image_models else PREFERRED[0])
+
+    def rank(n: str) -> tuple:
+        """가장 새 버전의 'flash 이미지'(나노바나나) 모델을 고른다. Pro 는 비싸고 Lite 는 품질이 낮아 뒤로"""
+        m = re.search(r"gemini-(\d+(?:\.\d+)?)", n)
+        ver = float(m.group(1)) if m else 0.0
+        return ("flash-image" in n and "lite" not in n, "preview" not in n and "exp" not in n,
+                "pro" not in n, ver)
+    gem = sorted((n for n in image_models if n.startswith("gemini")), key=rank, reverse=True)
+    model = gem[0] if gem else next((p for p in PREFERRED if p in image_models),
+                                     image_models[0] if image_models else PREFERRED[0])
     _model_cache[key] = model
     return model
 

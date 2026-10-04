@@ -966,9 +966,13 @@ def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, aut
             else:
                 editor.locator(SELECTORS["save_btn"]).first.click()
                 _pause(2.0, 3.0)
-        except Exception:
+        except Exception as e:
             screenshot_dir.mkdir(parents=True, exist_ok=True)
-            page.screenshot(path=str(screenshot_dir / f"error_{int(time.time())}.png"), full_page=True)
+            print(f"  ⚠ 네이버 입력 중 오류: {str(e).splitlines()[0][:150]}")
+            try:  # 화면 캡처가 실패해도 원래 오류가 가려지지 않게
+                page.screenshot(path=str(screenshot_dir / f"error_{int(time.time())}.png"), timeout=10000)
+            except Exception:
+                pass
             raise
         finally:
             # 세션 쿠키가 갱신됐을 수 있으니 다시 저장

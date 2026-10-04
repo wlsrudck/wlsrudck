@@ -51,19 +51,33 @@ def _ld_product(ld) -> dict:
     return {}
 
 
-def fetch_product(url: str, img_dir: Path, headless: bool = True) -> dict:
+def fetch_product(url: str, img_dir: Path, headless: bool = False) -> dict:
     """{'name','price','brand','url','facts'(글쓰기 자료 글자),'images'[Path]}. 못 읽으면 예외"""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
         ctx = browser.new_context(storage_state=str(STATE_PATH) if STATE_PATH.exists() else None, locale="ko-KR",
                                   viewport={"width": 1280, "height": 1600})
         page = ctx.new_page()
-        page.goto(url, wait_until="domcontentloaded", timeout=45000)
-        page.wait_for_timeout(3500)
+        # 쇼핑 페이지는 광고·추적 스크립트가 많아 '다 열림'을 기다리면 시간 초과가 나므로, 주소만 바뀌면 바로 읽기 시작한다
+        try:
+            page.goto(url, wait_until="commit", timeout=60000)
+        except Exception:
+            pass
+        for _ in range(30):  # 상품명이 보일 때까지 최대 약 15초
+            page.wait_for_timeout(500)
+            try:
+                if page.evaluate("() => !!document.querySelector('meta[property=\"og:title\"]') || document.title.length > 3"):
+                    break
+            except Exception:
+                pass
+        page.wait_for_timeout(2500)
         for _ in range(6):  # 아래로 내려 가며 늦게 뜨는 사진·설명을 불러온다
             page.mouse.wheel(0, 1400)
             page.wait_for_timeout(700)
-        page.evaluate("() => window.scrollTo(0, 0)")
+        try:
+            page.evaluate("() => window.scrollTo(0, 0)")
+        except Exception:
+            pass
         page.wait_for_timeout(800)
         d = page.evaluate(_READ)
         browser.close()

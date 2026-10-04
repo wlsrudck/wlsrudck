@@ -338,9 +338,14 @@ def main():
             if not shop.get("enabled"):
                 return True
             try:
-                return str(json.loads(path.read_text(encoding="utf-8")).get("version", "")) == str(VERSION)
+                saved = json.loads(path.read_text(encoding="utf-8"))
             except Exception:
                 return False
+            if str(saved.get("version", "")) != str(VERSION):
+                return False
+            # 그 글을 쓸 때 본 사진이 그대로 있어야 다시 쓸 수 있다 (사진 번호가 글 속 자리와 맞아야 하므로)
+            used = saved.get("photos")
+            return bool(used) and all(Path(p).exists() for p in used)
 
         if shop.get("enabled") and info_url and not reusable(OUTPUT / f"{dt.date.today()}_{slug}.json"):
             try:
@@ -372,8 +377,12 @@ def main():
                 if keyword.startswith(AUTO_KEYWORD):
                     print("  ⏭ 키워드가 없는 줄이라 건너뛰어요. 키워드 목록에서 키워드를 직접 적거나 '정보 링크'(스마트스토어 주소)를 넣어 주세요.")
                     continue
-        elif shop.get("enabled") and links:  # 오늘 써 둔 글을 다시 넣을 때는 받아 둔 상품 사진을 그대로 쓴다
-            photos = photos + find_photos(PHOTOS / slug / "_product")
+        elif shop.get("enabled") and links:  # 오늘 써 둔 글을 다시 넣을 때는 그 글을 쓸 때 본 사진을 같은 순서로
+            try:
+                photos = [Path(p) for p in json.loads((OUTPUT / f"{dt.date.today()}_{slug}.json")
+                                                      .read_text(encoding="utf-8")).get("photos", [])] or photos
+            except Exception:
+                pass
         print(f"[생성] {keyword} (사진 {len(photos)}장)")
         if not experience_memo(row.get("memo", "")):
             print("  💡 메모가 비어 있어요. keywords.csv 메모 칸에 직접 겪은 한두 줄을 적으면 글이 더 좋아져요 (경험은 지어내지 않아요)")
@@ -431,7 +440,8 @@ def main():
         checks = checklist(post, row.get("memo", ""), cfg["writing"])
         preview.write_text(post.to_html(photos, OUTPUT, media, cfg.get("style"), checks), encoding="utf-8")
         print(f"  미리보기 저장: {preview} ({len(post.body_text())}자)")
-        saved = {"keyword": keyword, "slug": slug, "date": str(dt.date.today()), "version": VERSION, "post": post.model_dump()}
+        saved = {"keyword": keyword, "slug": slug, "date": str(dt.date.today()), "version": VERSION,
+                 "photos": [str(p) for p in photos], "post": post.model_dump()}
         (OUTPUT / f"{dt.date.today()}_{slug}.json").write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
         failed = [f"{name}({detail})" for name, ok, detail in checks if not ok]
         print(f"  발행 전 점검: {len(checks) - len(failed)}/{len(checks)} 통과"

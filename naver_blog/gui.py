@@ -69,6 +69,18 @@ def open_path(p: Path) -> None:
 
 # ── 키워드 목록 ──────────────────────────────────────────────────
 
+SHOP_CATEGORIES = ["주방템", "청소·세탁템", "수납·정리템", "자취 꿀템 모음"]
+SHOP_HIDDEN = {"11_trending_keywords.bat", "12_evergreen_keywords.bat", "7_season_keywords.bat", "13_autofill_keywords.bat"}
+
+
+def is_shop() -> bool:
+    try:
+        from main import load_config
+        return bool(load_config().get("shopping", {}).get("enabled"))
+    except Exception:
+        return False
+
+
 def known_categories(rows: list[dict]) -> list[str]:
     cats = []
     try:
@@ -78,6 +90,8 @@ def known_categories(rows: list[dict]) -> list[str]:
     for r in rows:
         if r.get("category") and r["category"] not in cats:
             cats.append(r["category"])
+    if is_shop():
+        return cats + [c for c in SHOP_CATEGORIES if c not in cats]
     return cats or ["생활정보", "경제·재테크", "IT·AI", "연예·이슈 기록"]
 
 
@@ -359,7 +373,10 @@ def main():
 
     run = ttk.Frame(nb, padding=12)
     nb.add(run, text="  실행  ")
+    shop = is_shop()
     for col, (group, items) in enumerate(BUTTONS):
+        if shop:  # 쇼핑 블로그는 키워드를 직접 넣는다 (이슈·정보 키워드 찾기 버튼은 숨김)
+            items = [it for it in items if it[1] not in SHOP_HIDDEN]
         lf = ttk.LabelFrame(run, text=group, padding=10)
         lf.grid(row=0, column=col, sticky="nsew", padx=6)
         run.columnconfigure(col, weight=1)

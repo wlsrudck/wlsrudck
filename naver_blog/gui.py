@@ -353,6 +353,46 @@ class ColorTab(ttk.Frame):
 
 # ── 창 ──────────────────────────────────────────────────────────
 
+CLIP_KEYS = {86: "<<Paste>>", 67: "<<Copy>>", 88: "<<Cut>>"}  # V, C, X (윈도우 키 위치 번호)
+
+
+def clip_key(e):
+    """Ctrl+키: 한글 입력 상태라 글자가 v·c·x 가 아니어도 키 위치로 붙여넣기·복사·잘라내기"""
+    ev = CLIP_KEYS.get(e.keycode)
+    if ev and str(e.keysym).lower() not in ("v", "c", "x"):  # 영문 상태는 원래대로 동작
+        e.widget.event_generate(ev)
+        return "break"
+    if e.keycode == 65:  # Ctrl+A 모두 선택
+        try:
+            e.widget.select_range(0, "end")
+            e.widget.icursor("end")
+        except Exception:
+            pass
+        return "break"
+    return None
+
+
+def enable_clipboard(root: tk.Tk) -> None:
+    """입력 칸에서 복사·붙여넣기가 늘 되게 한다.
+    - 한글 입력 상태에서는 Ctrl+V 가 'Ctrl+ㅍ' 로 들어가 붙여넣기가 안 되므로 키 위치(keycode)로 잡는다
+    - 마우스 오른쪽 클릭 메뉴(잘라내기·복사·붙여넣기·모두 선택)를 붙인다"""
+    on_ctrl = clip_key
+    menu = tk.Menu(root, tearoff=0)
+    target = {"w": None}
+    for label, ev in (("잘라내기", "<<Cut>>"), ("복사", "<<Copy>>"), ("붙여넣기", "<<Paste>>")):
+        menu.add_command(label=label, command=lambda ev=ev: target["w"] and target["w"].event_generate(ev))
+    menu.add_command(label="모두 선택", command=lambda: target["w"] and target["w"].select_range(0, "end"))
+
+    def on_right(e):
+        target["w"] = e.widget
+        e.widget.focus_set()
+        menu.tk_popup(e.x_root, e.y_root)
+
+    for cls in ("TEntry", "Entry", "TCombobox"):
+        root.bind_class(cls, "<Control-KeyPress>", on_ctrl, add="+")
+        root.bind_class(cls, "<Button-3>", on_right, add="+")
+
+
 def main():
     try:  # 메인 폴더를 업데이트했으면 쇼핑 블로그 폴더에도 자동으로 같은 버전을 넣는다
         from make_shop_copy import sync_shop
@@ -360,6 +400,7 @@ def main():
     except Exception as e:
         msg = f"쇼핑 블로그 폴더 맞추기 실패: {e}"
     root = tk.Tk()
+    enable_clipboard(root)
     if msg:
         root.after(500, lambda: messagebox.showinfo("업데이트", msg))
     try:

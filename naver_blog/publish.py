@@ -204,6 +204,12 @@ def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | N
                     out.append((line.strip(), None, st["q_color"] if line.startswith("Q. ") else st["a_color"], False, False))
     for line in key_lines:
         out.append((line.strip(), None, st["key_color"], True, bool(st["key_underline"])))
+    # 쇼핑커넥트 광고 표기: 빨간 굵은 글씨로 눈에 띄게 (글 맨 위 + 맨 아래)
+    disc = next((v.strip() for k, v in blocks if k == "text" and "커넥트" in v and "수수료" in v), "")
+    if disc:
+        out.append((disc, None, st["disclosure_color"], True, False, True))
+        if sum(1 for k, v in blocks if k == "text" and v.strip() == disc) > 1:
+            out.append((disc, None, st["disclosure_color"], True, False, False))
     return out
 
 

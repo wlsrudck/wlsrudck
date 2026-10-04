@@ -42,6 +42,7 @@ STYLE_KEYS = [
     ("heading_color", "소제목", "#00756a"),
     ("quote_color", "인용구(포스트잇) 글자", "#00756a"),
     ("key_color", "핵심 한 줄 (밑줄 문장)", "#d9480f"),
+    ("disclosure_color", "광고 표기 (쇼핑 블로그)", "#e03131"),
     ("intro_color", "도입 3줄", "#777777"),
     ("q_color", "Q&A 질문", "#00756a"),
     ("a_color", "Q&A 답변", "#666666"),

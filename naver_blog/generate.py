@@ -33,7 +33,8 @@ TEXT_STYLE = {"heading_size": 24, "heading_color": "#00756a", "q_color": "#00756
               "intro_color": "#777777", "intro_bold": True, "quote_style": "포스트잇",
               "key_color": "#d9480f", "key_underline": True,
               "divider_style": 3, "heading_box": "버티컬 라인",
-              "toc_title_size": 19, "toc_color": "#555555", "quote_size": 19}
+              "toc_title_size": 19, "toc_color": "#555555", "quote_size": 19,
+              "disclosure_color": "#e03131"}
 
 
 def is_qa(text: str) -> bool:

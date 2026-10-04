@@ -331,7 +331,18 @@ def main():
         cfg["writing"]["shop_style"] = row.get("style", "")
         links = [u for u in re.split(r"[\s,]+", row.get("link", "")) if u.startswith("http")]
         info_url = (row.get("info_link") or "").strip() or (links[0] if links else "")
-        if shop.get("enabled") and info_url and not (OUTPUT / f"{dt.date.today()}_{slug}.json").exists():
+        def reusable(path: Path) -> bool:
+            """오늘 써 둔 글을 다시 쓸 수 있는지. 쇼핑 블로그는 프로그램 버전이 바뀌었으면 새 방식으로 다시 쓴다"""
+            if not path.exists():
+                return False
+            if not shop.get("enabled"):
+                return True
+            try:
+                return str(json.loads(path.read_text(encoding="utf-8")).get("version", "")) == str(VERSION)
+            except Exception:
+                return False
+
+        if shop.get("enabled") and info_url and not reusable(OUTPUT / f"{dt.date.today()}_{slug}.json"):
             try:
                 from shop_fetch import fetch_product
                 print("  상품 페이지 읽는 중..." + ("" if row.get("info_link") else " (정보 링크가 없어 제휴 링크로 열어요)"))
@@ -369,7 +380,9 @@ def main():
         saved_json = OUTPUT / f"{dt.date.today()}_{slug}.json"
         reused = False
         try:
-            if saved_json.exists() and not args.dry_run:
+            if saved_json.exists() and not reusable(saved_json) and not args.dry_run:
+                print("  ↻ 오늘 써 둔 글이 예전 버전 방식이라 새 방식으로 다시 써요")
+            if reusable(saved_json) and not args.dry_run:
                 # 오늘 이미 써 둔 글(창을 닫아 중간에 멈춘 경우 등)은 다시 쓰지 않고 그대로 네이버에 넣는다
                 post = Post.load(json.loads(saved_json.read_text(encoding="utf-8"))["post"])
                 reused = True
@@ -418,7 +431,7 @@ def main():
         checks = checklist(post, row.get("memo", ""), cfg["writing"])
         preview.write_text(post.to_html(photos, OUTPUT, media, cfg.get("style"), checks), encoding="utf-8")
         print(f"  미리보기 저장: {preview} ({len(post.body_text())}자)")
-        saved = {"keyword": keyword, "slug": slug, "date": str(dt.date.today()), "post": post.model_dump()}
+        saved = {"keyword": keyword, "slug": slug, "date": str(dt.date.today()), "version": VERSION, "post": post.model_dump()}
         (OUTPUT / f"{dt.date.today()}_{slug}.json").write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
         failed = [f"{name}({detail})" for name, ok, detail in checks if not ok]
         print(f"  발행 전 점검: {len(checks) - len(failed)}/{len(checks)} 통과"

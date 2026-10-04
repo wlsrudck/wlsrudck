@@ -38,10 +38,10 @@ disclosure = "이 포스팅은 네이버 쇼핑 커넥트 활동의 일환으로
     return text
 
 
-def copy_program(dst: Path) -> int:
+def copy_program(dst: Path, src: Path = SRC) -> int:
     """프로그램 파일만 복사 (설정·키워드·로그인·글 기록은 건드리지 않음)"""
     n = 0
-    for p in SRC.iterdir():
+    for p in src.iterdir():
         if p.name in SKIP or p.name.startswith("."):
             continue
         if p.is_dir():
@@ -53,18 +53,30 @@ def copy_program(dst: Path) -> int:
     return n
 
 
+def _ver(d: Path) -> int:
+    try:
+        return int(re.search(r'"(\d+)"', (d / "version.py").read_text(encoding="utf-8")).group(1))
+    except Exception:
+        return 0
+
+
 def sync_shop() -> str:
-    """메인 폴더가 업데이트되면 옆의 쇼핑 폴더에도 같은 프로그램을 자동으로 넣는다. 한 일을 글자로 돌려준다"""
+    """메인 폴더와 쇼핑 폴더 중 새 버전 쪽 프로그램을 옛 버전 쪽으로 복사한다 (어느 창을 먼저 열어도 맞춰지게).
+    설정·키워드·로그인·글 기록은 건드리지 않는다. 한 일을 글자로 돌려준다"""
     if SRC.name.endswith("_shop"):
+        main_dir, shop_dir = SRC.parent / SRC.name[:-5], SRC
+    else:
+        main_dir, shop_dir = SRC, SRC.parent / (SRC.name + "_shop")
+    if not ((main_dir / "main.py").exists() and (shop_dir / "config.toml").exists()):
         return ""
-    dst = SRC.parent / (SRC.name + "_shop")
-    if not (dst / "config.toml").exists():
-        return ""
-    ver = lambda d: (d / "version.py").read_text(encoding="utf-8") if (d / "version.py").exists() else ""
-    if ver(SRC) == ver(dst):
-        return ""
-    copy_program(dst)
-    return f"쇼핑 블로그 폴더({dst.name})도 새 버전으로 맞췄어요"
+    vm, vs = _ver(main_dir), _ver(shop_dir)
+    if vm > vs:
+        copy_program(shop_dir, main_dir)
+        return f"쇼핑 블로그 폴더를 버전 {vm}(으)로 맞췄어요" + (" — 창을 닫았다 다시 열면 적용돼요" if SRC == shop_dir else "")
+    if vs > vm:
+        copy_program(main_dir, shop_dir)
+        return f"메인 블로그 폴더를 버전 {vs}(으)로 맞췄어요" + (" — 창을 닫았다 다시 열면 적용돼요" if SRC == main_dir else "")
+    return ""
 
 
 def main():

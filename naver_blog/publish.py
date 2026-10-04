@@ -794,6 +794,75 @@ def _insert_photo_after(page: Page, editor, photo: Path, anchor: str):
     _pause(1.0, 2.0)
 
 
+_SCAN = r"""() => {
+    const comps = [...document.querySelectorAll(".se-component")];
+    return comps.map((c, i) => {
+        const cls = c.className || "";
+        const kind = /se-oglink/.test(cls) ? "link" : /se-image/.test(cls) ? "image" : /se-text/.test(cls) ? "text" : "other";
+        const a = c.querySelector("a[href]");
+        const img = c.querySelector("img");
+        return {i, kind, href: a ? a.href : "", url: (c.querySelector("[class*='oglink-url'], [class*='url']") || {}).innerText || "",
+                w: img ? img.naturalWidth : -1, done: img ? img.complete : true, text: kind === "text" ? (c.innerText || "") : ""};
+    });
+}"""
+
+
+def _host(u: str) -> str:
+    import urllib.parse
+    return urllib.parse.urlparse(u if "://" in u else "https://" + u).netloc.lower().removeprefix("www.").removeprefix("m.")
+
+
+def _check_editor(page: Page, editor, post: Post) -> list[str]:
+    """임시저장 직전 화면 점검 (Claude 비용 없음). 우리가 넣지 않은 링크 카드는 지우고, 이상한 점은 글로 돌려준다"""
+    time.sleep(3)  # 링크 미리보기 카드는 늦게 생긴다
+    allowed = {_host(u) for u in list(post.shop_links) + [x.partition("|")[2] for x in post.links] if u.strip()}
+    allowed |= {"naver.me", "blog.naver.com", "smartstore.naver.com", "brand.naver.com", "shopping.naver.com"}
+    notes = []
+    removed = 0
+    for _ in range(5):  # 한 번에 하나씩 지우고 다시 살핀다
+        comps = editor.evaluate(_SCAN)
+        stray = [c for c in comps if c["kind"] == "link" and (c["href"] or c["url"])
+                 and _host(c["href"] or c["url"]) not in allowed and _host(c["url"] or c["href"]) not in allowed]
+        if not stray:
+            break
+        c = stray[0]
+        name = (c["url"] or c["href"])[:40]
+        try:
+            before = len(comps)
+            editor.locator(".se-component").nth(c["i"]).click(position={"x": 6, "y": 6})
+            _pause(0.3, 0.6)
+            page.keyboard.press("Delete")
+            _pause(0.5, 0.9)
+            if len(editor.evaluate(_SCAN)) >= before:
+                page.keyboard.press("Backspace")
+                _pause(0.5, 0.9)
+            if len(editor.evaluate(_SCAN)) < before:
+                removed += 1
+                notes.append(f"엉뚱한 링크 카드 지움({name})")
+                continue
+        except Exception:
+            pass
+        notes.append(f"엉뚱한 링크 카드가 있어요({name}) → 직접 지워 주세요")
+        break
+    comps = editor.evaluate(_SCAN)
+    imgs = [c for c in comps if c["kind"] == "image"]
+    broken = sum(1 for c in imgs if c["done"] and c["w"] == 0)
+    small = sum(1 for c in imgs if 0 < c["w"] < 300)
+    if broken:
+        notes.append(f"안 보이는 사진 {broken}장 → 확인해 주세요")
+    if small:
+        notes.append(f"작거나 흐릴 수 있는 사진 {small}장 → 확인해 주세요")
+    if post.disclosure.strip():
+        n = sum(1 for c in comps if c["kind"] == "text" and "커넥트" in c["text"] and "수수료" in c["text"])
+        if n == 0:
+            notes.append("광고 표기 문장이 안 보여요 → 꼭 넣어 주세요")
+    if post.shop_links:
+        cards = sum(1 for c in comps if c["kind"] == "link" and _host(c["href"] or c["url"]) in allowed)
+        if not cards:
+            notes.append("구매 링크 카드가 안 생겼어요 (링크 글자는 있음)")
+    return notes
+
+
 def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screenshot_dir: Path | None = None,
                   key_lines=()) -> int:
     """글자를 전부 먼저 입력하고, 그다음 사진을 제자리에 끼워 넣는다.
@@ -986,6 +1055,11 @@ def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, aut
             total = sum(1 for k, _ in blocks if k == "photo")
             print(f"  네이버 입력: 본문 완료, 사진 {done}/{total}장")
             _pause(1.5, 3.0)
+            try:
+                notes = _check_editor(page, editor, post)
+                print("  화면 점검: " + (" / ".join(notes) if notes else "이상 없음"))
+            except Exception as e:
+                print(f"  (화면 점검 건너뜀: {str(e).splitlines()[0][:60]})")
             # 문제가 생겼을 때 원인을 볼 수 있게 마지막 화면을 남겨둔다
             page.screenshot(path=str(screenshot_dir / "last_editor.png"), full_page=True)
 

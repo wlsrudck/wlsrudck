@@ -172,8 +172,13 @@ class Post(BaseModel):
         if self.sources:
             has_links = any("http" in s for s in self.sources)
             out.append(("text", ("참고 자료\n" if has_links else "") + "\n".join(self.sources)))
+        credits = []
+        if any(Path(p).name.startswith("korea_") for p in stock.values()):
+            credits.append("정책브리핑(공공누리 제1유형)")
         if any("pixabay" in Path(p).name for p in stock.values()):
-            out.append(("text", "사진 출처: Pixabay"))
+            credits.append("Pixabay")
+        if credits:
+            out.append(("text", "사진 출처: " + ", ".join(credits)))
         if self.updated:
             out.append(("text", f"최종 수정: {self.updated} / 변경: 최초 작성"))
         if self.disclosure.strip() and self.shop_links:  # 글 끝에도 한 번 더 (독자가 링크 근처에서 다시 볼 수 있게)

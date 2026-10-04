@@ -41,7 +41,8 @@ def make_photo_folders(rows) -> None:
         (PHOTOS / slugify(r["keyword"])).mkdir(parents=True, exist_ok=True)
 
 
-def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: str = "", writing: dict | None = None) -> dict:
+def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: str = "", writing: dict | None = None,
+                  keyword: str = "") -> dict:
     """썸네일, 지표 카드, 요약 카드, 무료 사진을 만들어 output/<slug>_images/에 저장한다."""
     folder = OUTPUT / f"{slug}_images"
     folder.mkdir(parents=True, exist_ok=True)
@@ -79,9 +80,20 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             except Exception as e:
                 print(f"  썸네일 사진 검색 실패: {e}")
 
-    # 소제목마다 관련 이미지 하나: 직접 찍은 사진 → 무료 사진(후보 여러 장 중 Claude가 내용에 맞는 것만) → 소제목 카드
+    # 정책브리핑 공공누리 제1유형 사진 (정책·지원금 글에 어울리는 실제 현장 사진). 소제목마다 무료 사진 후보와 함께 보여 준다
+    policy: list[Path] = []
+    if cfg.get("policy_photos", True) and writing and keyword:
+        try:
+            from policy_photos import find_policy_photos
+            policy = find_policy_photos(keyword, folder / "_policy")
+            if policy:
+                print(f"  정책브리핑 공공누리 사진 후보 {len(policy)}장")
+        except Exception as e:
+            print(f"  (정책브리핑 사진 찾기 건너뜀: {str(e).splitlines()[0][:60]})")
+
+    # 소제목마다 관련 이미지 하나: 직접 찍은 사진 → 정책브리핑·무료 사진(후보 여러 장 중 Claude가 내용에 맞는 것만) → 소제목 카드
     cand_dir = folder / "_candidates"
-    own_used, n_stock, n_card = set(), 0, 0
+    own_used, n_stock, n_card, n_policy = set(), 0, 0, 0
     for i, s in enumerate(post.sections):
         if not s.heading.strip():
             continue
@@ -89,8 +101,17 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             own_used.add(s.photo)
             continue
         picked = None
+        if policy and writing:
+            try:
+                n = choose_photo(s.heading, " ".join(s.paragraphs), policy, writing)
+                if n:
+                    src = policy.pop(n - 1)
+                    picked = Path(shutil.copy2(src, folder / src.name))
+                    n_policy += 1
+            except Exception as e:
+                print(f"  정책브리핑 사진 고르기 실패({s.heading[:15]}): {str(e).splitlines()[0][:60]}")
         queries = [q for q in [s.stock_query, *s.alt_queries] if q.strip()]
-        if use_stock and queries and writing:
+        if not picked and use_stock and queries and writing:
             cands, seen = [], set(used_ids)
             for q in queries:
                 if len(cands) >= 6:
@@ -130,7 +151,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
                                                    photo=thumb_photo, brand=brand)
     print(f"  이미지 준비: 썸네일 {('사진형' if thumb_photo else '매거진형') if 'thumbnail' in media else '없음'}, "
           f"지표 카드 {'만듦' if 'metrics_card' in media else '없음'}, "
-          f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 소제목 이미지: 내용에 맞는 무료 사진 {n_stock}장 + 소제목 카드 {n_card}장")
+          f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 소제목 이미지: 정책브리핑 사진 {n_policy}장 + 내용에 맞는 무료 사진 {n_stock}장 + 소제목 카드 {n_card}장")
     return media
 
 
@@ -269,7 +290,7 @@ def main():
         cfg.setdefault("autofill", {})["enabled"] = False  # 상품 링크는 사람이 넣어야 해서 자동 채우기는 하지 않는다
         # 판매 글: 목차·지표 카드·요약 카드·무료 사진·카드뉴스·스레드 없이, 상품 사진 중심으로 짧게
         img = cfg.setdefault("images", {})
-        for k in ("metrics_card", "summary_card", "stock_photos", "section_cards", "card_news"):
+        for k in ("metrics_card", "summary_card", "stock_photos", "section_cards", "card_news", "policy_photos"):
             img[k] = bool(shop.get(k, False))
         cfg["writing"]["threads"] = bool(shop.get("threads", False))
         cfg["writing"]["min_chars"] = shop.get("min_chars", 800)
@@ -435,7 +456,8 @@ def main():
                 print("  ⚠ 상품 링크 칸이 비어 있어요. 임시저장 글에 쇼핑커넥트 링크를 직접 넣어 주세요.")
 
         OUTPUT.mkdir(exist_ok=True)
-        media = prepare_media(post, slug, photos, cfg.get("images", {}), cfg["naver"].get("blog_name", ""), cfg["writing"])
+        media = prepare_media(post, slug, photos, cfg.get("images", {}), cfg["naver"].get("blog_name", ""), cfg["writing"],
+                              keyword=keyword)
         preview = OUTPUT / f"{dt.date.today()}_{slug}.html"
         checks = checklist(post, row.get("memo", ""), cfg["writing"])
         preview.write_text(post.to_html(photos, OUTPUT, media, cfg.get("style"), checks), encoding="utf-8")

@@ -891,6 +891,11 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
            "제목에 못 넣은 것 중 맞는 것은 소제목이나 태그에 씁니다." if suggest else "")
         + (f"\n\n내 블로그의 다른 글:\n" + "\n".join(f"{i}. {t}" for i, (t, _) in enumerate(mine, 1)) if mine else "")
         + (f"\n\n조사 자료:\n{notes}" if notes else "")
+        + (f"\n\n[상품 상세페이지에서 읽은 자료]\n{cfg['product_info']}\n\n"
+           "위 사진들은 판매처의 상품 사진입니다(작성자가 찍은 사진이 아님). 사진 속 모습은 '상품 사진에 보이듯'처럼 설명하고, "
+           "상세페이지 문장을 그대로 옮기지 말고 사실(용량·성분·구성·사용법·가격대)만 골라 내 말로 정리하세요. "
+           "판매처의 홍보 문구(최고, 1위, 효과 보장 등)는 사실로 단정하지 말고 '판매처 설명에 따르면'으로 전하세요."
+           if cfg.get("product_info") else "")
     )})
     response = client.beta.messages.parse(
         model=cfg["model"],

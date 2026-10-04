@@ -301,6 +301,24 @@ def main():
         keyword = row["keyword"]
         slug = slugify(keyword)
         photos = find_photos(PHOTOS / slug)
+        product = None
+        cfg["writing"].pop("product_info", None)
+        links = [u for u in re.split(r"[\s,]+", row.get("link", "")) if u.startswith("http")]
+        if shop.get("enabled") and links and not (OUTPUT / f"{dt.date.today()}_{slug}.json").exists():
+            try:
+                from shop_fetch import fetch_product
+                print("  상품 페이지 읽는 중...")
+                product = fetch_product(links[0], PHOTOS / slug / "_product")
+                cfg["writing"]["product_info"] = product["facts"]
+                own = [p for p in photos if not p.name.startswith("product_")]
+                photos = own + product["images"]
+                print(f"  상품: {product['name'][:40]}" + (f" / {product['price']}원" if product["price"] else "")
+                      + f" / 상품 사진 {len(product['images'])}장")
+            except Exception as e:
+                product = None
+                print(f"  ⚠ 상품 페이지를 읽지 못했어요 ({str(e).splitlines()[0][:80]}) → 키워드와 메모로만 써요")
+        elif shop.get("enabled") and links:  # 오늘 써 둔 글을 다시 넣을 때는 받아 둔 상품 사진을 그대로 쓴다
+            photos = photos + find_photos(PHOTOS / slug / "_product")
         print(f"[생성] {keyword} (사진 {len(photos)}장)")
         if not experience_memo(row.get("memo", "")):
             print("  💡 메모가 비어 있어요. keywords.csv 메모 칸에 직접 겪은 한두 줄을 적으면 글이 더 좋아져요 (경험은 지어내지 않아요)")
@@ -342,7 +360,9 @@ def main():
         made += 1
         if shop.get("enabled"):
             post.disclosure = shop.get("disclosure", "이 포스팅은 네이버 쇼핑 커넥트 활동의 일환으로, 판매 발생 시 수수료를 제공받습니다.")
-            post.shop_links = [u.strip() for u in re.split(r"[\s,]+", row.get("link", "")) if u.strip().startswith("http")]
+            post.shop_links = links
+            if product and product["images"] and not any("상품 이미지 출처" in x for x in post.sources):
+                post.sources.append("상품 이미지 출처: 판매처 상품 페이지")
             if not post.shop_links:
                 print("  ⚠ 상품 링크 칸이 비어 있어요. 임시저장 글에 쇼핑커넥트 링크를 직접 넣어 주세요.")
 

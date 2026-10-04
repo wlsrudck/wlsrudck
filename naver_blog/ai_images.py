@@ -19,7 +19,7 @@ API = "https://generativelanguage.googleapis.com/v1beta"
 PREFERRED = ["gemini-2.5-flash-image", "gemini-2.5-flash-image-preview", "imagen-4.0-generate-001",
              "imagen-3.0-generate-002", "gemini-2.0-flash-preview-image-generation"]
 STYLE = ("사실적인 사진 느낌, 자연광, 깔끔하고 밝은 색감, 한국의 생활 공간(아파트·원룸·사무실·거리) 배경. "
-         "그림 안에 글자·숫자·간판 문구·로고·워터마크를 절대 넣지 않습니다. 실존 인물·연예인·정치인을 그리지 않습니다. "
+         "그림 안에 글자·숫자·간판 문구·로고·워터마크를 절대 넣지 않습니다(책 표지·노트·화면·포장에도 읽히는 글자 없이, 무늬나 흐릿하게). 실존 인물·연예인·정치인을 그리지 않습니다. "
          "사람이 나오면 뒷모습이나 손 위주로, 얼굴이 크게 보이지 않게. 가로형 16:9 구도.")
 
 _model_cache: dict[str, str] = {}
@@ -133,7 +133,7 @@ def explain(e: Exception) -> str:
 def section_prompt(heading: str, text: str, keyword: str) -> str:
     return (f"네이버 블로그 글 '{keyword}'의 소제목 '{heading}'에 넣을 이미지.\n"
             f"이 부분 내용: {text[:300]}\n"
-            "내용을 한눈에 떠올리게 하는 장면 하나를 그려 주세요 (사물·장소·손동작 중심).")
+            "내용을 한눈에 떠올리게 하는 장면 하나를 그려 주세요 (사물·장소·손동작 중심). 주제와 상관없는 물건은 넣지 않습니다.")
 
 
 if __name__ == "__main__":  # 시험: python ai_images.py "주제"

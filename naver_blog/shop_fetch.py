@@ -86,13 +86,19 @@ def fetch_product(url: str, img_dir: Path, headless: bool = False) -> dict:
     offers = prod.get("offers") or {}
     if isinstance(offers, list):
         offers = offers[0] if offers else {}
-    name = (prod.get("name") or d.get("title") or "").strip()
+    name = str(prod.get("name") or d.get("title") or "").strip()
     name = re.sub(r"\s*[:|-]\s*(네이버.*|스마트스토어.*|NAVER.*)$", "", name)
     price = str(offers.get("price") or d.get("price") or "").strip()
     brand = prod.get("brand", {})
-    brand = (brand.get("name") if isinstance(brand, dict) else str(brand or "")).strip()
+    brand = str((brand.get("name") if isinstance(brand, dict) else brand) or "").strip()
     if not name:
         raise RuntimeError("상품 페이지를 읽지 못했어요 (상품명 없음)")
+    m = re.search(r"리뷰\s*([\d,.]+\s*만?)", d.get("text") or "")
+    reviews = m.group(1).strip() if m else ""
+    if not price:  # 브랜드커넥트 상품 화면처럼 메타 정보가 없으면 화면 글자에서 판매가를 찾는다
+        m = re.search(r"(?:판매가|할인가|최종가)\s*(?:\d+\s*%\s*)?([\d,]{3,})\s*원", d.get("text") or "") or \
+            re.search(r"([\d,]{4,})\s*원", d.get("text") or "")
+        price = m.group(1).replace(",", "") if m else ""
 
     # 대표 이미지: og:image 먼저, 그다음 화면 위쪽(상품 사진 영역)의 큰 사진
     srcs = []
@@ -121,8 +127,9 @@ def fetch_product(url: str, img_dir: Path, headless: bool = False) -> dict:
         f"상품명: {name}",
         f"브랜드: {brand}" if brand else "",
         f"가격(읽은 시점 기준, 바뀔 수 있음): {price}원" if price else "",
-        f"판매 페이지 요약: {d.get('desc', '').strip()}" if d.get("desc") else "",
+        f"판매 페이지 요약: {str(d.get('desc') or '').strip()}" if d.get("desc") else "",
+        f"리뷰 수: {reviews}" if reviews else "",
         "판매 페이지 글자(상세 설명·옵션·리뷰 요약 등, 베껴 쓰지 말고 사실만 골라 쓸 것):",
         d.get("text", "")[:9000],
     ] if x)
-    return {"name": name, "price": price, "brand": brand, "url": d.get("url", url), "facts": facts, "images": images}
+    return {"name": name, "price": price, "brand": brand, "reviews": reviews, "url": d.get("url", url), "facts": facts, "images": images}

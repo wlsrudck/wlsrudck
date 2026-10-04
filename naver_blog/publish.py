@@ -159,7 +159,8 @@ def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | N
     도입 3줄은 회색 굵게, 소제목은 크게+색, Q&A는 질문·답을 다른 색으로, 섹션별 핵심 한 줄은 색+굵게+밑줄"""
     st = {**TEXT_STYLE, **(style or {})}
     out = []
-    intro = next((v for k, v in blocks if k == "text"), "")
+    # 첫 글 문단이 도입 3줄 (쇼핑 블로그의 광고 표기 문장은 건너뛴다)
+    intro = next((v for k, v in blocks if k == "text" and not ("커넥트" in v and "수수료" in v)), "")
     for line in intro.split("\n"):
         if line.strip():
             out.append((line.strip(), None, st["intro_color"], bool(st["intro_bold"]), False, True))

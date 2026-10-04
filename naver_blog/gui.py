@@ -87,9 +87,14 @@ class KeywordTab(ttk.Frame):
 
     def __init__(self, master):
         super().__init__(master, padding=10)
-        from main import load_rows, save_rows
+        from main import load_config, load_rows, save_rows
         self._load, self._save = load_rows, save_rows
         self.rows: list[dict] = []
+        try:
+            self.shop = bool(load_config().get("shopping", {}).get("enabled"))
+        except Exception:
+            self.shop = False
+        cols = self.COLS + ((("link", "상품 링크", 200),) if self.shop else ())
 
         top = ttk.Frame(self)
         top.pack(fill="x")
@@ -99,8 +104,8 @@ class KeywordTab(ttk.Frame):
 
         box = ttk.Frame(self)
         box.pack(fill="both", expand=True, pady=6)
-        self.tree = ttk.Treeview(box, columns=[c for c, _, _ in self.COLS], show="headings", height=14)
-        for c, title, w in self.COLS:
+        self.tree = ttk.Treeview(box, columns=[c for c, _, _ in cols], show="headings", height=14)
+        for c, title, w in cols:
             self.tree.heading(c, text=title)
             self.tree.column(c, width=w, anchor="w")
         sb = ttk.Scrollbar(box, orient="vertical", command=self.tree.yview)
@@ -111,7 +116,7 @@ class KeywordTab(ttk.Frame):
 
         form = ttk.LabelFrame(self, text="키워드 넣기 / 고치기", padding=8)
         form.pack(fill="x")
-        self.kw, self.memo, self.cat = tk.StringVar(), tk.StringVar(), tk.StringVar()
+        self.kw, self.memo, self.cat, self.link = tk.StringVar(), tk.StringVar(), tk.StringVar(), tk.StringVar()
         ttk.Label(form, text="키워드").grid(row=0, column=0, sticky="w")
         ttk.Entry(form, textvariable=self.kw, width=30).grid(row=0, column=1, sticky="we", padx=4)
         ttk.Label(form, text="카테고리").grid(row=0, column=2, sticky="w")
@@ -119,9 +124,14 @@ class KeywordTab(ttk.Frame):
         self.cat_box.grid(row=0, column=3, sticky="w", padx=4)
         ttk.Label(form, text="메모").grid(row=1, column=0, sticky="w", pady=4)
         ttk.Entry(form, textvariable=self.memo, width=80).grid(row=1, column=1, columnspan=3, sticky="we", padx=4)
+        if self.shop:
+            ttk.Label(form, text="상품 링크").grid(row=2, column=0, sticky="w", pady=4)
+            ttk.Entry(form, textvariable=self.link, width=80).grid(row=2, column=1, columnspan=3, sticky="we", padx=4)
+            ttk.Label(form, text="메모에 직접 써 본 경험을 적으면 실사용 리뷰, 비워 두면 구매 가이드로 써요. 링크는 쇼핑커넥트에서 복사해 붙여 넣기",
+                      foreground="#777").grid(row=3, column=1, columnspan=3, sticky="w")
         form.columnconfigure(1, weight=1)
         btns = ttk.Frame(form)
-        btns.grid(row=2, column=0, columnspan=4, sticky="e", pady=(6, 0))
+        btns.grid(row=4, column=0, columnspan=4, sticky="e", pady=(6, 0))
         ttk.Button(btns, text="새로 추가", command=self.add).pack(side="left", padx=3)
         ttk.Button(btns, text="선택한 줄 고치기", command=self.update_row).pack(side="left", padx=3)
         ttk.Button(btns, text="다시 쓰게 하기 (상태 비우기)", command=self.reset_status).pack(side="left", padx=3)
@@ -146,7 +156,7 @@ class KeywordTab(ttk.Frame):
         for i, r in enumerate(self.rows):
             if self.only_todo.get() and r["status"].strip():
                 continue
-            self.tree.insert("", "end", iid=str(i), values=(r["keyword"], r["memo"], r["category"], r["status"]))
+            self.tree.insert("", "end", iid=str(i), values=(r["keyword"], r["memo"], r["category"], r["status"], r.get("link", "")))
 
     def selected(self) -> int | None:
         sel = self.tree.selection()
@@ -158,6 +168,7 @@ class KeywordTab(ttk.Frame):
             r = self.rows[i]
             self.kw.set(r["keyword"])
             self.memo.set(r["memo"])
+            self.link.set(r.get("link", ""))
             self.cat.set(r["category"])
 
     def save(self):
@@ -178,17 +189,19 @@ class KeywordTab(ttk.Frame):
             if not messagebox.askyesno("이미 있음", f"'{kw}' 은(는) 이미 목록에 있어요. 그래도 추가할까요?"):
                 return
         self.rows.append({"keyword": kw, "memo": self.memo.get().strip(), "status": "",
-                          "category": self.cat.get().strip()})
+                          "category": self.cat.get().strip(), "link": self.link.get().strip()})
         if self.save():
             self.kw.set("")
             self.memo.set("")
+            self.link.set("")
 
     def update_row(self):
         i = self.selected()
         if i is None:
             messagebox.showinfo("선택", "위 표에서 고칠 줄을 먼저 눌러 주세요.")
             return
-        self.rows[i].update(keyword=self.kw.get().strip(), memo=self.memo.get().strip(), category=self.cat.get().strip())
+        self.rows[i].update(keyword=self.kw.get().strip(), memo=self.memo.get().strip(), category=self.cat.get().strip(),
+                            link=self.link.get().strip())
         self.save()
 
     def reset_status(self):

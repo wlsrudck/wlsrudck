@@ -148,7 +148,7 @@ def load_rows():
     if lines and lines[0][0].strip().lower() == "keyword":  # 칸 이름 줄: keyword,memo,status,category
         lines = lines[1:]
     rows = [{"keyword": r[0].strip(), "memo": r[1] if len(r) > 1 else "", "status": r[2] if len(r) > 2 else "",
-             "category": r[3].strip() if len(r) > 3 else ""} for r in lines]
+             "category": r[3].strip() if len(r) > 3 else "", "link": r[4].strip() if len(r) > 4 else ""} for r in lines]
     for r in rows:
         # 메모를 카테고리 칸 뒤에 `생활정보 "메모"` 처럼 붙여 적은 경우: 따옴표 안은 메모, 앞은 카테고리
         m = re.fullmatch(r'\s*([^"]*?)\s*"(.*)"?\s*', r["category"], re.S)
@@ -170,7 +170,7 @@ def mark_done(keyword: str, status: str) -> None:
 
 def save_rows(rows):
     with KEYWORDS.open("w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["keyword", "memo", "status", "category"], restval="", extrasaction="ignore")
+        w = csv.DictWriter(f, fieldnames=["keyword", "memo", "status", "category", "link"], restval="", extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
 
@@ -244,6 +244,11 @@ def main():
 
     cfg = load_config()
     pub = cfg["publish"]
+    shop = cfg.get("shopping", {})
+    if shop.get("enabled"):
+        cfg["writing"]["shopping"] = True
+        cfg.setdefault("autofill", {})["enabled"] = False  # 상품 링크는 사람이 넣어야 해서 자동 채우기는 하지 않는다
+        print("[쇼핑 블로그 모드] 메모에 경험이 있으면 실사용 리뷰, 없으면 구매 가이드로 써요")
 
     rows = load_rows()
     pending = [r for r in rows if not (r.get("status") or "").strip()]
@@ -329,6 +334,11 @@ def main():
             print("    이 키워드는 그대로 두었어요. 위 문구를 캡처해 보내 주세요.")
             break
         made += 1
+        if shop.get("enabled"):
+            post.disclosure = shop.get("disclosure", "이 포스팅은 네이버 쇼핑 커넥트 활동의 일환으로, 판매 발생 시 수수료를 제공받습니다.")
+            post.shop_links = [u.strip() for u in re.split(r"[\s,]+", row.get("link", "")) if u.strip().startswith("http")]
+            if not post.shop_links:
+                print("  ⚠ 상품 링크 칸이 비어 있어요. 임시저장 글에 쇼핑커넥트 링크를 직접 넣어 주세요.")
 
         OUTPUT.mkdir(exist_ok=True)
         media = prepare_media(post, slug, photos, cfg.get("images", {}), cfg["naver"].get("blog_name", ""), cfg["writing"])

@@ -80,6 +80,8 @@ class Post(BaseModel):
     links: SkipJsonSchema[list[str]] = []
     suggest: SkipJsonSchema[list[str]] = []  # 네이버 검색창 자동완성 연관 키워드 (점검표용)
     updated: SkipJsonSchema[str] = ""
+    disclosure: SkipJsonSchema[str] = ""  # 쇼핑커넥트 광고 표기 (글 맨 위)
+    shop_links: SkipJsonSchema[list[str]] = []  # 쇼핑커넥트 링크
 
     @classmethod
     def load(cls, data: dict) -> "Post":
@@ -118,6 +120,8 @@ class Post(BaseModel):
         stock = media.get("stock", {})
         used = set()
         out = []
+        if self.disclosure.strip():
+            out.append(("text", self.disclosure.strip()))
         if media.get("thumbnail"):
             out.append(("photo", media["thumbnail"]))
         if self.intro:
@@ -137,6 +141,8 @@ class Post(BaseModel):
             elif i in stock:
                 out.append(("photo", stock[i]))
             out.extend(("text", p) for p in s.paragraphs)
+        if self.shop_links:
+            out.append(("text", "👉 제품 자세히 보기\n" + "\n".join(self.shop_links)))
         if self.qa:
             out.append(("heading", "자주 묻는 질문"))
             for q in self.qa:
@@ -144,6 +150,8 @@ class Post(BaseModel):
         out.extend(("photo", p) for i, p in enumerate(photos, 1) if i not in used)
         if media.get("summary_card"):
             out.append(("photo", media["summary_card"]))
+        if self.shop_links:
+            out.append(("text", "👉 제품 자세히 보기\n" + "\n".join(self.shop_links)))
         if self.closing:
             out.append(("text", "\n".join(c.strip() for c in self.closing if c.strip())))
         if self.next_teaser.strip():
@@ -621,7 +629,9 @@ def checklist(post: "Post", memo: str, cfg: dict) -> list[tuple[str, bool, str]]
         ("AI 말투", not ai, "없음" if not ai else ", ".join(ai)),
         ("직접 경험(메모)", has_memo, "메모 반영" if has_memo else "메모 없음 → 정보글로만 작성"),
         ("글자 수", lo * 0.8 <= body_len <= hi * 1.3, f"{body_len}자 (목표 {lo}~{hi})"),
-    ]
+    ] + ([("광고 표기", bool(post.disclosure.strip()), "글 맨 위에 있음" if post.disclosure.strip() else "없음 → 꼭 넣기"),
+          ("상품 링크", bool(post.shop_links), f"{len(post.shop_links)}개" if post.shop_links else "링크 칸이 비어 있음")]
+         if cfg.get("shopping") else [])
 
 
 class Threads(BaseModel):
@@ -753,9 +763,29 @@ def my_posts(blog_id: str, limit: int = 30) -> list[tuple[str, str]]:
     return out[:limit]
 
 
-def _system(cfg: dict) -> str:
+SHOP_GUIDE = """
+
+[쇼핑 블로그 - 구매 가이드 글]
+이 글은 작성자가 직접 써 본 후기가 아닙니다. 고르는 기준과 비교를 정리한 정보글입니다.
+- "써 보니", "사용해 보니", "제가 산", "구매했어요" 등 사용·구매 경험 표현을 절대 쓰지 않습니다.
+- 독자가 살 때 헷갈리는 기준(크기·용량·소재·소음·전기료·관리 방법·가격대)을 소제목으로 나눠 설명합니다.
+- 제품 사양·가격은 조사 자료에 있는 것만 쓰고, 가격은 "판매처마다 다르다", "○월 기준" 처럼 단정하지 않습니다.
+- 과장 광고 표현(최고, 무조건, 인생템, 강추)은 쓰지 않습니다. 장점과 함께 아쉬운 점·맞지 않는 사람도 씁니다.
+- 마무리에 "구매 전에 이것만 확인" 체크리스트를 넣습니다."""
+
+SHOP_REVIEW = """
+
+[쇼핑 블로그 - 실사용 리뷰 글]
+작성자 메모에 적힌 경험과 사진에 보이는 것만 후기로 씁니다. 메모에 없는 사용 기간·느낌·결과를 지어내지 않습니다.
+- 메모의 경험을 중심으로: 왜 샀는지 → 실제로 써 보니 → 좋았던 점 → 아쉬운 점 → 이런 사람에게 맞음/안 맞음.
+- 아쉬운 점을 반드시 한 가지 이상 씁니다(메모에 없으면 "아직 써 본 기간이 짧아 ○○은 더 지켜봐야 한다" 처럼 솔직하게).
+- 제품 사양·가격은 조사 자료에 있는 것만, 단정하지 않습니다. 과장 광고 표현은 쓰지 않습니다."""
+
+
+def _system(cfg: dict, memo: str = "") -> str:
     short = cfg.get("voice", "short") == "short"
-    return SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else SEARCH) + (SHORT_VOICE if short else "") + STYLE_RULES
+    shop = (SHOP_REVIEW if experience_memo(memo) else SHOP_GUIDE) if cfg.get("shopping") else ""
+    return SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else SEARCH) + (SHORT_VOICE if short else "") + STYLE_RULES + shop
 
 
 MOBILE_WIDTH = 24  # 네이버 모바일 화면(본문 19 크기)에서 한 줄에 편하게 들어가는 글자 수
@@ -805,7 +835,7 @@ def polish_saved(post: Post, memo: str, cfg: dict) -> Post:
     keep = {"links": post.links, "updated": post.updated}
     res = client.beta.messages.parse(
         model=cfg["model"], max_tokens=16000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
-        system=_system(cfg),
+        system=_system(cfg, memo),
         messages=[{"role": "user", "content": (
             f"작성자 메모: {memo_for_prompt(memo)}\n\n아래 글을 규칙에 맞게 고쳐 같은 형식으로 주세요. 사실·숫자·구성은 그대로 둡니다.\n"
             + (f"- 광고처럼 보이는 표현: {', '.join(hits)}\n" if hits else "")
@@ -844,7 +874,7 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
         raise NotEnoughInfo(miss.group(1).strip() or "핵심 정보")
     notes = re.sub(r"\[핵심답:[^\]]*\]", "", notes).strip()
     short = cfg.get("voice", "short") == "short"
-    system = _system(cfg)
+    system = _system(cfg, memo)
     content = []
     for i, path in enumerate(photos, 1):
         content.append({"type": "text", "text": f"사진 {i}:"})

@@ -124,5 +124,10 @@ if __name__ == "__main__":  # 시험: python ai_images.py "주제"
         p = generate(section_prompt("시험", sys.argv[1] if len(sys.argv) > 1 else "원룸 책상 위 가습기", "시험"),
                      ROOT / "output" / "ai_test.png", k)
         print(f"만들었어요: {p}")
+        try:
+            import os
+            os.startfile(p)  # noqa  (윈도우에서 그림을 바로 열어 보여 준다)
+        except Exception:
+            pass
     except Exception as e:
         print(f"실패: {explain(e)}")

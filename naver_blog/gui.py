@@ -33,6 +33,8 @@ BUTTONS = [
     ]),
     ("준비·설정", [
         ("네이버 로그인", "2_login.bat", "로그인이 풀렸을 때 다시 로그인해요"),
+        ("구글 AI 키 넣기", "@google_key", "Google AI Studio 에서 만든 키를 붙여 넣어 저장해요"),
+        ("AI 이미지 시험", "16_ai_image_test.bat", "구글 키로 그림 한 장을 만들어 봐요"),
         ("사진 폴더 만들기", "2-5_make_photo_folders.bat", "키워드별 내 사진 폴더를 만들어요"),
         ("목소리 테스트", "9_voice_test.bat", "클립 목소리를 미리 들어봐요"),
         ("설치 (처음 한 번)", "1_install.bat", "필요한 프로그램을 설치해요"),
@@ -62,6 +64,20 @@ def run_bat(name: str) -> None:
         subprocess.Popen(["sh", str(bat)], cwd=ROOT)
 
 
+def save_google_key() -> None:
+    """구글 AI 키를 붙여 넣어 google_key.txt 로 저장 (화면에는 키를 다시 보여 주지 않는다)"""
+    from tkinter import simpledialog
+    key = simpledialog.askstring("구글 AI 키 넣기", "Google AI Studio 에서 복사한 키(AIza…)를 붙여 넣으세요 (Ctrl+V)", show="*")
+    if not key:
+        return
+    key = key.strip()
+    if not key.startswith("AIza") or len(key) < 30:
+        messagebox.showerror("키 확인", "AIza 로 시작하는 키가 아니에요. 다시 복사해 주세요.")
+        return
+    (ROOT / "google_key.txt").write_text(key, encoding="utf-8")
+    messagebox.showinfo("저장", "저장했어요. [AI 이미지 시험]을 눌러 확인해 보세요.")
+
+
 def open_path(p: Path) -> None:
     if os.name == "nt":
         os.startfile(p)  # noqa
@@ -73,7 +89,8 @@ def open_path(p: Path) -> None:
 
 AUTO_KEYWORD = "(상품명 자동)"
 SHOP_CATEGORIES = ["주방템", "청소·세탁템", "수납·정리템", "자취 꿀템 모음"]
-SHOP_HIDDEN = {"11_trending_keywords.bat", "12_evergreen_keywords.bat", "7_season_keywords.bat", "13_autofill_keywords.bat"}
+SHOP_HIDDEN = {"11_trending_keywords.bat", "12_evergreen_keywords.bat", "7_season_keywords.bat", "13_autofill_keywords.bat",
+               "@google_key", "16_ai_image_test.bat"}
 
 
 def is_shop() -> bool:
@@ -480,7 +497,8 @@ def main():
         lf.grid(row=0, column=col, sticky="nsew", padx=6)
         run.columnconfigure(col, weight=1)
         for label, bat, tip in items:
-            ttk.Button(lf, text=label, command=lambda b=bat: run_bat(b)).pack(fill="x", pady=(6, 0))
+            cmd = save_google_key if bat == "@google_key" else (lambda b=bat: run_bat(b))
+            ttk.Button(lf, text=label, command=cmd).pack(fill="x", pady=(6, 0))
             ttk.Label(lf, text=tip, foreground="#777", wraplength=250).pack(fill="x")
     bottom = ttk.Frame(run)
     bottom.grid(row=1, column=0, columnspan=3, sticky="w", pady=16, padx=6)

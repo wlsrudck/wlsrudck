@@ -974,20 +974,26 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
               if any(p.name.startswith("detail_") for p in photos) else "")
            if cfg.get("product_info") else "")
     )})
-    response = _parse_post(
-        client,
-        model=cfg["model"],
-        max_tokens=16000,
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
-        system=system,
-        messages=[{"role": "user", "content": content}],
-        output_format=Post,
-    )
-    if response.stop_reason == "refusal":
-        raise RuntimeError(f"글 생성이 거절되었습니다: {keyword}")
-    if response.stop_reason == "max_tokens" or response.parsed_output is None:
-        raise RuntimeError(f"글 생성 결과가 불완전합니다: {keyword}")
+    for attempt in range(1, 3):  # 받은 글이 잘렸거나 비었으면 한 번 더 받는다
+        response = _parse_post(
+            client,
+            model=cfg["model"],
+            max_tokens=16000 if attempt == 1 else 21000,  # 두 번째는 넉넉히 (21000 넘으면 SDK가 스트리밍을 요구함)
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+            system=system,
+            messages=[{"role": "user", "content": content}],
+            output_format=Post,
+        )
+        if response.stop_reason == "refusal":
+            raise RuntimeError(f"글 생성이 거절되었습니다: {keyword}")
+        if response.stop_reason != "max_tokens" and response.parsed_output is not None:
+            break
+        out_tokens = getattr(getattr(response, "usage", None), "output_tokens", "?")
+        print(f"  (받은 글이 불완전해요: 멈춘 이유 {response.stop_reason}, 글자 수 토큰 {out_tokens}"
+              + (" → 한 번 더 받아요)" if attempt == 1 else ")"))
+    else:
+        raise RuntimeError(f"글 생성 결과가 불완전합니다 (멈춘 이유: {response.stop_reason}): {keyword}")
     post = response.parsed_output
     if not short:
         post.pull_quote = ""

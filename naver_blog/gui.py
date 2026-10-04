@@ -67,12 +67,12 @@ def run_bat(name: str) -> None:
 def save_google_key() -> None:
     """구글 AI 키를 붙여 넣어 google_key.txt 로 저장 (화면에는 키를 다시 보여 주지 않는다)"""
     from tkinter import simpledialog
-    key = simpledialog.askstring("구글 AI 키 넣기", "Google AI Studio 에서 복사한 키(AIza…)를 붙여 넣으세요 (Ctrl+V)", show="*")
+    key = simpledialog.askstring("구글 AI 키 넣기", "Google AI Studio 에서 복사한 키를 붙여 넣으세요 (Ctrl+V 또는 마우스 오른쪽 → 붙여넣기)", show="*")
     if not key:
         return
-    key = key.strip()
-    if not key.startswith("AIza") or len(key) < 30:
-        messagebox.showerror("키 확인", "AIza 로 시작하는 키가 아니에요. 다시 복사해 주세요.")
+    key = key.strip().strip('"').strip("'").strip()
+    if len(key) < 20 or " " in key:
+        messagebox.showerror("키 확인", f"키가 아닌 것 같아요 (글자 {len(key)}개). AI Studio 키 줄의 복사 아이콘을 눌러 다시 복사해 주세요.")
         return
     (ROOT / "google_key.txt").write_text(key, encoding="utf-8")
     messagebox.showinfo("저장", "저장했어요. [AI 이미지 시험]을 눌러 확인해 보세요.")

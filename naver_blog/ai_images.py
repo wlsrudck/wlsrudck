@@ -37,6 +37,9 @@ def load_key() -> str:
                 m = re.search(r"AIza[0-9A-Za-z_\-]{20,}", key)
                 if m:
                     return m.group(0)
+                one = key.strip().strip('"').strip("'")
+                if len(one) >= 20 and not re.search(r"\s", one):  # 다른 모양의 새 키도 받아 준다
+                    return one
     return ""
 
 

@@ -120,16 +120,22 @@ def _thumb_magazine(lines, out, marker: str, brand: str) -> Path:
     return out
 
 
-def _photo_bg(bg: Path, size: tuple[int, int], dim: int = 120) -> Image.Image:
-    """AI·사진 배경: 꽉 차게 자르고 살짝 흐리게, 어둡게 덮어 위의 글자 카드가 또렷하게 보이게"""
+def _photo_bg(bg: Path, size: tuple[int, int], dim: int = 40) -> Image.Image:
+    """사진 배경: 꽉 차게 자르고 선명하게 둔다. 위·아래만 그라데이션으로 살짝 어둡게 해 흰 제목·이름이 읽히게"""
     with Image.open(bg) as src:
-        im = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGB"), size, Image.LANCZOS)
-    im = im.filter(ImageFilter.GaussianBlur(4))
-    shade = Image.new("RGBA", size, (12, 14, 18, dim))
-    return Image.alpha_composite(im.convert("RGBA"), shade)
+        im = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGB"), size, Image.LANCZOS).convert("RGBA")
+    w, h = size
+    shade = Image.new("RGBA", size, (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shade)
+    for y in range(h):
+        top = max(0.0, 1 - y / (h * 0.32))          # 위쪽 1/3: 제목 자리
+        bottom = max(0.0, (y - h * 0.82) / (h * 0.18))  # 아래 끝: 블로그 이름 자리
+        a = int(dim + 150 * top ** 1.4 + 120 * bottom)
+        sd.line([(0, y), (w, y)], fill=(10, 12, 16, min(a, 210)))
+    return Image.alpha_composite(im, shade)
 
 
-def _panel(base: Image.Image, box, radius: int = 28, alpha: int = 238) -> None:
+def _panel(base: Image.Image, box, radius: int = 28, alpha: int = 225) -> None:
     """반투명 흰 판 (유리 카드 느낌)"""
     layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
     ImageDraw.Draw(layer).rounded_rectangle(box, radius=radius, fill=(255, 255, 255, alpha))

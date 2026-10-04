@@ -82,6 +82,7 @@ class Post(BaseModel):
     updated: SkipJsonSchema[str] = ""
     disclosure: SkipJsonSchema[str] = ""  # 쇼핑커넥트 광고 표기 (글 맨 위)
     shop_links: SkipJsonSchema[list[str]] = []  # 쇼핑커넥트 링크
+    shop_name: SkipJsonSchema[str] = ""  # 상품명 (링크 앞 안내 문장용)
 
     @classmethod
     def load(cls, data: dict) -> "Post":
@@ -142,7 +143,7 @@ class Post(BaseModel):
                 out.append(("photo", stock[i]))
             out.extend(("text", p) for p in s.paragraphs)
         if self.shop_links:
-            out.append(("text", "👉 제품 자세히 보기\n" + "\n".join(self.shop_links)))
+            out.append(("text", f"👉 {self.shop_name or '제품'} 자세히 보기\n" + "\n".join(self.shop_links)))
         if self.qa:
             out.append(("heading", "자주 묻는 질문"))
             for q in self.qa:
@@ -151,7 +152,7 @@ class Post(BaseModel):
         if media.get("summary_card"):
             out.append(("photo", media["summary_card"]))
         if self.shop_links:
-            out.append(("text", "👉 제품 자세히 보기\n" + "\n".join(self.shop_links)))
+            out.append(("text", f"👉 {self.shop_name or '제품'} 자세히 보기\n" + "\n".join(self.shop_links)))
         if self.closing:
             out.append(("text", "\n".join(c.strip() for c in self.closing if c.strip())))
         if self.next_teaser.strip():
@@ -169,6 +170,8 @@ class Post(BaseModel):
             out.append(("text", "사진 출처: Pixabay"))
         if self.updated:
             out.append(("text", f"최종 수정: {self.updated} / 변경: 최초 작성"))
+        if self.disclosure.strip() and self.shop_links:  # 글 끝에도 한 번 더 (독자가 링크 근처에서 다시 볼 수 있게)
+            out.append(("text", self.disclosure.strip()))
         out.append(("text", " ".join(f"#{t}" for t in self.tags)))
         return out
 

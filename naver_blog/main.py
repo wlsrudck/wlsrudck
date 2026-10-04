@@ -361,6 +361,7 @@ def main():
         if shop.get("enabled"):
             post.disclosure = shop.get("disclosure", "이 포스팅은 네이버 쇼핑 커넥트 활동의 일환으로, 판매 발생 시 수수료를 제공받습니다.")
             post.shop_links = links
+            post.shop_name = (product or {}).get("name", "")[:40]
             if product and product["images"] and not any("상품 이미지 출처" in x for x in post.sources):
                 post.sources.append("상품 이미지 출처: 판매처 상품 페이지")
             if not post.shop_links:

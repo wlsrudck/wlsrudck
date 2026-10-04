@@ -148,13 +148,26 @@ def load_rows():
     if lines and lines[0][0].strip().lower() == "keyword":  # 칸 이름 줄: keyword,memo,status,category
         lines = lines[1:]
     rows = [{"keyword": r[0].strip(), "memo": r[1] if len(r) > 1 else "", "status": r[2] if len(r) > 2 else "",
-             "category": r[3].strip() if len(r) > 3 else "", "link": r[4].strip() if len(r) > 4 else ""} for r in lines]
+             "category": r[3].strip() if len(r) > 3 else "", "link": r[4].strip() if len(r) > 4 else "",
+             "info_link": r[5].strip() if len(r) > 5 else "", "style": r[6].strip() if len(r) > 6 else ""} for r in lines]
     for r in rows:
         # 메모를 카테고리 칸 뒤에 `생활정보 "메모"` 처럼 붙여 적은 경우: 따옴표 안은 메모, 앞은 카테고리
         m = re.fullmatch(r'\s*([^"]*?)\s*"(.*)"?\s*', r["category"], re.S)
         if m and not r["memo"].strip():
             r["category"], r["memo"] = m.group(1).strip(), m.group(2).rstrip('"').strip()
     return rows
+
+
+AUTO_KEYWORD = "(상품명 자동)"  # 링크만 넣은 줄의 임시 키워드. 상품 페이지를 읽으면 상품명으로 바뀐다
+
+
+def rename_keyword(old: str, new: str, link: str = "") -> None:
+    rows = load_rows()
+    for r in rows:
+        if r["keyword"] == old and not r["status"].strip() and (not link or r.get("link") == link):
+            r["keyword"] = new
+            break
+    save_rows(rows)
 
 
 def mark_done(keyword: str, status: str) -> None:
@@ -170,7 +183,7 @@ def mark_done(keyword: str, status: str) -> None:
 
 def save_rows(rows):
     with KEYWORDS.open("w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["keyword", "memo", "status", "category", "link"], restval="", extrasaction="ignore")
+        w = csv.DictWriter(f, fieldnames=["keyword", "memo", "status", "category", "link", "info_link", "style"], restval="", extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
 
@@ -303,12 +316,26 @@ def main():
         photos = find_photos(PHOTOS / slug)
         product = None
         cfg["writing"].pop("product_info", None)
+        cfg["writing"]["shop_style"] = row.get("style", "")
         links = [u for u in re.split(r"[\s,]+", row.get("link", "")) if u.startswith("http")]
-        if shop.get("enabled") and links and not (OUTPUT / f"{dt.date.today()}_{slug}.json").exists():
+        info_url = (row.get("info_link") or "").strip() or (links[0] if links else "")
+        if shop.get("enabled") and info_url and not (OUTPUT / f"{dt.date.today()}_{slug}.json").exists():
             try:
                 from shop_fetch import fetch_product
-                print("  상품 페이지 읽는 중...")
-                product = fetch_product(links[0], PHOTOS / slug / "_product")
+                print("  상품 페이지 읽는 중..." + ("" if row.get("info_link") else " (정보 링크가 없어 제휴 링크로 열어요)"))
+                tmp_dir = PHOTOS / "_fetch"
+                product = fetch_product(info_url, tmp_dir)
+                if keyword.startswith(AUTO_KEYWORD):  # 링크만 넣은 줄: 상품명으로 키워드를 정한다
+                    new_kw = re.sub(r"\s+", " ", re.sub(r"[\[\(].*?[\]\)]", "", product["name"])).strip()[:30]
+                    rename_keyword(keyword, new_kw, row.get("link", ""))
+                    keyword, slug = new_kw, slugify(new_kw)
+                    photos = find_photos(PHOTOS / slug)
+                    print(f"  키워드를 상품명으로 정했어요: {keyword}")
+                dest = PHOTOS / slug / "_product"
+                dest.mkdir(parents=True, exist_ok=True)
+                for old in dest.glob("product_*"):
+                    old.unlink()
+                product["images"] = [Path(shutil.move(str(p), str(dest / p.name))) for p in product["images"]]
                 cfg["writing"]["product_info"] = product["facts"]
                 own = [p for p in photos if not p.name.startswith("product_")]
                 photos = own + product["images"]
@@ -317,6 +344,9 @@ def main():
             except Exception as e:
                 product = None
                 print(f"  ⚠ 상품 페이지를 읽지 못했어요 ({str(e).splitlines()[0][:80]}) → 키워드와 메모로만 써요")
+                if keyword.startswith(AUTO_KEYWORD):
+                    print("  ⏭ 키워드가 없는 줄이라 건너뛰어요. 키워드 목록에서 키워드를 직접 적거나 '정보 링크'(스마트스토어 주소)를 넣어 주세요.")
+                    continue
         elif shop.get("enabled") and links:  # 오늘 써 둔 글을 다시 넣을 때는 받아 둔 상품 사진을 그대로 쓴다
             photos = photos + find_photos(PHOTOS / slug / "_product")
         print(f"[생성] {keyword} (사진 {len(photos)}장)")

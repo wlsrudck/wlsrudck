@@ -785,9 +785,22 @@ SHOP_REVIEW = """
 - 제품 사양·가격은 조사 자료에 있는 것만, 단정하지 않습니다. 과장 광고 표현은 쓰지 않습니다."""
 
 
+SHOP_STYLES = {
+    "후기형": "실사용 후기. 메모의 경험을 시간 순서(구매 이유 → 써 보니 → 좋은 점 → 아쉬운 점)로 풀어 씁니다.",
+    "추천형": "이런 사람에게 맞는 상품인지 중심. '이런 분께 추천 / 이런 분은 다른 선택' 소제목을 꼭 넣습니다.",
+    "비교형": "같은 종류 상품을 고를 때의 기준(용량·가격대·성분·구성)으로 비교. 표처럼 항목별로 정리하고, 다른 브랜드를 깎아내리지 않습니다.",
+    "정보형": "상품이 속한 분야의 기본 정보(사용법·보관·주의사항) 중심. 상품 소개는 뒤쪽에 짧게.",
+}
+
+
 def _system(cfg: dict, memo: str = "") -> str:
     short = cfg.get("voice", "short") == "short"
-    shop = (SHOP_REVIEW if experience_memo(memo) else SHOP_GUIDE) if cfg.get("shopping") else ""
+    shop = ""
+    if cfg.get("shopping"):
+        shop = SHOP_REVIEW if experience_memo(memo) else SHOP_GUIDE
+        style = (cfg.get("shop_style") or "").strip()
+        if style in SHOP_STYLES and not (style == "후기형" and not experience_memo(memo)):
+            shop += "\n- 글 스타일: " + SHOP_STYLES[style]
     return SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else SEARCH) + (SHORT_VOICE if short else "") + STYLE_RULES + shop
 
 

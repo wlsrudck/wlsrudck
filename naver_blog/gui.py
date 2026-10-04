@@ -69,6 +69,7 @@ def open_path(p: Path) -> None:
 
 # ── 키워드 목록 ──────────────────────────────────────────────────
 
+AUTO_KEYWORD = "(상품명 자동)"
 SHOP_CATEGORIES = ["주방템", "청소·세탁템", "수납·정리템", "자취 꿀템 모음"]
 SHOP_HIDDEN = {"11_trending_keywords.bat", "12_evergreen_keywords.bat", "7_season_keywords.bat", "13_autofill_keywords.bat"}
 
@@ -131,6 +132,7 @@ class KeywordTab(ttk.Frame):
         form = ttk.LabelFrame(self, text="키워드 넣기 / 고치기", padding=8)
         form.pack(fill="x")
         self.kw, self.memo, self.cat, self.link = tk.StringVar(), tk.StringVar(), tk.StringVar(), tk.StringVar()
+        self.info, self.style = tk.StringVar(), tk.StringVar()
         ttk.Label(form, text="키워드").grid(row=0, column=0, sticky="w")
         ttk.Entry(form, textvariable=self.kw, width=30).grid(row=0, column=1, sticky="we", padx=4)
         ttk.Label(form, text="카테고리").grid(row=0, column=2, sticky="w")
@@ -139,13 +141,21 @@ class KeywordTab(ttk.Frame):
         ttk.Label(form, text="메모").grid(row=1, column=0, sticky="w", pady=4)
         ttk.Entry(form, textvariable=self.memo, width=80).grid(row=1, column=1, columnspan=3, sticky="we", padx=4)
         if self.shop:
-            ttk.Label(form, text="상품 링크").grid(row=2, column=0, sticky="w", pady=4)
+            ttk.Label(form, text="제휴 링크").grid(row=2, column=0, sticky="w", pady=4)
             ttk.Entry(form, textvariable=self.link, width=80).grid(row=2, column=1, columnspan=3, sticky="we", padx=4)
-            ttk.Label(form, text="메모에 직접 써 본 경험을 적으면 실사용 리뷰, 비워 두면 구매 가이드로 써요. 링크는 쇼핑커넥트에서 복사해 붙여 넣기",
-                      foreground="#777").grid(row=3, column=1, columnspan=3, sticky="w")
+            ttk.Label(form, text="정보 링크").grid(row=3, column=0, sticky="w", pady=4)
+            ttk.Entry(form, textvariable=self.info, width=60).grid(row=3, column=1, sticky="we", padx=4)
+            ttk.Label(form, text="글 스타일").grid(row=3, column=2, sticky="w")
+            ttk.Combobox(form, textvariable=self.style, width=18, state="readonly",
+                         values=["", "후기형", "추천형", "비교형", "정보형"]).grid(row=3, column=3, sticky="w", padx=4)
+            ttk.Label(form, text="제휴 링크 = 쇼핑커넥트 링크(수익). 정보 링크 = 스마트스토어 상품 주소(상품명·사진·설명을 읽어 옴, 비우면 제휴 링크로 시도).\n"
+                                 "후기형은 메모에 직접 써 본 경험이 있을 때만 써요. 키워드를 비우면 상품명으로 자동으로 정해요.",
+                      foreground="#777").grid(row=5, column=1, columnspan=3, sticky="w")
         form.columnconfigure(1, weight=1)
         btns = ttk.Frame(form)
         btns.grid(row=4, column=0, columnspan=4, sticky="e", pady=(6, 0))
+        if self.shop:
+            ttk.Button(btns, text="링크 여러 개 한 번에", command=self.bulk_add).pack(side="left", padx=3)
         ttk.Button(btns, text="새로 추가", command=self.add).pack(side="left", padx=3)
         ttk.Button(btns, text="선택한 줄 고치기", command=self.update_row).pack(side="left", padx=3)
         ttk.Button(btns, text="다시 쓰게 하기 (상태 비우기)", command=self.reset_status).pack(side="left", padx=3)
@@ -183,6 +193,8 @@ class KeywordTab(ttk.Frame):
             self.kw.set(r["keyword"])
             self.memo.set(r["memo"])
             self.link.set(r.get("link", ""))
+            self.info.set(r.get("info_link", ""))
+            self.style.set(r.get("style", ""))
             self.cat.set(r["category"])
 
     def save(self):
@@ -196,14 +208,17 @@ class KeywordTab(ttk.Frame):
 
     def add(self):
         kw = self.kw.get().strip()
+        if not kw and self.shop and (self.info.get().strip() or self.link.get().strip()):
+            kw = AUTO_KEYWORD
         if not kw:
             messagebox.showinfo("키워드", "키워드를 적어 주세요.")
             return
-        if any(r["keyword"].replace(" ", "") == kw.replace(" ", "") for r in self.rows):
+        if kw != AUTO_KEYWORD and any(r["keyword"].replace(" ", "") == kw.replace(" ", "") for r in self.rows):
             if not messagebox.askyesno("이미 있음", f"'{kw}' 은(는) 이미 목록에 있어요. 그래도 추가할까요?"):
                 return
         self.rows.append({"keyword": kw, "memo": self.memo.get().strip(), "status": "",
-                          "category": self.cat.get().strip(), "link": self.link.get().strip()})
+                          "category": self.cat.get().strip(), "link": self.link.get().strip(),
+                          "info_link": self.info.get().strip(), "style": self.style.get().strip()})
         if self.save():
             self.kw.set("")
             self.memo.set("")
@@ -215,7 +230,7 @@ class KeywordTab(ttk.Frame):
             messagebox.showinfo("선택", "위 표에서 고칠 줄을 먼저 눌러 주세요.")
             return
         self.rows[i].update(keyword=self.kw.get().strip(), memo=self.memo.get().strip(), category=self.cat.get().strip(),
-                            link=self.link.get().strip())
+                            link=self.link.get().strip(), info_link=self.info.get().strip(), style=self.style.get().strip())
         self.save()
 
     def reset_status(self):
@@ -237,6 +252,38 @@ class KeywordTab(ttk.Frame):
         if messagebox.askyesno("정리", f"아직 안 쓴 키워드 중 {len(bad)}개를 지울까요?\n(가사·음원, 연예·사람 이슈 / 메모 적은 줄은 남겨요)\n\n{names}"):
             self.rows = [r for r in self.rows if r not in bad]
             self.save()
+
+    def bulk_add(self):
+        """링크 여러 개를 한 줄에 하나씩 붙여 넣어 한 번에 추가 (줄마다: 제휴링크 [정보링크])"""
+        win = tk.Toplevel(self)
+        win.title("링크 여러 개 한 번에 넣기")
+        win.transient(self.winfo_toplevel())
+        ttk.Label(win, text="한 줄에 상품 하나: 제휴 링크 (띄우고 정보 링크를 같이 써도 돼요)\n"
+                            "키워드는 상품 페이지를 읽어 상품명으로 자동으로 정해요. 하루 글 수 설정만큼 차례로 써요.").pack(anchor="w", padx=10, pady=6)
+        box = tk.Text(win, width=90, height=14)
+        box.pack(padx=10)
+        box.bind("<Control-KeyPress>", clip_key)
+        opt = ttk.Frame(win)
+        opt.pack(fill="x", padx=10, pady=6)
+        cat, style = tk.StringVar(value=self.cat.get()), tk.StringVar(value="추천형")
+        ttk.Label(opt, text="카테고리").pack(side="left")
+        ttk.Combobox(opt, textvariable=cat, values=known_categories(self.rows), width=16).pack(side="left", padx=4)
+        ttk.Label(opt, text="글 스타일").pack(side="left", padx=(12, 0))
+        ttk.Combobox(opt, textvariable=style, values=["추천형", "비교형", "정보형"], width=10, state="readonly").pack(side="left", padx=4)
+
+        def ok():
+            n = 0
+            for line in box.get("1.0", "end").splitlines():
+                urls = [u for u in line.split() if u.startswith("http")]
+                if not urls:
+                    continue
+                self.rows.append({"keyword": AUTO_KEYWORD, "memo": "", "status": "", "category": cat.get().strip(),
+                                  "link": urls[0], "info_link": urls[1] if len(urls) > 1 else "", "style": style.get()})
+                n += 1
+            if n and self.save():
+                messagebox.showinfo("추가", f"{n}개를 넣었어요. 글쓰기를 누를 때마다 차례로 써요.")
+            win.destroy()
+        ttk.Button(win, text="넣기", command=ok).pack(pady=(0, 10))
 
     def delete(self):
         i = self.selected()

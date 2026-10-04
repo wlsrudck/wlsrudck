@@ -50,6 +50,32 @@ def _dismiss(editor, key):
         pass  # 팝업이 없으면 무시
 
 
+# '내돈내산 기능 이용안내' 같은 안내 창은 X(닫기)로만 닫는다. '동의'는 절대 누르지 않는다
+# (쇼핑커넥트 글은 수수료를 받으므로 내돈내산 기능을 쓰면 안 됨)
+_CLOSE_NOTICE = r"""() => {
+    let n = 0;
+    for (const el of document.querySelectorAll("div, section, aside")) {
+        const t = el.innerText || "";
+        if (!t.includes("내돈내산 기능 이용안내") || el.offsetParent === null) continue;
+        const btn = [...el.querySelectorAll("button, a")].find(b => {
+            const s = ((b.className || "") + " " + (b.getAttribute("aria-label") || "") + " " + (b.innerText || "")).toLowerCase();
+            return (s.includes("close") || s.includes("닫기")) && !s.includes("동의");
+        });
+        if (btn) { btn.click(); n++; break; }
+    }
+    return n;
+}"""
+
+
+def _close_notices(editor):
+    try:
+        if editor.evaluate(_CLOSE_NOTICE):
+            print("  안내 창(내돈내산 이용안내)을 X로 닫았어요 (동의는 누르지 않음)")
+            _pause()
+    except Exception:
+        pass
+
+
 def _type_lines(page: Page, text: str):
     lines = text.split("\n")
     for i, line in enumerate(lines):
@@ -940,6 +966,7 @@ def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, aut
             editor.locator(SELECTORS["title"]).first.wait_for(timeout=30000)
             _dismiss(editor, "draft_popup_cancel")
             _dismiss(editor, "help_close")
+            _close_notices(editor)
 
             editor.locator(SELECTORS["title"]).first.click()
             _pause()

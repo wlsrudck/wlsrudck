@@ -241,6 +241,12 @@ def main():
     args = ap.parse_args()
     from version import VERSION
     print(f"[프로그램 버전 {VERSION}]  폴더: {ROOT}")
+    try:
+        from make_shop_copy import sync_shop
+        if (m := sync_shop()):
+            print("  " + m)
+    except Exception:
+        pass
 
     cfg = load_config()
     pub = cfg["publish"]

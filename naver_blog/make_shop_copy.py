@@ -38,6 +38,35 @@ disclosure = "이 포스팅은 네이버 쇼핑 커넥트 활동의 일환으로
     return text
 
 
+def copy_program(dst: Path) -> int:
+    """프로그램 파일만 복사 (설정·키워드·로그인·글 기록은 건드리지 않음)"""
+    n = 0
+    for p in SRC.iterdir():
+        if p.name in SKIP or p.name.startswith("."):
+            continue
+        if p.is_dir():
+            if p.name == "music":
+                shutil.copytree(p, dst / p.name, dirs_exist_ok=True)
+            continue
+        shutil.copy2(p, dst / p.name)
+        n += 1
+    return n
+
+
+def sync_shop() -> str:
+    """메인 폴더가 업데이트되면 옆의 쇼핑 폴더에도 같은 프로그램을 자동으로 넣는다. 한 일을 글자로 돌려준다"""
+    if SRC.name.endswith("_shop"):
+        return ""
+    dst = SRC.parent / (SRC.name + "_shop")
+    if not (dst / "config.toml").exists():
+        return ""
+    ver = lambda d: (d / "version.py").read_text(encoding="utf-8") if (d / "version.py").exists() else ""
+    if ver(SRC) == ver(dst):
+        return ""
+    copy_program(dst)
+    return f"쇼핑 블로그 폴더({dst.name})도 새 버전으로 맞췄어요"
+
+
 def main():
     dst = SRC.parent / (SRC.name + "_shop")
     print(f"쇼핑 블로그용 폴더를 만들어요: {dst}")
@@ -49,16 +78,7 @@ def main():
     blog_id = input("쇼핑 블로그 아이디 (blog.naver.com/ 뒤의 글자, 엔터 = rudwlsck): ").strip() or "rudwlsck"
     blog_name = input("블로그 이름 (엔터 = 혼자 사는 살림노트): ").strip() or "혼자 사는 살림노트"
     dst.mkdir(exist_ok=True)
-    n = 0
-    for p in SRC.iterdir():
-        if p.name in SKIP or p.name.startswith("."):
-            continue
-        if p.is_dir():
-            if p.name == "music":
-                shutil.copytree(p, dst / p.name, dirs_exist_ok=True)
-            continue
-        shutil.copy2(p, dst / p.name)
-        n += 1
+    n = copy_program(dst)
     cfg = dst / "config.toml"
     if not cfg.exists():
         cfg.write_text(shop_config((SRC / "config.toml").read_text(encoding="utf-8"), blog_id, blog_name), encoding="utf-8")

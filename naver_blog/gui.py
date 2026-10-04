@@ -354,7 +354,14 @@ class ColorTab(ttk.Frame):
 # ── 창 ──────────────────────────────────────────────────────────
 
 def main():
+    try:  # 메인 폴더를 업데이트했으면 쇼핑 블로그 폴더에도 자동으로 같은 버전을 넣는다
+        from make_shop_copy import sync_shop
+        msg = sync_shop()
+    except Exception as e:
+        msg = f"쇼핑 블로그 폴더 맞추기 실패: {e}"
     root = tk.Tk()
+    if msg:
+        root.after(500, lambda: messagebox.showinfo("업데이트", msg))
     try:
         from main import load_config
         name = load_config().get("naver", {}).get("blog_name", "")

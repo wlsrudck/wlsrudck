@@ -150,7 +150,8 @@ class Post(BaseModel):
             out.append(("heading", "자주 묻는 질문"))
             for q in self.qa:
                 out.append(("text", f"Q. {q.question}\nA. {q.answer}"))
-        out.extend(("photo", p) for i, p in enumerate(photos, 1) if i not in used)
+        # 남은 사진은 끝에 모아 넣는다. 단, 상세페이지에서 잘라 온 조각(detail_)은 본문에 맞는 자리에 고른 것만 쓴다
+        out.extend(("photo", p) for i, p in enumerate(photos, 1) if i not in used and not p.name.startswith("detail_"))
         if media.get("summary_card"):
             out.append(("photo", media["summary_card"]))
         if self.shop_links:
@@ -923,7 +924,7 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
     system = _system(cfg, memo)
     content = []
     for i, path in enumerate(photos, 1):
-        content.append({"type": "text", "text": f"사진 {i}:"})
+        content.append({"type": "text", "text": f"사진 {i}" + (" (상세페이지에서 자른 조각)" if path.name.startswith("detail_") else "") + ":"})
         content.append(_image_block(path))
     content.append({"type": "text", "text": (
         f"검색 키워드: {keyword}\n"
@@ -941,6 +942,9 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
            "위 사진들은 판매처의 상품 사진입니다(작성자가 찍은 사진이 아님). 사진 속 모습은 '상품 사진에 보이듯'처럼 설명하고, "
            "상세페이지 문장을 그대로 옮기지 말고 사실(용량·성분·구성·사용법·가격대)만 골라 내 말로 정리하세요. "
            "판매처의 홍보 문구(최고, 1위, 효과 보장 등)는 사실로 단정하지 말고 '판매처 설명에 따르면'으로 전하세요."
+           + ("\n'상세페이지에서 자른 조각' 사진은 그 소제목 내용(사용법·크기·소재·구성 등)을 그대로 보여 줄 때만 photo 로 지정하세요. "
+              "소제목마다 다른 사진을 쓰고, 맞지 않는 조각은 쓰지 않습니다(안 고른 조각은 글에 들어가지 않음)."
+              if any(p.name.startswith("detail_") for p in photos) else "")
            if cfg.get("product_info") else "")
     )})
     response = client.beta.messages.parse(

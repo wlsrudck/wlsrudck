@@ -345,7 +345,7 @@ def main():
                     print(f"  키워드를 상품명으로 정했어요: {keyword}")
                 dest = PHOTOS / slug / "_product"
                 dest.mkdir(parents=True, exist_ok=True)
-                for old in dest.glob("product_*"):
+                for old in [*dest.glob("product_*"), *dest.glob("detail_*")]:
                     old.unlink()
                 product["images"] = [Path(shutil.move(str(p), str(dest / p.name))) for p in product["images"]]
                 cfg["writing"]["product_info"] = product["facts"]
@@ -353,7 +353,8 @@ def main():
                 photos = own + product["images"]
                 print(f"  상품: {product['name'][:40]}" + (f" / {product['price']}원" if product["price"] else "")
                       + f" / 상품 사진 {len(product['images'])}장"
-                      + (" / 상세 이미지 글자 읽음" if product.get("detail_read") else ""))
+                      + (" / 상세 이미지 글자 읽음" if product.get("detail_read") else "")
+                      + (f" (상세 사진 후보 {product['detail_photos']}장)" if product.get("detail_photos") else ""))
             except Exception as e:
                 product = None
                 print(f"  ⚠ 상품 페이지를 읽지 못했어요 ({str(e).splitlines()[0][:80]}) → 키워드와 메모로만 써요")

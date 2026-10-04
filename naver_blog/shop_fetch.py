@@ -69,8 +69,13 @@ def _slices(data: bytes, width: int = 800, ratio: float = 1.6) -> list:
                 if min(y + step, im.height) - y > 80]
 
 
-def read_detail_images(srcs: list[str], referer: str, model: str) -> str:
-    """상세페이지 통이미지 속 글자(소재·사이즈·사용법·주의사항 등)를 Claude가 읽어 사실만 정리한다. 실패하면 빈 글자"""
+MAX_DETAIL_PHOTOS = 5  # 상세페이지에서 잘라 글에 쓸 사진 수
+
+
+def read_detail_images(srcs: list[str], referer: str, model: str, img_dir: Path | None = None) -> tuple[str, list]:
+    """상세페이지 통이미지 속 글자(소재·사이즈·사용법·주의사항 등)를 Claude가 읽어 사실만 정리하고,
+    조각 중 글에 사진으로 쓸 만한 것(상품·사용 장면이 잘리지 않고 보이는 것)을 골라 img_dir 에 detail_N.jpg 로 저장한다.
+    (글자, [저장한 사진]) — 실패하면 ("", [])"""
     import base64
     import io
     import anthropic
@@ -85,9 +90,11 @@ def read_detail_images(srcs: list[str], referer: str, model: str) -> str:
         if len(pieces) >= MAX_SLICES:
             break
     if not pieces:
-        return ""
+        return "", []
+    pieces = pieces[:MAX_SLICES]
     content = []
-    for im in pieces[:MAX_SLICES]:
+    for n, im in enumerate(pieces, 1):
+        content.append({"type": "text", "text": f"조각 {n}:"})
         buf = io.BytesIO()
         im.save(buf, format="JPEG", quality=85)
         content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
@@ -96,14 +103,31 @@ def read_detail_images(srcs: list[str], referer: str, model: str) -> str:
         "위 그림들은 한 상품의 상세페이지를 위에서부터 차례로 자른 것입니다. 그림 속 글자에서 상품 사실만 한국어로 정리하세요.\n"
         "- 항목: 구성·색상, 소재, 크기·용량·무게, 사용 가능 온도 등 사양, 특징, 사용법, 주의사항, 인증·원산지\n"
         "- 글자로 분명히 적힌 것만 씁니다. 짐작하거나 꾸미지 않습니다. 홍보 문구(최고, 1위 등)는 '판매처 주장'으로 표시합니다.\n"
-        "- 짧은 줄 목록으로만 답합니다.")})
+        "- 짧은 줄 목록으로 답합니다.\n"
+        "마지막 줄에는 블로그 글에 사진으로 넣기 좋은 조각 번호를 '사진: 2, 5' 처럼 적으세요(최대 5개, 없으면 '사진: 없음').\n"
+        "좋은 조각: 상품 모습·사용 장면·구성·크기 비교가 잘리지 않고 한눈에 보이는 것. "
+        "빼는 조각: 글자만 가득한 것, 상품이 중간에 잘린 것, 로고·배너·빈 배경, 다른 상품이 주인공인 것.")})
     try:
         client = anthropic.Anthropic(api_key=_api_key(), max_retries=3)
         res = client.messages.create(model=model, max_tokens=2000, messages=[{"role": "user", "content": content}])
-        return "".join(b.text for b in res.content if b.type == "text").strip()
+        text = "".join(b.text for b in res.content if b.type == "text").strip()
     except Exception as e:
         print(f"  (상세 이미지 글자 읽기 실패: {str(e).splitlines()[0][:60]})")
-        return ""
+        return "", []
+    saved = []
+    m = re.search(r"(?m)^\W*사진\s*:\s*(.*)$", text)
+    if m:
+        text = (text[:m.start()] + text[m.end():]).strip()
+        if img_dir is not None:
+            img_dir.mkdir(parents=True, exist_ok=True)
+            for old in img_dir.glob("detail_*"):
+                old.unlink()
+            for k in dict.fromkeys(int(x) for x in re.findall(r"\d+", m.group(1))):
+                if 1 <= k <= len(pieces) and len(saved) < MAX_DETAIL_PHOTOS:
+                    path = img_dir / f"detail_{k}.jpg"
+                    pieces[k - 1].save(path, format="JPEG", quality=90)
+                    saved.append(path)
+    return text, saved
 
 
 def fetch_product(url: str, img_dir: Path, headless: bool = False, model: str = "") -> dict:
@@ -179,7 +203,9 @@ def fetch_product(url: str, img_dir: Path, headless: bool = False, model: str = 
             continue
 
     detail_srcs = [i["src"] for i in sorted(d.get("detail", []), key=lambda i: i["top"])]
-    detail_text = read_detail_images(detail_srcs, d.get("url", url), model) if model and detail_srcs else ""
+    detail_text, detail_photos = (read_detail_images(detail_srcs, d.get("url", url), model, img_dir)
+                                  if model and detail_srcs else ("", []))
+    images += detail_photos
 
     facts = "\n".join(x for x in [
         f"상품명: {name}",
@@ -192,4 +218,4 @@ def fetch_product(url: str, img_dir: Path, headless: bool = False, model: str = 
         d.get("text", "")[:9000],
     ] if x)
     return {"name": name, "price": price, "brand": brand, "reviews": reviews, "url": d.get("url", url), "facts": facts, "images": images,
-            "detail_read": bool(detail_text)}
+            "detail_read": bool(detail_text), "detail_photos": len(detail_photos)}

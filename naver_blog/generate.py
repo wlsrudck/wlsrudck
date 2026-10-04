@@ -903,6 +903,20 @@ def polish_saved(post: Post, memo: str, cfg: dict) -> Post:
     return post
 
 
+def _parse_post(client, tries: int = 3, **kw):
+    """구조화된 글 받기. 가끔 받은 글이 형식에 안 맞아(ValidationError) 멈추므로, 어느 칸이 문제인지 보여 주고 다시 받는다"""
+    from pydantic import ValidationError
+    for n in range(1, tries + 1):
+        try:
+            return client.beta.messages.parse(**kw)
+        except ValidationError as e:
+            where = "; ".join(f"{'.'.join(str(x) for x in er.get('loc', ()))}: {er.get('msg', '')}"[:120]
+                              for er in e.errors()[:3])
+            print(f"  (받은 글 형식이 맞지 않아요 [{where}] → {'다시 받아요' if n < tries else '그만둬요'})")
+            if n == tries:
+                raise
+
+
 def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
                   mine: list[tuple[str, str]] = (), next_keyword: str = "") -> Post:
     # 서버가 붐빌 때(529) 조금씩 더 기다리며 여러 번 다시 시도한다
@@ -950,7 +964,8 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
               if any(p.name.startswith("detail_") for p in photos) else "")
            if cfg.get("product_info") else "")
     )})
-    response = client.beta.messages.parse(
+    response = _parse_post(
+        client,
         model=cfg["model"],
         max_tokens=16000,
         betas=["server-side-fallback-2026-07-01"],
@@ -973,7 +988,8 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
     fake = [] if experience_memo(memo) else fake_experience_in(post)
     if hits or ai_hits or fake:
         print(f"  금지 표현·AI 말투·지어낸 경험 발견({', '.join(hits + ai_hits + fake)}) → 고쳐 쓰는 중")
-        fixed = client.beta.messages.parse(
+        try:
+            fixed = _parse_post(client, tries=1,
             model=cfg["model"],
             max_tokens=16000,
             betas=["server-side-fallback-2026-07-01"],
@@ -993,8 +1009,11 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
                     + "같은 형식으로 다시 주세요. 나머지 내용과 사실은 그대로 유지하세요.")},
             ],
             output_format=Post,
-        )
-        if fixed.stop_reason == "end_turn" and fixed.parsed_output is not None:
+            )
+        except Exception as e:  # 고쳐 쓰기가 실패하면 처음 글을 그대로 쓴다
+            print(f"  (고쳐 쓰기 실패, 처음 글로 진행: {str(e).splitlines()[0][:60]})")
+            fixed = None
+        if fixed is not None and fixed.stop_reason == "end_turn" and fixed.parsed_output is not None:
             post = fixed.parsed_output
         left = banned_in(post) + ai_phrases_in(post)
         if left:

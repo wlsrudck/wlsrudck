@@ -322,6 +322,12 @@ def main():
 
     cfg = load_config()
     pub = cfg["publish"]
+    from login import STATE_PATH
+    if not args.dry_run and not args.make_folders and not STATE_PATH.exists():
+        # 로그인 정보가 없으면 글을 다 써 놓고 마지막에 실패하므로(비용 낭비), 쓰기 전에 멈춘다
+        print("⚠ 이 폴더는 아직 네이버 로그인이 안 됐어요. 같은 폴더의 2_login.bat 으로 "
+              f"[{cfg['naver'].get('blog_id', '')}] 아이디 로그인을 먼저 해 주세요. (글은 쓰지 않았어요)")
+        return
     shop = cfg.get("shopping", {})
     if shop.get("enabled"):
         cfg["writing"]["shopping"] = True

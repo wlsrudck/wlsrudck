@@ -31,7 +31,10 @@ def main():
         browser = p.chromium.launch(headless=False)
         context = browser.new_context(locale="ko-KR")
         page = context.new_page()
-        page.goto("https://nid.naver.com/nidlogin.login")
+        try:  # 로그인 화면은 광고·추적 스크립트 때문에 '다 열림'이 늦을 수 있어, 주소만 바뀌면 진행한다 (느려도 그 창에서 로그인하면 됨)
+            page.goto("https://nid.naver.com/nidlogin.login", wait_until="commit", timeout=60000)
+        except Exception:
+            print("  (로그인 화면이 늦게 열려요. 브라우저 창에서 그대로 로그인하면 돼요. 안 보이면 주소창에 nid.naver.com 입력)")
         for _ in range(300):
             if any(c["name"] == "NID_AUT" for c in context.cookies()):
                 break
@@ -43,7 +46,10 @@ def main():
         time.sleep(2)
         ok = True
         if blog_id:
-            page.goto(f"https://blog.naver.com/{blog_id}?Redirect=Write&", wait_until="domcontentloaded")
+            try:
+                page.goto(f"https://blog.naver.com/{blog_id}?Redirect=Write&", wait_until="commit", timeout=60000)
+            except Exception:
+                pass
             time.sleep(4)
             if "nid.naver.com" in page.url:
                 ok = False

@@ -93,6 +93,14 @@ SHOP_HIDDEN = {"11_trending_keywords.bat", "12_evergreen_keywords.bat", "7_seaso
                "@google_key", "16_ai_image_test.bat"}
 
 
+def is_cs() -> bool:
+    try:
+        from main import load_config
+        return bool(load_config().get("cs", {}).get("enabled"))
+    except Exception:
+        return False
+
+
 def is_shop() -> bool:
     try:
         from main import load_config
@@ -488,11 +496,14 @@ def main():
     run = ttk.Frame(nb, padding=12)
     nb.add(run, text="  실행  ")
     shop = is_shop()
+    cs = is_cs()
     for col, (group, items) in enumerate(BUTTONS):
         if shop:  # 쇼핑 블로그는 이슈·정보 키워드 찾기 버튼을 숨긴다
             items = [it for it in items if it[1] not in SHOP_HIDDEN]
         else:
             items = [it for it in items if it[1] != "15_find_products.bat"]
+        if cs:  # 고객센터 블로그는 이슈·계절 키워드를 쓰지 않는다
+            items = [it for it in items if it[1] not in ("11_trending_keywords.bat", "7_season_keywords.bat")]
         lf = ttk.LabelFrame(run, text=group, padding=10)
         lf.grid(row=0, column=col, sticky="nsew", padx=6)
         run.columnconfigure(col, weight=1)

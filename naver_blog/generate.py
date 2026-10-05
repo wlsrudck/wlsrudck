@@ -442,6 +442,16 @@ RESEARCH_PROMPT = """네이버 블로그 글을 쓰기 전에 사실 확인용 �
   형식은 [핵심답: 찾음] 또는 [핵심답: 못찾음 - 무엇이 없는지] 입니다."""
 
 
+CS_RESEARCH = """
+
+[고객센터·배송조회·신청방법 주제 추가 규칙]
+- 전화번호·운영시간·상담원 연결 방법·조회 주소는 반드시 그 회사·기관의 **공식 홈페이지(회사 도메인)나 공식 앱 안내**에서
+  확인하세요. 블로그·카페·지식iN·번호 모음 사이트의 번호는 근거로 쓰지 않습니다.
+- 공식 출처에서 대표 전화번호(또는 공식 조회 방법)를 확인하지 못했으면 [핵심답: 못찾음 - 공식 번호 확인 안 됨]으로 적으세요.
+- 번호마다 어느 공식 페이지에서 확인했는지 URL 을 같이 적고, ARS 번호 순서(예: 1번→2번)가 공식 안내에 있으면 함께 적으세요.
+"""
+
+
 class NotEnoughInfo(Exception):
     """검색으로 핵심 답을 찾지 못해 글을 쓰지 않고 건너뛸 때"""
 
@@ -453,7 +463,8 @@ class SearchFailed(Exception):
 def research(client: anthropic.Anthropic, keyword: str, memo: str, cfg: dict) -> tuple[str, dict]:
     """웹 검색으로 최신 사실을 조사해 (정리한 메모, 출처 URL 목록)을 돌려준다."""
     messages = [{"role": "user", "content": RESEARCH_PROMPT.format(
-        keyword=keyword, memo=memo_for_prompt(memo), max_searches=cfg.get("max_searches", 5))}]
+        keyword=keyword, memo=memo_for_prompt(memo), max_searches=cfg.get("max_searches", 5))
+        + (CS_RESEARCH if cfg.get("cs") else "")}]
     tools = [{
         "type": "web_search_20260209", "name": "web_search", "max_uses": cfg.get("max_searches", 5),
         "user_location": {"type": "approximate", "country": "KR", "timezone": "Asia/Seoul"},
@@ -851,6 +862,19 @@ SHOP_REVIEW = """
 - 제품 사양·가격은 조사 자료에 있는 것만, 단정하지 않습니다. 과장 광고 표현은 쓰지 않습니다."""
 
 
+CS_GUIDE = """
+
+[고객센터 블로그 글]
+급하게 연락처·조회 방법을 찾는 사람이 읽는 글입니다. 답을 맨 앞에, 정확하게.
+- 제목: "○○ 고객센터 전화번호·운영시간, 상담원 바로 연결 방법" 처럼 회사명 + 찾는 것 + 얻는 것. 낚시·과장·'직접 해보니' 금지.
+- 도입 세 줄: ①대표 번호 ②운영 시간 ③가장 빠른 연결 방법(또는 조회 주소) — 조사로 확인된 것만. 첫 줄부터 답을 줍니다.
+- pull_quote: 대표 번호와 운영 시간을 한 줄로 (예: "1588-0000 · 평일 9~18시").
+- 소제목 흐름: 번호·시간 한눈에 → 상담원 연결 순서(ARS) → 전화 말고 빠른 방법(앱·채팅·홈페이지) → 안 될 때·자주 막히는 이유 → Q&A.
+- 번호·시간·주소는 조사 자료의 공식 출처 그대로. 확인 못 한 번호는 쓰지 않고 "공식 홈페이지에서 확인" 으로 안내합니다.
+- 'OOOO년 OO월 공식 홈페이지 기준' 처럼 기준 시점을 본문에 한 번 적습니다. 작성자가 직접 전화해 본 것처럼 쓰지 않습니다.
+- metrics: 대표 번호, 운영 시간, 주말 운영 여부, 연결 단축 번호 같은 '바로 쓰는 정보'로.
+"""
+
 SHOP_STYLES = {
     "후기형": "실사용 후기. 메모의 경험을 시간 순서(구매 이유 → 써 보니 → 좋은 점 → 아쉬운 점)로 풀어 씁니다.",
     "추천형": "이런 사람에게 맞는 상품인지 중심. '이런 분께 추천 / 이런 분은 다른 선택' 소제목을 꼭 넣습니다.",
@@ -867,6 +891,8 @@ def _system(cfg: dict, memo: str = "") -> str:
         style = (cfg.get("shop_style") or "").strip()
         if style in SHOP_STYLES and not (style == "후기형" and not experience_memo(memo)):
             shop += "\n- 글 스타일: " + SHOP_STYLES[style]
+    if cfg.get("cs"):
+        shop += CS_GUIDE
     return SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else SEARCH) + (SHORT_VOICE if short else "") + STYLE_RULES + shop
 
 

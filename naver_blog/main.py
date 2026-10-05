@@ -334,6 +334,14 @@ def main():
         cfg["writing"]["min_chars"] = shop.get("min_chars", 800)
         cfg["writing"]["max_chars"] = shop.get("max_chars", 1400)
         print("[쇼핑 블로그 모드] 메모에 경험이 있으면 실사용 리뷰, 없으면 구매 가이드로 써요")
+    cs = cfg.get("cs", {})
+    if cs.get("enabled"):
+        cfg["writing"]["cs"] = True
+        cfg.setdefault("autofill", {})["mix"] = cs.get("mix", "evergreen")  # 고객센터·배송조회는 이슈가 아니라 평생 키워드
+        cfg["writing"]["style"] = cs.get("style", "search")  # 급하게 검색해서 들어오는 글: 검색용 제목·구조
+        cfg["writing"]["min_chars"] = cs.get("min_chars", 1300)
+        cfg["writing"]["max_chars"] = cs.get("max_chars", 2200)
+        print("[고객센터 블로그 모드] 공식 홈페이지에서 확인한 번호·시간만 써요. 확인 못 하면 건너뛰어요")
 
     rows = load_rows()
     pending = [r for r in rows if not (r.get("status") or "").strip()]

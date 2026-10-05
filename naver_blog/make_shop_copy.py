@@ -115,7 +115,7 @@ def make_cs() -> None:
     """고객센터 블로그용 폴더 (16_make_cs_blog.bat)"""
     dst = SRC.parent / (SRC.name + "_cs")
     print(f"고객센터 블로그용 폴더를 만들어요: {dst}")
-    blog_id = input("블로그 아이디 (엔터 = ckjkjk): ").strip() or "ckjkjk"
+    blog_id = input("블로그 아이디 (엔터 = ckjkjkj): ").strip() or "ckjkjkj"
     blog_name = input("블로그 이름 (엔터 = 생활메모지기): ").strip() or "생활메모지기"
     dst.mkdir(exist_ok=True)
     n = copy_program(dst)

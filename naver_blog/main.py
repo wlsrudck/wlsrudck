@@ -553,11 +553,22 @@ def main():
         if args.dry_run:
             continue
 
-        from publish import post_to_naver  # dry-run에서는 playwright 없이도 동작하도록
+        from publish import LoginRequired, post_to_naver  # dry-run에서는 playwright 없이도 동작하도록
 
         category = (row.get("category") or cfg["naver"].get("category", "")).strip()
-        post_to_naver(post, photos, media, cfg["naver"]["blog_id"], pub["auto_publish"], pub["headless"], OUTPUT,
-                      cfg.get("style"), category)
+        for attempt in range(2):
+            try:
+                post_to_naver(post, photos, media, cfg["naver"]["blog_id"], pub["auto_publish"], pub["headless"], OUTPUT,
+                              cfg.get("style"), category)
+                break
+            except LoginRequired:
+                if attempt:
+                    raise
+                # 로그인이 풀렸으면 로그인 창을 바로 띄우고, 로그인이 끝나면 이어서 올린다 (써 둔 글은 그대로)
+                print(f"\n🔑 네이버 로그인이 풀렸어요. 뜨는 브라우저에서 [{cfg['naver']['blog_id']}] 아이디로 로그인해 주세요 "
+                      "('로그인 상태 유지' 체크). 로그인하면 이어서 올려요.")
+                import login
+                login.main()
         mark_done(keyword, f"{'published' if pub['auto_publish'] else 'draft'} {dt.datetime.now():%Y-%m-%d %H:%M}")
         bump_today()
         print(f"  {'발행' if pub['auto_publish'] else '임시저장'} 완료")

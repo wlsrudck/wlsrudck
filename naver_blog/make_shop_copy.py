@@ -70,6 +70,12 @@ def _family() -> tuple[Path, list[Path]]:
         if SRC.name.endswith(suf):
             base = SRC.parent / SRC.name[:-len(suf)]
     folders = [base] + [base.parent / (base.name + suf) for suf in SUFFIXES]
+    # 폴더 이름을 바꿔도(예: naver_blog_shop → 쇼핑) 같은 프로그램 폴더면 함께 맞춘다
+    try:
+        folders += [d for d in SRC.parent.iterdir() if d.is_dir() and d not in folders
+                    and all((d / f).exists() for f in ("main.py", "publish.py", "generate.py", "version.py", "config.toml"))]
+    except Exception:
+        pass
     return base, [f for f in folders if (f / "main.py").exists() and (f / "config.toml").exists()]
 
 

@@ -13,7 +13,7 @@ from pathlib import Path
 
 SRC = Path(__file__).parent
 SKIP = {"auth", "output", "photos", "__pycache__", "keywords.csv", "state.json", "run_log.txt", "used_media.json",
-        "categories.json", "palette.json", "config.toml"}
+        "categories.json", "palette.json", "config.toml", "config_backup.toml"}
 SHOP_CATEGORIES = ["주방템", "청소·세탁템", "수납·정리템", "자취 꿀템 모음"]
 
 

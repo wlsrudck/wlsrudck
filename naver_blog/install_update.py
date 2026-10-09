@@ -18,7 +18,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ZIP_URL = "https://codeload.github.com/wlsrudck/wlsrudck/zip/refs/heads/claude/epic-tesla-p48lxk"
 SKIP = {"auth", "output", "photos", "__pycache__", "keywords.csv", "state.json", "run_log.txt", "used_media.json",
-        "categories.json", "palette.json", "config.toml", "api_key.txt", "pixabay_key.txt", "naver_keys.txt",
+        "categories.json", "palette.json", "config.toml", "config_backup.toml", "api_key.txt", "pixabay_key.txt", "naver_keys.txt",
         "google_key.txt", ".gitignore"}
 
 

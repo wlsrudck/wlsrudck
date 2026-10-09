@@ -199,6 +199,10 @@ def main():
         if not url:
             print("최근 글을 찾지 못했어요. 글 주소를 직접 붙여 넣어 주세요.")
             return
+    if re.search(r"Redirect=Write|PostWriteForm|/postwrite", url, re.I):
+        print("\n이 주소는 '글쓰기 화면'이라 찍을 수 없어요 (임시저장 글은 주소가 없어요).")
+        print("임시저장 글을 보여 주려면: 글쓰기 화면 오른쪽 위 [미리보기] → [모바일] 을 누른 뒤 Win+Shift+S 로 찍어 주세요.")
+        return
     url = to_mobile(url)
     print(f"찍는 중: {url}  (긴 글은 30초쯤 걸려요)")
     try:

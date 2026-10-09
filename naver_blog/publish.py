@@ -20,7 +20,7 @@ SELECTORS = {
     "photo_btn": "button.se-image-toolbar-button",       # 상단 툴바의 "사진" 버튼
     "image": ".se-component.se-image",
     "video_btn": "button.se-video-toolbar-button",       # 상단 툴바의 "동영상" 버튼
-    "video": ".se-component.se-video",
+    "video": ".se-component.se-video, .se-component[class*='se-video'], .se-component[class*='se-section-video']",
     "font_size_btn": "button[class*='font-size'][class*='toolbar-button']",   # 글자 크기 (19 ▾)
     "font_color_btn": "button[class*='font-color'][class*='toolbar-button']", # 글자 색
     "bg_color_btn": "button[class*='background-color'][class*='toolbar-button']",  # 글자 배경색(형광펜)
@@ -845,6 +845,7 @@ _VIDEO_POPUP_INFO = r"""() => {
         out.push([e.tagName, e.type || "", e.getAttribute("accept") || "", (e.className || "").toString().slice(0, 50),
                   (e.innerText || e.getAttribute("aria-label") || e.src || "").trim().slice(0, 30)].join(" | "));
     });
+    out.unshift("글자: " + (pop.innerText || "").replace(/\s+/g, " ").trim().slice(0, 120));
     return out.slice(0, 40).join("\n");
 }"""
 
@@ -855,6 +856,18 @@ _CLOSE_VIDEO_POPUP = r"""() => {
         /close|닫기/i.test((b.className || "") + " " + (b.getAttribute("aria-label") || "") + " " + (b.innerText || "")));
     if (btn) { btn.click(); return "닫기 버튼"; }
     return "버튼 없음";
+}"""
+
+
+_CONFIRM_ALERT = r"""() => {
+    const vis = e => e.getClientRects().length > 0;
+    const pop = [...document.querySelectorAll(".se-popup-alert, .se-popup-alert-confirm, [class*='nvu_layer_confirm'], [class*='nvu_alert'], [role=alertdialog]")]
+        .filter(vis)[0];
+    if (!pop) return "";
+    const btn = [...pop.querySelectorAll("button")].filter(vis).find(b => /확인|예|취소하기|닫기/.test(b.innerText || ""));
+    const msg = (pop.innerText || "").replace(/\s+/g, " ").slice(0, 60);
+    if (btn) { btn.click(); return msg + " → " + btn.innerText.trim(); }
+    return msg + " (버튼 못 찾음)";
 }"""
 
 
@@ -872,6 +885,11 @@ def _close_video_popup(page: Page, editor) -> str:
     except Exception:
         pass
     _pause(0.5, 0.8)
+    # 닫을 때 '업로드를 취소할까요?' 같은 확인 창이 뜨면 확인을 눌러 닫는다 (남아 있으면 그 뒤 꾸미기를 전부 막는다)
+    for fr in frames:
+        r = _safe_eval(fr, _CONFIRM_ALERT, None)
+        if r:
+            how.append(f"확인 창: {r}")
     for fr in frames:
         if _safe_eval(fr, "() => !!document.querySelector('.se-popup-video-upload, [data-name*=\\'video-upload\\']')", None):
             _safe_eval(fr, """() => document.querySelectorAll(".se-popup-video-upload, [data-name*='video-upload']")
@@ -972,7 +990,8 @@ def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str
             raise RuntimeError("영상 파일을 넣을 곳을 못 찾음")
         log.append(f"파일 고름: {video.name}")
         # 업로드·처리 기다리기 (최대 5분). 제목 칸이 비어 있으면 글 제목을 넣는다
-        for _ in range(100):
+        last = ""
+        for n in range(100):
             _pause(2.5, 3.5)
             if editor.locator(SELECTORS["video"]).count() > before:
                 log.append("본문에 영상 들어옴")
@@ -982,23 +1001,36 @@ def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str
                     except Exception:
                         pass
                 return True
+            # 올리기 창이 어떻게 바뀌는지 기록 (바뀔 때만)
+            now = next((i for i in (_safe_eval(fr, _VIDEO_POPUP_INFO, None) for fr in frames) if i), "")
+            if now != last:
+                log.append(f"[{n * 3}초] 올리기 창: " + (now.replace("\n", " / ")[:600] if now else "사라짐"))
+                last = now
+            if not now:
+                if n > 3:  # 창이 닫혔는데 본문에 영상이 없으면 더 기다리지 않는다
+                    _pause(3, 4)
+                    if editor.locator(SELECTORS["video"]).count() > before:
+                        continue
+                    log.append("올리기 창이 닫혔지만 본문에 영상이 없음")
+                    break
+                continue
             for fr in frames:
                 try:
-                    box = fr.locator("input[placeholder*='제목'], textarea[placeholder*='제목']").first
+                    box = fr.locator(".se-popup-video-upload input[placeholder*='제목'], .se-popup-video-upload textarea[placeholder*='제목'], "
+                                     "[data-name*='video-upload'] input[placeholder*='제목']").first
                     if box.count() and box.is_visible() and not box.input_value().strip():
                         box.fill(title[:60])
                         log.append("영상 제목 넣음")
                 except Exception:
                     pass
-                try:
-                    done = fr.evaluate(_MARK_VIDEO_STEP, ["완료"])  # 다른 창의 확인·등록을 잘못 누르지 않게
-                except Exception:
-                    done = ""
+                # 올리기 창 안의 '완료'(없으면 '등록')만 누른다. 창이 없으면 아무것도 누르지 않는다
+                done = _safe_eval(fr, _MARK_VIDEO_STEP, ["완료", "등록"]) if _safe_eval(fr, _VIDEO_POPUP_INFO, None) else ""
                 if done:
                     fr.locator("[data-nb-pick]").first.click()
                     log.append(f"'{done}' 누름")
                     break
-        log.append("5분 기다려도 본문에 영상이 안 들어옴")
+        else:
+            log.append("5분 기다려도 본문에 영상이 안 들어옴")
     except Exception as e:
         log.append(f"오류: {str(e).splitlines()[0][:80]}")
     # 못 넣었으면 올리기 창의 생김새를 기록하고 창을 꼭 닫는다 (열어 두면 그 뒤 글 꾸미기 클릭을 전부 가로막는다)

@@ -69,3 +69,7 @@ voice_rate = 220
 music_volume = 0.12
 # 글 안(첫 소제목 뒤)에도 이 짧은 영상을 넣는다 (체류 시간). 끄려면 false
 in_post = true
+# 글 안에는 블로그 화면에 맞는 가로 영상을 따로 만들어 넣는다 (세로 클립은 클립 업로드용으로 그대로)
+blog_wide = true
+# 배경음악: "auto" = music 폴더의 음악, 비어 있으면 프로그램이 만든 잔잔한 소리 / "none" = 음악 없이
+music = "auto"

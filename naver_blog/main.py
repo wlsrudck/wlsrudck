@@ -698,15 +698,21 @@ def main():
         # 짧은 영상: 이 글의 그림·카드로 만든 세로 영상을 글 안(첫 소제목 뒤)에도 넣는다 — 영상은 체류 시간을 늘린다
         # (끄려면 config [clip] in_post = false. 쇼핑 블로그는 기본으로 넣지 않는다)
         in_post = cfg.get("clip", {}).get("in_post", not cfg["writing"].get("shopping"))
-        made_clip = OUTPUT / f"{dt.date.today()}_{slug}_클립" / "clip.mp4"
-        if in_post and reused and made_clip.exists():  # 오늘 써 둔 글을 다시 넣을 때: 그때 만든 영상을 그대로
-            media["video"] = made_clip
+        # 글 안에는 가로 영상(clip_blog.mp4, 블로그 화면에 꽉 차게)을, 없으면 세로 클립을 넣는다
+        clip_dir = OUTPUT / f"{dt.date.today()}_{slug}_클립"
+        made_clip = next((p for p in (clip_dir / "clip_blog.mp4", clip_dir / "clip.mp4") if p.exists()), None)
+        if in_post and reused and made_clip and (made_clip.name == "clip_blog.mp4" or not cfg.get("clip", {}).get("blog_wide", True)):
+            media["video"] = made_clip  # 오늘 써 둔 글을 다시 넣을 때: 그때 만든 영상을 그대로
             print("  짧은 영상: 아까 만든 영상을 그대로 써요")
         elif cfg.get("clip", {}).get("auto", False) or in_post:
             try:
                 from clip_maker import load_saved, make_clip
-                clip = make_clip(load_saved(OUTPUT / f"{dt.date.today()}_{slug}.json"), cfg)
-                if in_post and clip and Path(clip).exists():
+                clip = make_clip(load_saved(OUTPUT / f"{dt.date.today()}_{slug}.json"), cfg,
+                                 blog=in_post and cfg.get("clip", {}).get("blog_wide", True))
+                wide = clip_dir / "clip_blog.mp4"
+                if in_post and wide.exists():
+                    media["video"] = wide
+                elif in_post and clip and Path(clip).exists():
                     media["video"] = Path(clip)
             except Exception as e:
                 print(f"  짧은 영상은 건너뜀: {str(e).splitlines()[0][:100]}")

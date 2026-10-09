@@ -447,6 +447,52 @@ def post_images(slug: str) -> list[Path]:
     return out
 
 
+UPLOAD = ROOT / "클립_올리기"  # 네이버 클립에 올릴 세로 영상만 모아 두는 곳 (바탕화면 바로가기로 연다)
+
+
+def export_for_upload(folder: Path, slug: str, cfg: dict) -> Path | None:
+    """세로 클립·표지·설명을 '클립_올리기' 폴더에 이름 맞춰 복사한다 (output 폴더를 뒤질 필요 없게)"""
+    import shutil
+    src = folder / "clip.mp4"
+    if not src.exists():
+        return None
+    UPLOAD.mkdir(exist_ok=True)
+    (UPLOAD / "올림").mkdir(exist_ok=True)
+    readme = UPLOAD / "읽어 주세요.txt"
+    if not readme.exists():
+        readme.write_text("네이버 클립에 올릴 세로 영상이 여기에 모여요.\n"
+                          "- 날짜_키워드.mp4 : 올릴 영상\n- 날짜_키워드_설명.txt : 제목·설명·해시태그 (복사해서 붙여 넣기)\n"
+                          "- 날짜_키워드_표지.jpg : 표지로 쓰기 좋은 첫 장면\n\n"
+                          "올린 뒤에는 세 파일을 '올림' 폴더로 옮겨 두면 헷갈리지 않아요.\n", encoding="utf-8")
+    name = folder.name.removesuffix("_클립")
+    out = UPLOAD / f"{name}.mp4"
+    shutil.copy2(src, out)
+    for extra, suffix in ((folder / "설명_해시태그.txt", "_설명.txt"), (folder / "scene_01.jpg", "_표지.jpg")):
+        if extra.exists():
+            shutil.copy2(extra, UPLOAD / f"{name}{suffix}")
+    ensure_shortcut(cfg)
+    return out
+
+
+def ensure_shortcut(cfg: dict) -> None:
+    """바탕화면에 '클립 올리기 (블로그 이름)' 바로가기를 한 번 만든다 (윈도우만)"""
+    import os
+    if os.name != "nt":
+        return
+    name = f"클립 올리기 ({cfg.get('naver', {}).get('blog_name') or ROOT.name})"
+    name = re.sub(r'[\\/:*?"<>|]', "", name)
+    ps = ("$d=[Environment]::GetFolderPath('Desktop'); $p=Join-Path $d ($env:LNK_NAME + '.lnk');"
+          "if (-not (Test-Path $p)) { $s=(New-Object -ComObject WScript.Shell).CreateShortcut($p);"
+          "$s.TargetPath=$env:LNK_TARGET; $s.Save(); 'made' }")
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=30,
+                           env={**os.environ, "LNK_NAME": name, "LNK_TARGET": str(UPLOAD)})
+        if "made" in (r.stdout or ""):
+            print(f"      바탕화면에 '{name}' 바로가기를 만들었어요")
+    except Exception:
+        pass
+
+
 def make_clip(saved: dict, cfg: dict, blog: bool = False) -> Path:
     """세로 클립(clip.mp4)을 만든다. blog=True면 블로그 본문용 가로 영상(clip_blog.mp4)도 같이"""
     post: Post = saved["post"]
@@ -557,6 +603,12 @@ def make_clip(saved: dict, cfg: dict, blog: bool = False) -> Path:
         w.unlink(missing_ok=True)
     total = sum(durations) - FADE * (n - 1)
     print(f"완료: {video}  (약 {total:.0f}초)")
+    try:
+        up = export_for_upload(folder, slug, cfg)
+        if up:
+            print(f"      클립에 올릴 파일: 바탕화면 '클립 올리기' 바로가기 → {up.name}")
+    except Exception as e:
+        print(f"      ('클립_올리기' 폴더에 복사 실패: {str(e).splitlines()[0][:60]})")
     return video
 
 

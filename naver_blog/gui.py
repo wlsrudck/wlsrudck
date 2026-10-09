@@ -24,6 +24,7 @@ BUTTONS = [
         ("모아보기 글 만들기", "22_curation_post.bat", "예전에 쓴 내 글 4~6개를 한 주제로 묶어 임시저장해요 (조회수·체류시간↑)"),
         ("미리보기만 (저장 안 함)", "3_test_write_only.bat", "블로그에 올리지 않고 output 폴더에 미리보기만 만들어요"),
         ("클립 영상 만들기", "8_make_clip.bat", "오늘 쓴 글로 네이버 클립용 세로 영상을 만들어요"),
+        ("클립 올릴 폴더 열기", "@clip_folder", "네이버 클립에 올릴 세로 영상·설명·표지를 모아 둔 폴더를 열어요"),
         ("글 캡처하기", "17_capture.bat", "글 주소를 넣으면(그냥 엔터는 최근 글) 휴대폰 화면 그대로 길게 찍어요"),
     ]),
     ("키워드 찾기", [
@@ -100,6 +101,12 @@ def save_pexels_key() -> None:
         return
     (ROOT / "pexels_key.txt").write_text(key, encoding="utf-8")
     messagebox.showinfo("저장", "저장했어요. 다음 글부터 Pixabay와 Pexels 두 곳에서 사진을 찾아요.")
+
+
+def open_clip_folder() -> None:
+    folder = ROOT / "클립_올리기"
+    folder.mkdir(exist_ok=True)
+    open_path(folder)
 
 
 def open_path(p: Path) -> None:
@@ -532,7 +539,7 @@ def main():
         lf.grid(row=0, column=col, sticky="nsew", padx=6)
         run.columnconfigure(col, weight=1)
         for label, bat, tip in items:
-            cmd = {"@google_key": save_google_key, "@pexels_key": save_pexels_key}.get(bat) or (lambda b=bat: run_bat(b))
+            cmd = {"@google_key": save_google_key, "@pexels_key": save_pexels_key, "@clip_folder": open_clip_folder}.get(bat) or (lambda b=bat: run_bat(b))
             ttk.Button(lf, text=label, command=cmd).pack(fill="x", pady=(6, 0))
             ttk.Label(lf, text=tip, foreground="#777", wraplength=250).pack(fill="x")
     bottom = ttk.Frame(run)

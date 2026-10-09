@@ -58,6 +58,20 @@ def to_mobile(url: str) -> str:
     return f"https://m.blog.naver.com/{m.group(1)}/{m.group(2)}"
 
 
+class PostGone(Exception):
+    pass
+
+
+GONE = [(r"삭제되었|삭제된 게시물|존재하지 않는 게시물|찾을 수 없",
+         "이 주소의 글은 삭제됐어요. 방금 지운 글이면 '최근 글' 목록이 늦게 바뀐 거예요. 글 주소를 직접 붙여 넣어 주세요."),
+        (r"비공개|권한이 없|접근할 수 없",
+         "비공개 글이거나 볼 권한이 없어요. 공개로 바꾸거나 [네이버 로그인]을 다시 한 뒤 찍어 주세요."),
+        (r"임시조치|게시 중단|신고.*접수",
+         "⚠ 네이버가 이 글을 가렸어요(신고에 의한 임시조치). 블로그 관리·알림을 꼭 확인해 주세요."),
+        (r"로그인이 필요|로그인 후 이용",
+         "로그인이 필요한 글이에요. [네이버 로그인]을 다시 한 뒤 찍어 주세요.")]
+
+
 def capture(url: str) -> list[Path]:
     from playwright.sync_api import sync_playwright
     folder = OUT / dt.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -74,6 +88,13 @@ def capture(url: str) -> list[Path]:
         page = ctx.new_page()
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(2500)
+        # 글이 없는 화면(삭제·비공개·임시조치)이면 찍지 않고 이유를 알려 준다
+        body = page.evaluate("document.body ? document.body.innerText.slice(0, 600) : ''")
+        # 안내 화면은 글자가 몇 줄뿐이다 (본문에 '비공개'라는 말이 나오는 보통 글을 잘못 막지 않게)
+        gone = next((msg for pat, msg in GONE if re.search(pat, body)), "") if len(body.strip()) < 400 else ""
+        if gone:
+            browser.close()
+            raise PostGone(gone)
         # 본문 끝까지만 천천히 내려서 사진을 불러온다 (그 아래 댓글·다른 글 목록은 끝없이 늘어나므로 찍지 않는다)
         end = 0
         for _ in range(150):
@@ -156,6 +177,9 @@ def main():
     print(f"찍는 중: {url}  (긴 글은 30초쯤 걸려요)")
     try:
         files = capture(url)
+    except PostGone as e:
+        print(f"\n찍지 않았어요: {e}")
+        return
     except Exception as e:
         print(f"캡처 실패: {str(e).splitlines()[0][:120]}")
         return

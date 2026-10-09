@@ -45,17 +45,36 @@ def latest_post(blog_id: str) -> str:
     return m.group(1) if m else ""
 
 
+def post_id(url: str) -> tuple[str, str]:
+    """주소에서 (블로그 아이디, 글 번호). 어떤 모양이든: /아이디/번호, ?Redirect=Log&logNo=, PostView?blogId=&logNo="""
+    url = url.strip()
+    m = re.search(r"blog\.naver\.com/([\w-]+)/(\d{6,})", url)
+    if m and m.group(1) not in ("PostView.naver", "PostView.nhn"):
+        return m.group(1), m.group(2)
+    no = re.search(r"logNo=(\d+)", url)
+    bid = re.search(r"blogId=([\w-]+)", url) or re.search(r"blog\.naver\.com/([\w-]+)", url)
+    if no and bid and bid.group(1) not in ("PostView.naver", "PostView.nhn"):
+        return bid.group(1), no.group(1)
+    return "", ""
+
+
 def to_mobile(url: str) -> str:
-    """blog.naver.com/아이디/글번호 (또는 PostView 주소) → 모바일 주소"""
-    url = url.strip().split("?Redirect")[0]
-    m = re.search(r"blog\.naver\.com/([\w-]+)/(\d+)", url)
-    if not m:
-        bid = re.search(r"blogId=([\w-]+)", url)
-        no = re.search(r"logNo=(\d+)", url)
-        if bid and no:
-            return f"https://m.blog.naver.com/{bid.group(1)}/{no.group(1)}"
-        return url if url.startswith("http") else "https://" + url
-    return f"https://m.blog.naver.com/{m.group(1)}/{m.group(2)}"
+    """블로그 글 주소 → 모바일 주소 (모르는 모양이면 그대로: naver.me 공유 주소 등)"""
+    bid, no = post_id(url)
+    if bid:
+        return f"https://m.blog.naver.com/{bid}/{no}"
+    url = url.strip()
+    return url if url.startswith("http") else "https://" + url
+
+
+def url_variants(url: str) -> list[str]:
+    """같은 글을 여는 여러 주소 (한 모양이 '삭제됨'으로 나오면 다른 모양으로 다시 연다)"""
+    bid, no = post_id(url)
+    if not bid:
+        return [to_mobile(url)]
+    return [f"https://m.blog.naver.com/{bid}/{no}",
+            f"https://m.blog.naver.com/PostView.naver?blogId={bid}&logNo={no}",
+            f"https://blog.naver.com/PostView.naver?blogId={bid}&logNo={no}"]
 
 
 class PostGone(Exception):
@@ -79,19 +98,26 @@ def capture(url: str) -> list[Path]:
     saved: list[Path] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context(
-            locale="ko-KR", viewport={"width": WIDTH, "height": 900}, device_scale_factor=2,
-            is_mobile=True, has_touch=True,
-            user_agent="Mozilla/5.0 (Linux; Android 14; SM-S921N) AppleWebKit/537.36 (KHTML, like Gecko) "
-                       "Chrome/124.0 Mobile Safari/537.36",
-            storage_state=str(STATE) if STATE.exists() else None)
-        page = ctx.new_page()
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(2500)
-        # 글이 없는 화면(삭제·비공개·임시조치)이면 찍지 않고 이유를 알려 준다
-        body = page.evaluate("document.body ? document.body.innerText.slice(0, 600) : ''")
-        # 안내 화면은 글자가 몇 줄뿐이다 (본문에 '비공개'라는 말이 나오는 보통 글을 잘못 막지 않게)
-        gone = next((msg for pat, msg in GONE if re.search(pat, body)), "") if len(body.strip()) < 400 else ""
+        gone, page = "", None
+        # 주소 모양 × (로그인 / 로그인 없이) 를 차례로: '삭제됨'·'권한 없음' 이 한 가지 길에서만 나는 경우가 있다
+        tries = [(u, login) for u in url_variants(url) for login in ((True, False) if STATE.exists() else (False,))]
+        for u, login in tries:
+            ctx = browser.new_context(
+                locale="ko-KR", viewport={"width": WIDTH, "height": 900}, device_scale_factor=2,
+                is_mobile=True, has_touch=True,
+                user_agent="Mozilla/5.0 (Linux; Android 14; SM-S921N) AppleWebKit/537.36 (KHTML, like Gecko) "
+                           "Chrome/124.0 Mobile Safari/537.36",
+                storage_state=str(STATE) if login else None)
+            page = ctx.new_page()
+            print(f"  여는 주소: {u}" + (" (로그인)" if login else " (로그인 없이)"))
+            page.goto(u, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(2500)
+            # 글이 없는 화면(삭제·비공개·임시조치)인지: 안내 화면은 글자가 몇 줄뿐이다
+            body = page.evaluate("document.body ? document.body.innerText.slice(0, 600) : ''")
+            gone = next((msg for pat, msg in GONE if re.search(pat, body)), "") if len(body.strip()) < 400 else ""
+            if not gone:
+                break
+            ctx.close()
         if gone:
             browser.close()
             raise PostGone(gone)

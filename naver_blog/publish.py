@@ -802,10 +802,12 @@ def _insert_heading_parts(page: Page, editor, heads, st: dict, screenshot_dir: P
 
 _MARK_VIDEO_STEP = r"""(words) => {
     // 동영상 올리기 창에서 글자로 버튼을 찾는다 (예: '동영상 추가', '완료', '확인')
+    // 올리기 창이 떠 있으면 그 안에서만 찾는다 (위 도구 막대의 '동영상' 버튼 설명 글자도 '동영상 추가'라 잘못 누르게 된다)
     document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const root = document.querySelector(".se-popup-video-upload, [data-name*='video-upload']") || document;
     const vis = e => e.getClientRects().length > 0 && !e.disabled && e.getAttribute("aria-disabled") !== "true";
     for (const w of words) {
-        const el = [...document.querySelectorAll("button, label, a, [role=button]")].filter(vis)
+        const el = [...root.querySelectorAll("button, label, a, [role=button]")].filter(vis)
             .find(e => (e.innerText || e.getAttribute("aria-label") || "").replace(/\s+/g, "").includes(w.replace(/\s+/g, "")));
         if (el) { el.setAttribute("data-nb-pick", "1"); return (el.innerText || w).trim().slice(0, 20); }
     }
@@ -878,6 +880,16 @@ def _close_video_popup(page: Page, editor) -> str:
     return ", ".join(how) or "이미 닫힘"
 
 
+_VIDEO_START_SHOWN = r"""() => {
+    // 올리기 창이 아직 첫 화면('동영상 추가 / MYBOX' 고르는 화면)인지
+    const pop = document.querySelector(".se-popup-video-upload, [data-name*='video-upload']");
+    if (!pop) return false;
+    const b = pop.querySelector(".nvu_local") ||
+        [...pop.querySelectorAll("button")].find(e => (e.innerText || "").replace(/\s+/g, "") === "동영상추가");
+    return !!(b && b.getClientRects().length);
+}"""
+
+
 def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str, screenshot_dir: Path | None) -> bool:
     """anchor 문단 뒤에 동영상을 올린다: 동영상 버튼 → 파일 고르기 → 처리 기다리기 → 제목 → 완료.
     네이버 화면이 달라 못 넣으면 False (글은 그대로 저장되게 예외를 밖으로 던지지 않는다)"""
@@ -897,19 +909,24 @@ def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str
                 _pause(1.2, 1.6)
                 if editor.locator(SELECTORS["video"]).count() > before:
                     return True
-                if not any(_safe_eval(fr, _MARK_VIDEO_STEP, ["동영상 추가", "동영상추가"]) for fr in frames):
+                if not any(_safe_eval(fr, _VIDEO_START_SHOWN, None) for fr in frames):
                     return True
             return False
 
         put = False
-        # 1) 사람처럼 '동영상 추가' 버튼 → 파일 고르는 창
+        # 1) 사람처럼 올리기 창의 '동영상 추가'(내 컴퓨터) 버튼 → 파일 고르는 창
         for fr in frames:
-            picked = _safe_eval(fr, _MARK_VIDEO_STEP, ["동영상 추가", "동영상추가"])
-            if not picked:
-                continue
+            local = fr.locator(".se-popup-video-upload .nvu_local, [data-name*='video-upload'] .nvu_local")
+            if local.count():
+                btn, picked = local.first, "동영상 추가(nvu_local)"
+            else:
+                picked = _safe_eval(fr, _MARK_VIDEO_STEP, ["동영상 추가", "동영상추가"])
+                if not picked:
+                    continue
+                btn = fr.locator("[data-nb-pick]").first
             try:
-                with page.expect_file_chooser(timeout=8000) as fc:
-                    fr.locator("[data-nb-pick]").first.click()
+                with page.expect_file_chooser(timeout=10000) as fc:
+                    btn.click(timeout=8000)
                 fc.value.set_files(str(video))
                 put = moved_on()
                 log.append(f"'{picked}' → 파일 고르는 창: " + ("넘어감" if put else "창이 그대로"))

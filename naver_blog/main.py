@@ -62,7 +62,13 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     ai_left = int(cfg.get("ai_max", 7)) if ai_key else 0
     ai_model = cfg.get("ai_model", "")
     # 일러스트 방식: 블로그 캐릭터 하나·색 하나로 모든 그림 통일, 소제목 그림에 제목·핵심 3개 글자까지 (Claude 가 맞춤법 확인)
-    illust = ai_left > 0 and cfg.get("ai_style", "illustration") == "illustration"
+    # ai_style: illustration(카드형 일러스트) / photo(실사) / auto(글마다 Claude 가 주제에 맞게 고름)
+    ai_style = cfg.get("ai_style", "auto")
+    if ai_style == "auto":
+        ai_style = "photo" if post.image_style == "photo" else "illustration"
+        if ai_left:
+            print(f"  그림 방식(자동): {'실사 사진' if ai_style == 'photo' else '카드형 일러스트'}")
+    illust = ai_left > 0 and ai_style == "illustration"
     character = cfg.get("ai_character") or ai_images.CHARACTERS["main"][0]
     color = cfg.get("ai_color") or ai_images.CHARACTERS["main"][1]
     plain_style = ai_images.illust_style(color, False) if illust else None  # 글자 없는 그림 (썸네일·카드 배경)

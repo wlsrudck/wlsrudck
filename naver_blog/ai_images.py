@@ -250,7 +250,7 @@ if __name__ == "__main__":  # 시험: 이 블로그 캐릭터 + 소제목 일러
     character, color = CHARACTERS[_blog_mode()]
     out_dir = ROOT / "output"
     out_dir.mkdir(exist_ok=True)
-    if _blog_cfg().get("images", {}).get("ai_style", "illustration") == "photo":  # 실사 스타일: 글자 없는 생활 사진 한 장
+    if _blog_cfg().get("images", {}).get("ai_style", "auto") == "photo":  # 실사 스타일: 글자 없는 생활 사진 한 장
         topic = sys.argv[1] if len(sys.argv) > 1 else "원룸 겨울 난방비 아끼기"
         try:
             p = stamp(generate(section_prompt("난방비 아끼기", topic, topic, "보일러 온도조절기, 창문 문풍지", 0),

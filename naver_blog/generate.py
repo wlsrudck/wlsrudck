@@ -11,7 +11,7 @@ from pathlib import Path
 
 import anthropic
 from PIL import Image, ImageOps
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from pydantic.json_schema import SkipJsonSchema
 
 PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -20,7 +20,19 @@ PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 UNKNOWN = re.compile(r"확인되지\s*않|확인\s*필요|알려지지\s*않|미정|정해지지\s*않|명확하지\s*않")
 
 
+def _all_required(schema: dict) -> None:
+    """Claude 에게 보내는 형식에서는 모든 칸을 '꼭 채울 칸'으로 (비워도 됨: 빈 글자·빈 목록).
+    고를 수 있는 칸이 많으면 형식 검사기가 너무 커져 API 가 'compiled grammar is too large' 로 거절한다.
+    저장해 둔 예전 글을 읽을 때는 기본값이 그대로 쓰인다"""
+    schema["required"] = list(schema.get("properties", {}))
+
+
+STRICT = ConfigDict(json_schema_extra=_all_required)
+
+
 class Section(BaseModel):
+    model_config = STRICT
+
     heading: str = Field(description="소제목 (없으면 빈 문자열)")
     photo: int | None = Field(description="이 소제목 바로 아래에 넣을 사진 번호(1부터). 없으면 null")
     stock_query: str = Field(description="photo가 null이고 소제목이 있으면 반드시 적는 무료 사진 검색어(영어 2~4단어). "
@@ -116,6 +128,8 @@ class QA(BaseModel):
 
 
 class RecapItem(BaseModel):
+    model_config = STRICT
+
     name: str = Field(description="견준 것 하나의 이름(12자 이내). 예: 네이버 메이트")
     says: str = Field(description="그것을 한마디로 말하는 한 줄(25자 이내, 따옴표 없이). 그것이 독자에게 말하듯. "
                                   "예: 이번 달 당신 콘텐츠 좋네요.")
@@ -123,6 +137,8 @@ class RecapItem(BaseModel):
 
 
 class Post(BaseModel):
+    model_config = STRICT
+
     title: str
     intro: list[str] = Field(description="세 줄 도입. 정확히 3개: 궁금증과 맞닿은 장면/질문, 확인 가능한 핵심 사실, 이 글에서 얻을 답")
     pull_quote: str = Field(description="짧은 호흡 문체에서 도입 뒤에 크게 뽑아 보여줄 한 줄(20자 안팎). 제목 되풀이 금지, "

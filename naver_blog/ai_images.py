@@ -211,18 +211,32 @@ if __name__ == "__main__":  # 시험: 이 블로그 캐릭터 + 소제목 일러
     character, color = CHARACTERS[_blog_mode()]
     out_dir = ROOT / "output"
     out_dir.mkdir(exist_ok=True)
-    try:
-        ref = character_ref(k, character, color, out_dir / "ai_character.png")
-        if ref:
-            print(f"이 블로그 캐릭터: {ref}  (마음에 안 들면 이 파일을 지우고 다시 시험하면 새로 그려요)")
-        topic = sys.argv[1] if len(sys.argv) > 1 else "원룸 겨울 난방비 아끼기"
-        p = generate(card_prompt("난방비 아끼기", ["문풍지 붙이기", "온도 20도", "가습기 켜기"], topic, topic, character),
-                     out_dir / "ai_test.png", k, style=illust_style(color, True), aspect="4:3", refs=[ref] if ref else None)
-        print(f"만들었어요: {p}")
+    ref_path = out_dir / "ai_character.png"
+    topic = sys.argv[1] if len(sys.argv) > 1 else "원룸 겨울 난방비 아끼기"
+
+    def show(path):
         try:
             import os
-            os.startfile(p)  # noqa  (윈도우에서 그림을 바로 열어 보여 준다)
+            os.startfile(path)  # noqa  (윈도우에서 그림을 바로 열어 보여 준다)
         except Exception:
             pass
-    except Exception as e:
-        print(f"실패: {explain(e)}")
+
+    while True:
+        try:
+            ref = character_ref(k, character, color, ref_path)
+            p = generate(card_prompt("난방비 아끼기", ["문풍지 붙이기", "온도 20도", "가습기 켜기"], topic, topic, character),
+                         out_dir / "ai_test.png", k, style=illust_style(color, True), aspect="4:3", refs=[ref] if ref else None)
+        except Exception as e:
+            print(f"실패: {explain(e)}")
+            break
+        if ref:
+            show(ref)
+        show(p)
+        print("\n그림 두 장을 열었어요: 이 블로그 캐릭터(ai_character) + 소제목 그림 예시(ai_test)")
+        print("  캐릭터가 마음에 들면 → 그냥 엔터 (앞으로 글마다 이 캐릭터로 그려요)")
+        print("  캐릭터를 새로 그리려면 → 1 입력 후 엔터")
+        if input("> ").strip() != "1":
+            print("이 캐릭터로 정했어요.")
+            break
+        ref_path.unlink(missing_ok=True)
+        print("새 캐릭터를 그리는 중...")

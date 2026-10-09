@@ -368,6 +368,11 @@ def fetch_trending(blog_id: str, tcfg_topics: list[str] = CA_TOPICS) -> list[tup
 
 
 # 노래 가사 글은 가사를 옮겨 적게 되어 저작권·저품질 위험이 있으므로 뺀다
+# 정치·논란·사람 신상 이슈: 조회수는 낮고 악플·신고·명예훼손 시비가 붙기 쉬우며 광고도 잘 안 붙는다
+# ([trending] controversy = true 면 거르지 않는다)
+CONTROVERSY = re.compile(r"좌파|우파|극우|극좌|진보|보수\s*성향|정치\s*성향|성향\s*논란|논란|탄핵|국회의원|대통령|정당|여당|야당|"
+                         r"선거|친일|종북|빨갱이|불륜|열애설|이혼설|폭로|루머|저격|사생활|신상|"
+                         r"(기자|아나운서|판사|검사|피해자|가해자|유족|가족)\s*(누구|프로필|나이)")
 LYRICS = re.compile(r"가사|노래방|악보|lyrics|음원\s*추출|음원\s*다운|mp3", re.I)  # 저작권 문제가 생길 수 있는 글감
 
 
@@ -435,9 +440,12 @@ def find_trending(cfg: dict) -> list[dict] | None:
         return None
     have = {r["keyword"].replace(" ", "") for r in load_rows()}
     titles = written_titles(cfg["naver"]["blog_id"])
-    rows = []
+    rows, dropped = [], []
     for topic, kw in items:
         if kw.replace(" ", "") in have or SHOPPING.search(kw) or LYRICS.search(kw):
+            continue
+        if not tcfg.get("controversy", False) and CONTROVERSY.search(kw):
+            dropped.append(kw)
             continue
         have.add(kw.replace(" ", ""))  # 같은 키워드가 여러 주제에 올라와도 한 번만
         rows.append({"keyword": kw, "topic": topic, "category": map_category(topic, mapping) if topic else "",
@@ -448,6 +456,8 @@ def find_trending(cfg: dict) -> list[dict] | None:
     skipped = len(rows) - len(mine)
     rows = balanced(mine, 40)
     print(f"인기 키워드 {len(items)}개 중 내 블로그 주제에 맞는 {len(rows)}개" + (f" (다른 주제 {skipped}개 제외)" if skipped else ""))
+    if dropped:
+        print(f"  정치·논란·신상 키워드 {len(dropped)}개는 뺐어요: " + ", ".join(dropped[:5]) + (" …" if len(dropped) > 5 else ""))
     print(f"이미 쓴 글 {len(titles)}개와 비교했어요" + ("" if titles else " (내 글 목록을 못 읽었어요)"))
 
     keys = load_keys()

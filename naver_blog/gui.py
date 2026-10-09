@@ -44,7 +44,8 @@ BUTTONS = [
 STYLE_KEYS = [
     ("heading_color", "소제목", "#00756a"),
     ("quote_color", "인용구(포스트잇) 글자", "#00756a"),
-    ("key_color", "핵심 한 줄 (밑줄 문장)", "#d9480f"),
+    ("highlight_color", "핵심 한 줄 형광펜(배경)", "#fff3bf"),
+    ("key_color", "핵심 한 줄 (밑줄 방식일 때)", "#d9480f"),
     ("disclosure_color", "광고 표기 (쇼핑 블로그)", "#e03131"),
     ("cta_color", "지금 할 일 한 줄 (✔)", "#1971c2"),
     ("intro_color", "도입 3줄", "#777777"),

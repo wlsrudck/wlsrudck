@@ -21,6 +21,7 @@ SELECTORS = {
     "image": ".se-component.se-image",
     "font_size_btn": "button[class*='font-size'][class*='toolbar-button']",   # 글자 크기 (19 ▾)
     "font_color_btn": "button[class*='font-color'][class*='toolbar-button']", # 글자 색
+    "bg_color_btn": "button[class*='background-color'][class*='toolbar-button']",  # 글자 배경색(형광펜)
     "save_btn": "button[class*='save_btn']",
     "publish_btn": "button[class*='publish_btn']",
     "publish_confirm": "button[class*='confirm_btn']",
@@ -203,7 +204,10 @@ def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | N
                 if line.strip():
                     out.append((line.strip(), None, st["q_color"] if line.startswith("Q. ") else st["a_color"], False, False))
     for line in key_lines:
-        out.append((line.strip(), None, st["key_color"], True, bool(st["key_underline"])))
+        if st.get("key_style", "highlight") == "highlight":  # 형광펜: 글자는 그대로(굵게), 연한 배경색 한 가지
+            out.append((line.strip(), None, None, True, False, False, st["highlight_color"]))
+        else:
+            out.append((line.strip(), None, st["key_color"], True, bool(st["key_underline"])))
     # 행동 한 줄(✔ …): 굵게 + 행동 색 (서체 4역할 중 '행동형')
     for kind, value in blocks:
         if kind == "text" and value.startswith("✔ "):
@@ -380,6 +384,7 @@ def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None =
     done, log, notes = 0, [], []
     for i, (text, size, color, bold, underline, *rest) in enumerate(targets):
         first = bool(rest and rest[0])  # 도입·목차 줄은 같은 글자가 본문에 또 있어도 앞쪽 문단
+        bg = rest[1] if len(rest) > 1 else None  # 형광펜(배경색)
         if len(log) >= 2 or (i >= 2 and done == 0):  # 처음 두 줄이 안 되면 나머지도 안 되니 멈춘다
             break
         try:
@@ -388,7 +393,11 @@ def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None =
             picked_size = "" if size is None else _pick(page, editor, SELECTORS["font_size_btn"], _MARK_SIZE_OPTION, size, log)
             if size is not None and picked_size:
                 _select_line(page, editor, text, first)  # 목록을 닫으며 선택이 풀렸을 수 있어 다시 선택
-            picked_color = _pick(page, editor, SELECTORS["font_color_btn"], _MARK_COLOR_OPTION, color, log)
+            picked_color = _pick(page, editor, SELECTORS["font_color_btn"], _MARK_COLOR_OPTION, color, log) if color else ""
+            picked_bg = ""
+            if bg:
+                _select_line(page, editor, text, first)
+                picked_bg = _pick(page, editor, SELECTORS["bg_color_btn"], _MARK_COLOR_OPTION, bg, log)
             if bold and "<b" not in editor.evaluate(_PARAGRAPH_HTML, [sel, text, first]).lower():
                 _select_line(page, editor, text, first)
                 page.keyboard.press("Control+B")
@@ -397,11 +406,11 @@ def _style_paragraphs(page: Page, editor, targets, screenshot_dir: Path | None =
                 page.keyboard.press("Control+U")
             page.keyboard.press("End")  # 선택 해제
             after = editor.evaluate(_PARAGRAPH_HTML, [sel, text, first])
-            m = re.search(r"#[0-9a-fA-F]{6}", picked_color)
+            m = re.search(r"#[0-9a-fA-F]{6}", picked_color or picked_bg)
             ok = bool(m) and _styled(after, size, m.group(0))
             done += ok
             if not ok and len(notes) < 6:  # 실패한 줄만 기록 (성공한 줄은 볼 필요가 없다)
-                notes.append(f"[{text[:20]}] 크기 선택: {picked_size or '-'} / 색 선택: {picked_color or '-'} / 결과: {'성공' if ok else '실패'}\n"
+                notes.append(f"[{text[:20]}] 크기 선택: {picked_size or '-'} / 색 선택: {picked_color or picked_bg or '-'} / 결과: {'성공' if ok else '실패'}\n"
                              f"  문단 HTML: {after[:300]}")
         except Exception as e:
             print(f"  글자 꾸미기 건너뜀 ({text[:15]}): {str(e).splitlines()[0]}")

@@ -142,7 +142,9 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     used_ids: set[int] = set()
     thumb_photo = None
     if ai_left and not photos and cfg.get("thumbnail", True):
-        thumb_photo = ai_make(f"블로그 글 '{post.title}'의 대표 이미지. 주제를 한눈에 보여 주는 장면.",
+        thumb_photo = ai_make(f"블로그 글 '{post.title}'의 대표 이미지. 주제를 한눈에 보여 주는 장면"
+                              + (f"(찍을 대상: {post.thumbnail_query})" if post.thumbnail_query.strip() else "")
+                              + ". 사람 없이 물건·장소 중심.",
                               folder / "ai_thumb.png")
     if not thumb_photo and cfg.get("thumbnail", True) and cfg.get("thumbnail_style", "auto") == "auto":
         # 썸네일 배경: 직접 찍은 사진이 있으면 그걸, 없으면 무료 사진을 따로 찾는다
@@ -213,7 +215,8 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
                 print(f"  위키미디어 사진 고르기 실패({s.heading[:15]}): {str(e).splitlines()[0][:60]}")
         if not picked and ai_left:
             picked = ai_card(s, i) if illust else ai_make(
-                ai_images.section_prompt(s.heading, s.key_line + " " + " ".join(s.paragraphs), keyword or post.title),
+                ai_images.section_prompt(s.heading, s.key_line + " " + " ".join(s.paragraphs), keyword or post.title,
+                                         " / ".join([s.stock_query, *s.alt_queries[:1]]), i),
                 folder / f"ai_{i + 1:02d}.png")
             if picked and not illust:
                 ai_images.stamp(picked)

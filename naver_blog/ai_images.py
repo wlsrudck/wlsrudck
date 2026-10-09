@@ -155,10 +155,21 @@ def explain(e: Exception) -> str:
     return str(e).splitlines()[0][:100]
 
 
-def section_prompt(heading: str, text: str, keyword: str) -> str:
-    return (f"네이버 블로그 글 '{keyword}'의 소제목 '{heading}'에 넣을 이미지.\n"
-            f"이 부분 내용: {text[:300]}\n"
-            "내용을 한눈에 떠올리게 하는 장면 하나를 그려 주세요 (사물·장소·손동작 중심). 주제와 상관없는 물건은 넣지 않습니다.")
+# 실사 그림의 구도를 소제목마다 바꿔 비슷한 사진이 반복되지 않게 한다
+SHOTS = ["물건 하나를 가까이서 찍은 클로즈업(배경은 흐리게)", "위에서 내려다본 책상·탁자 위 물건들(플랫레이)",
+         "장소 전체가 보이는 넓은 실내 풍경", "바깥 거리·건물·풍경", "휴대폰·노트북 화면이나 서류가 놓인 장면(화면 글자는 흐리게)"]
+PEOPLE = ["사람 없이 물건과 장소만", "사람 없이 물건과 장소만", "손만 살짝 보이게(나이 든 손)",
+          "사람 없이 물건과 장소만", "멀리서 작게 보이는 뒷모습 한 명(중년 남성)"]
+
+
+def section_prompt(heading: str, text: str, keyword: str, scene: str = "", idx: int = 0) -> str:
+    """소제목 실사 그림. scene: 글을 쓸 때 소제목마다 정한 장면(사진 검색어), idx: 몇 번째 소제목(구도를 바꾼다)"""
+    return (f"네이버 블로그 글 '{keyword}'의 소제목 '{heading}'에 넣을 사진.\n"
+            + (f"찍을 대상: {scene}\n" if scene.strip() else "")
+            + f"이 부분 내용: {text[:250]}\n"
+            f"구도: {SHOTS[idx % len(SHOTS)]}. 사람: {PEOPLE[idx % len(PEOPLE)]}.\n"
+            "내용을 한눈에 떠올리게 하는 구체적인 물건·장소를 찍습니다. 주제와 상관없는 물건이나, "
+            "책상 앞에 앉은 여성 같은 흔한 인물 사진은 넣지 않습니다.")
 
 
 def stamp(path: Path, label: str = "AI 생성") -> Path:
@@ -242,7 +253,8 @@ if __name__ == "__main__":  # 시험: 이 블로그 캐릭터 + 소제목 일러
     if _blog_cfg().get("images", {}).get("ai_style", "illustration") == "photo":  # 실사 스타일: 글자 없는 생활 사진 한 장
         topic = sys.argv[1] if len(sys.argv) > 1 else "원룸 겨울 난방비 아끼기"
         try:
-            p = stamp(generate(section_prompt("난방비 아끼기", topic, topic), out_dir / "ai_test.png", k))
+            p = stamp(generate(section_prompt("난방비 아끼기", topic, topic, "보일러 온도조절기, 창문 문풍지", 0),
+                               out_dir / "ai_test.png", k))
             print(f"실사 스타일 예시를 만들었어요: {p}")
             try:
                 import os

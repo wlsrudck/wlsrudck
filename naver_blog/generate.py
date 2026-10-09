@@ -254,6 +254,8 @@ class Post(BaseModel):
             out.extend(("text", p) for p in s.paragraphs)
             if media.get("table") and i + 1 == max(1, min(self.table_after, len(self.sections))):
                 out.append(("photo", media["table"]))
+            if i == 0 and media.get("video"):  # 이 글로 만든 짧은 영상 (체류 시간)
+                out.append(("video", media["video"]))
             if i == 0 and self.videos:  # 공식 영상 (주소 한 줄 = 편집기가 영상으로 바꿔 보여 준다)
                 out.append(("text", "▶ 공식 영상으로 보기"))
                 out.extend(("text", v) for v in self.videos)
@@ -342,6 +344,9 @@ class Post(BaseModel):
                     body.append('<hr style="width:60px;border:0;border-top:2px solid #bbb;margin:48px auto 24px">')
                 bar = f"border-left:4px solid {st['heading_color']};padding-left:12px;" if st.get("heading_box") else ""
                 body.append(f'<h2 style="{bar}font-size:{st["heading_size"]}px;color:{st["heading_color"]}">{html.escape(value)}</h2>')
+            elif kind == "video":
+                rel = os.path.relpath(value, out_dir).replace(os.sep, "/")
+                body.append(f'<video src="{html.escape(rel)}" controls style="max-width:100%"></video>')
             elif kind == "photo":
                 rel = os.path.relpath(value, out_dir).replace(os.sep, "/")
                 body.append(f'<img src="{html.escape(rel)}">')

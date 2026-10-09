@@ -19,6 +19,8 @@ SELECTORS = {
     "body": ".se-component.se-text .se-text-paragraph",
     "photo_btn": "button.se-image-toolbar-button",       # 상단 툴바의 "사진" 버튼
     "image": ".se-component.se-image",
+    "video_btn": "button.se-video-toolbar-button",       # 상단 툴바의 "동영상" 버튼
+    "video": ".se-component.se-video",
     "font_size_btn": "button[class*='font-size'][class*='toolbar-button']",   # 글자 크기 (19 ▾)
     "font_color_btn": "button[class*='font-color'][class*='toolbar-button']", # 글자 색
     "bg_color_btn": "button[class*='background-color'][class*='toolbar-button']",  # 글자 배경색(형광펜)
@@ -798,6 +800,75 @@ def _insert_heading_parts(page: Page, editor, heads, st: dict, screenshot_dir: P
     return fallback
 
 
+_MARK_VIDEO_STEP = r"""(words) => {
+    // 동영상 올리기 창에서 글자로 버튼을 찾는다 (예: '동영상 추가', '완료', '확인')
+    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const vis = e => e.getClientRects().length > 0 && !e.disabled && e.getAttribute("aria-disabled") !== "true";
+    for (const w of words) {
+        const el = [...document.querySelectorAll("button, label, a, [role=button]")].filter(vis)
+            .find(e => (e.innerText || e.getAttribute("aria-label") || "").replace(/\s+/g, "").includes(w.replace(/\s+/g, "")));
+        if (el) { el.setAttribute("data-nb-pick", "1"); return (el.innerText || w).trim().slice(0, 20); }
+    }
+    return "";
+}"""
+
+
+def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str, screenshot_dir: Path | None) -> bool:
+    """anchor 문단 뒤에 동영상을 올린다: 동영상 버튼 → 파일 고르기 → 처리 기다리기 → 제목 → 완료.
+    네이버 화면이 달라 못 넣으면 False (글은 그대로 저장되게 예외를 밖으로 던지지 않는다)"""
+    log = []
+    try:
+        if not _click_paragraph_end(page, editor, anchor):
+            log.append("영상 넣을 위치를 찾지 못함")
+            raise RuntimeError("위치")
+        before = editor.locator(SELECTORS["video"]).count()
+        btn = editor.locator(SELECTORS["video_btn"]).first
+        try:  # 버튼을 누르면 바로 파일 고르는 창이 뜨는 경우
+            with page.expect_file_chooser(timeout=6000) as fc:
+                btn.click()
+            fc.value.set_files(str(video))
+        except Exception:  # 올리기 창이 먼저 뜨는 경우: 창 안의 '동영상 추가' 버튼
+            picked = editor.evaluate(_MARK_VIDEO_STEP, ["동영상 추가", "동영상추가", "파일 선택", "동영상 선택", "추가"])
+            log.append(f"올리기 창 버튼: {picked or '못 찾음'}")
+            if not picked:
+                raise RuntimeError("올리기 버튼")
+            with page.expect_file_chooser(timeout=10000) as fc:
+                editor.locator("[data-nb-pick]").first.click()
+            fc.value.set_files(str(video))
+        log.append(f"파일 고름: {video.name}")
+        # 업로드·처리 기다리기 (최대 5분). 제목 칸이 비어 있으면 글 제목을 넣는다
+        for _ in range(100):
+            _pause(2.5, 3.5)
+            if editor.locator(SELECTORS["video"]).count() > before:
+                log.append("본문에 영상 들어옴")
+                return True
+            try:
+                box = editor.locator("input[placeholder*='제목'], textarea[placeholder*='제목']").first
+                if box.count() and box.is_visible() and not box.input_value().strip():
+                    box.fill(title[:60])
+                    log.append("영상 제목 넣음")
+            except Exception:
+                pass
+            done = editor.evaluate(_MARK_VIDEO_STEP, ["완료", "확인", "등록"])
+            if done:
+                editor.locator("[data-nb-pick]").first.click()
+                log.append(f"'{done}' 누름")
+        log.append("5분 기다려도 본문에 영상이 안 들어옴")
+    except Exception as e:
+        log.append(f"오류: {str(e).splitlines()[0][:80]}")
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
+    if screenshot_dir:
+        try:
+            (screenshot_dir / "editor_video.txt").write_text("\n".join(log) + "\n\n" + editor.evaluate(_DUMP_BUTTONS),
+                                                            encoding="utf-8")
+        except Exception:
+            pass
+    return False
+
+
 def _insert_photo_after(page: Page, editor, photo: Path, anchor: str):
     """anchor 문단 끝에 커서를 두고 사진을 올린다. (사진은 커서 위치 다음에 들어간다)"""
     if not _click_paragraph_end(page, editor, anchor):
@@ -921,17 +992,19 @@ def _type_caption(page: Page, editor, anchor: str, caption: str) -> bool:
 
 
 def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screenshot_dir: Path | None = None,
-                  key_lines=(), captions: dict | None = None) -> int:
+                  key_lines=(), captions: dict | None = None, title_hint: str = "") -> int:
     """글자를 전부 먼저 입력하고, 그다음 사진을 제자리에 끼워 넣는다.
     사진을 올린 뒤 커서를 다시 글 칸으로 옮기는 동작이 불안정해서 이렇게 나눴다.
     실패한 사진은 건너뛰고, 넣은 사진 수를 돌려준다."""
     st = {**TEXT_STYLE, **(style or {})}
     blocks, heads = _with_placeholders(blocks, st)
-    texts = [(k, v) for k, v in blocks if k not in ("photo", "quote")]
-    photos, quotes, anchor = [], [], None
+    texts = [(k, v) for k, v in blocks if k not in ("photo", "quote", "video")]
+    photos, quotes, videos, anchor = [], [], [], None
     for kind, value in blocks:
         if kind == "photo":
             photos.append((value, anchor))
+        elif kind == "video":
+            videos.append((value, anchor))
         elif kind == "quote":
             quotes.append((value, anchor))  # 인용구는 글자를 다 친 뒤 제자리에 끼워 넣는다
         else:
@@ -980,6 +1053,9 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screens
 
     if captions:
         print(f"  사진 설명: {n_cap}/{len([p for p, _ in photos if str(p) in captions])}장")
+    for video, v_anchor in videos:  # 사진 다음에: 영상은 업로드·처리가 오래 걸린다
+        ok = _insert_video_after(page, editor, Path(video), v_anchor or first_line, title_hint, screenshot_dir)
+        print(f"  짧은 영상: {'넣음' if ok else '못 넣음 (output/editor_video.txt 참고, 글은 그대로 저장해요)'}")
 
     # 사진 다음에 넣어야 같은 자리에서 구분선 → 소제목 → 사진 순서가 된다
     fallback = _insert_heading_parts(page, editor, heads, st, screenshot_dir) if heads else []
@@ -1115,7 +1191,7 @@ def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, aut
             _pause()
             blocks = post.blocks(photos, media)
             done = _write_blocks(page, editor, blocks, style, screenshot_dir, post.key_lines(),
-                                 captions=post.photo_captions(photos, media))
+                                 captions=post.photo_captions(photos, media), title_hint=post.title)
             total = sum(1 for k, _ in blocks if k == "photo")
             print(f"  네이버 입력: 본문 완료, 사진 {done}/{total}장")
             _pause(1.5, 3.0)

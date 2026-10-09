@@ -695,12 +695,17 @@ def main():
                 print(f"  스레드 글 저장: {tfile.name} ({len(posts)}개 게시물)")
             except Exception as e:
                 print(f"  스레드 글은 건너뜀: {e}")
-        if cfg.get("clip", {}).get("auto", False) and not reused:
+        # 짧은 영상: 이 글의 그림·카드로 만든 세로 영상을 글 안(첫 소제목 뒤)에도 넣는다 — 영상은 체류 시간을 늘린다
+        # (끄려면 config [clip] in_post = false. 쇼핑 블로그는 기본으로 넣지 않는다)
+        in_post = cfg.get("clip", {}).get("in_post", not cfg["writing"].get("shopping"))
+        if (cfg.get("clip", {}).get("auto", False) or in_post) and not reused:
             try:
                 from clip_maker import load_saved, make_clip
-                make_clip(load_saved(OUTPUT / f"{dt.date.today()}_{slug}.json"), cfg)
+                clip = make_clip(load_saved(OUTPUT / f"{dt.date.today()}_{slug}.json"), cfg)
+                if in_post and clip and Path(clip).exists():
+                    media["video"] = Path(clip)
             except Exception as e:
-                print(f"  클립은 건너뜀: {e}")
+                print(f"  짧은 영상은 건너뜀: {str(e).splitlines()[0][:100]}")
         confirmed = [m for m in post.metrics if not m.pending]
         if not confirmed:
             print("  ⚠ 확인된 지표가 하나도 없어요 (규칙: 검증 가능한 지표 최소 1개)")

@@ -67,3 +67,5 @@ speed = "+15%"
 voice_rate = 220
 # music 폴더에 넣은 배경음악 크기 (0.05 아주 작게 ~ 0.25 크게)
 music_volume = 0.12
+# 글 안(첫 소제목 뒤)에도 이 짧은 영상을 넣는다 (체류 시간). 끄려면 false
+in_post = true

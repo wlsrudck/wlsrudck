@@ -103,13 +103,14 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
                 return None
             ok, why = check_card_text(path, [title, *points], writing)
             if ok:
-                return path
+                return ai_images.stamp(path)
             print(f"  (그림 글자 다시: {title} — {why})")
             if retries <= 0:
                 break
             retries -= 1
             ai_left += 1  # 다시 그리는 건 장수에 세지 않는다 (retries 로 따로 막는다)
-        return ai_make(ai_images.card_prompt(title, points, s.heading, text, character, with_text=False), out, aspect="4:3")
+        path = ai_make(ai_images.card_prompt(title, points, s.heading, text, character, with_text=False), out, aspect="4:3")
+        return ai_images.stamp(path) if path else None
 
     if getattr(post, "table_rows", None):
         try:
@@ -133,6 +134,10 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
         media["summary_card"] = images.make_summary_card(post.title, post.summary, folder / "summary.jpg", slug, brand,
                                                          bg=card_bg)
 
+    if card_bg:  # AI 배경을 깐 카드에도 표시
+        for k in ("metrics_card", "summary_card"):
+            if media.get(k):
+                ai_images.stamp(media[k])
     used_ids: set[int] = set()
     thumb_photo = None
     if ai_left and not photos and cfg.get("thumbnail", True):
@@ -180,9 +185,11 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             continue
         picked = None
         if ai_left:
-            picked = (ai_card(s, i) if illust else
-                      ai_make(ai_images.section_prompt(s.heading, s.key_line + " " + " ".join(s.paragraphs), keyword or post.title),
-                              folder / f"ai_{i + 1:02d}.png"))
+            picked = ai_card(s, i) if illust else ai_make(
+                ai_images.section_prompt(s.heading, s.key_line + " " + " ".join(s.paragraphs), keyword or post.title),
+                folder / f"ai_{i + 1:02d}.png")
+            if picked and not illust:
+                ai_images.stamp(picked)
             n_ai += bool(picked)
         if not picked and policy and writing:
             try:
@@ -235,6 +242,8 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     if cfg.get("thumbnail", True):
         media["thumbnail"] = images.make_thumbnail(post.title, folder / "thumbnail.jpg", slug, post.thumbnail_text,
                                                    photo=thumb_photo, brand=brand)
+        if thumb_photo and Path(thumb_photo).name.startswith("ai_") and media["thumbnail"]:
+            ai_images.stamp(media["thumbnail"])  # AI 배경 썸네일에도 표시
     print(f"  이미지 준비: 썸네일 {('사진형' if thumb_photo else '매거진형') if 'thumbnail' in media else '없음'}, "
           f"지표 카드 {'만듦' if 'metrics_card' in media else '없음'}, "
           f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 비교표 {'만듦' if 'table' in media else '없음'}, 소제목 이미지: AI {n_ai}장 + 정책브리핑 사진 {n_policy}장 + 내용에 맞는 무료 사진 {n_stock}장 + 소제목 카드 {n_card}장")

@@ -20,7 +20,8 @@ PREFERRED = ["gemini-2.5-flash-image", "gemini-2.5-flash-image-preview", "imagen
              "imagen-3.0-generate-002", "gemini-2.0-flash-preview-image-generation"]
 STYLE = ("사실적인 사진 느낌, 자연광, 깔끔하고 밝은 색감, 한국의 생활 공간(아파트·원룸·사무실·거리) 배경. "
          "그림 안에 글자·숫자·간판 문구·로고·워터마크를 절대 넣지 않습니다(책 표지·노트·화면·포장에도 읽히는 글자 없이, 무늬나 흐릿하게). 실존 인물·연예인·정치인을 그리지 않습니다. "
-         "사람이 나오면 뒷모습이나 손 위주로, 얼굴이 크게 보이지 않게. 가로형 16:9 구도.")
+         "사람이 나오면 뒷모습이나 손 위주로, 얼굴이 크게 보이지 않게. 의사·약사·간호사·변호사처럼 전문가로 보이는 "
+         "인물(가운·청진기·약국 카운터 등)은 그리지 않습니다. 가로형 16:9 구도.")
 
 # 일러스트 방식 (config [images] ai_style = "illustration"): 블로그마다 캐릭터 하나·색 하나로 모든 그림을 통일한다.
 # 캐릭터는 처음 한 번 그려 output/ai_character.png 에 두고, 이후 그림마다 참고 그림으로 같이 보내 같은 얼굴로 그리게 한다.
@@ -33,7 +34,9 @@ CHARACTERS = {
            "믿음직한 파랑(#1971c2)과 하늘색"),
 }
 ILLUST = ("밝고 따뜻한 3D 카툰 일러스트(부드러운 조명, 둥근 형태, 맑은 색감), 깔끔한 방·책상 배경에 화분·책·머그컵 같은 소품. "
-          "메인 색: {color}. 실존 인물·연예인·정치인을 그리지 않고 로고·워터마크를 넣지 않습니다.")
+          "메인 색: {color}. 실존 인물·연예인·정치인을 그리지 않고 로고·워터마크를 넣지 않습니다. "
+          "캐릭터에게 의사 가운·청진기·약사 복장처럼 전문가로 보이는 차림을 입히지 않습니다. "
+          "실제 판매 상품(특정 브랜드 제품)을 그리지 않습니다.")
 
 _model_cache: dict[str, str] = {}
 
@@ -156,6 +159,27 @@ def section_prompt(heading: str, text: str, keyword: str) -> str:
     return (f"네이버 블로그 글 '{keyword}'의 소제목 '{heading}'에 넣을 이미지.\n"
             f"이 부분 내용: {text[:300]}\n"
             "내용을 한눈에 떠올리게 하는 장면 하나를 그려 주세요 (사물·장소·손동작 중심). 주제와 상관없는 물건은 넣지 않습니다.")
+
+
+def stamp(path: Path, label: str = "AI 생성") -> Path:
+    """오른쪽 아래에 작은 'AI 생성' 표시를 얹는다 (AI 로 만든 그림이라는 걸 그림 가까이에서 알리기)"""
+    try:
+        from PIL import Image, ImageDraw
+        from images import _font
+        im = Image.open(path).convert("RGB")
+        w, h = im.size
+        size = max(14, w // 45)
+        font = _font(size)
+        d = ImageDraw.Draw(im, "RGBA")
+        tw = d.textlength(label, font=font)
+        pad, m = size // 2, size
+        box = (w - m - tw - pad * 2, h - m - size - pad * 2, w - m, h - m)
+        d.rounded_rectangle(box, radius=size, fill=(0, 0, 0, 120))
+        d.text((box[0] + pad, box[1] + pad - size // 8), label, font=font, fill=(255, 255, 255, 235))
+        im.save(path)
+    except Exception as e:
+        print(f"  (AI 표시 넣기 실패: {str(e).splitlines()[0][:60]})")
+    return path
 
 
 def illust_style(color: str, text_ok: bool) -> str:

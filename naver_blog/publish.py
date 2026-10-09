@@ -902,7 +902,9 @@ _VIDEO_START_SHOWN = r"""() => {
     // 올리기 창이 아직 첫 화면('동영상 추가 / MYBOX' 고르는 화면)인지
     const pop = document.querySelector(".se-popup-video-upload, [data-name*='video-upload']");
     if (!pop) return false;
-    const b = pop.querySelector(".nvu_local") ||
+    // 파일이 들어가면 '동영상 추가' 버튼은 그대로 있고(더 넣기용) 파일 이름·삭제·제목 칸·완료가 생긴다
+    if (pop.querySelector(".nvu_btn_delete, .nvu_btn_submit, .nvu_inp") || /업로드|\.mp4/i.test(pop.innerText || "")) return false;
+    const b = pop.querySelector(".nvu_local, .nvu_btn_local") ||
         [...pop.querySelectorAll("button")].find(e => (e.innerText || "").replace(/\s+/g, "") === "동영상추가");
     return !!(b && b.getClientRects().length);
 }"""
@@ -934,7 +936,7 @@ def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str
         put = False
         # 1) 사람처럼 올리기 창의 '동영상 추가'(내 컴퓨터) 버튼 → 파일 고르는 창
         for fr in frames:
-            local = fr.locator(".se-popup-video-upload .nvu_local, [data-name*='video-upload'] .nvu_local")
+            local = fr.locator(".se-popup-video-upload :is(.nvu_local, .nvu_btn_local), [data-name*='video-upload'] :is(.nvu_local, .nvu_btn_local)")
             if local.count():
                 btn, picked = local.first, "동영상 추가(nvu_local)"
             else:
@@ -1016,15 +1018,23 @@ def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str
                 continue
             for fr in frames:
                 try:
-                    box = fr.locator(".se-popup-video-upload input[placeholder*='제목'], .se-popup-video-upload textarea[placeholder*='제목'], "
-                                     "[data-name*='video-upload'] input[placeholder*='제목']").first
+                    box = fr.locator(".se-popup-video-upload :is(input.nvu_inp, input[placeholder*='제목'], textarea[placeholder*='제목']), "
+                                     "[data-name*='video-upload'] :is(input.nvu_inp, input[placeholder*='제목'])").first
                     if box.count() and box.is_visible() and not box.input_value().strip():
                         box.fill(title[:60])
                         log.append("영상 제목 넣음")
                 except Exception:
                     pass
                 # 올리기 창 안의 '완료'(없으면 '등록')만 누른다. 창이 없으면 아무것도 누르지 않는다
-                done = _safe_eval(fr, _MARK_VIDEO_STEP, ["완료", "등록"]) if _safe_eval(fr, _VIDEO_POPUP_INFO, None) else ""
+                info = _safe_eval(fr, _VIDEO_POPUP_INFO, None)
+                if not info or ("업로드 중" in info or "%" in info.split("\n", 1)[0]) and "업로드 완료" not in info:
+                    continue  # 올리는 중에는 완료를 누르지 않는다
+                sub = fr.locator(".se-popup-video-upload .nvu_btn_submit, [data-name*='video-upload'] .nvu_btn_submit")
+                if sub.count() and sub.first.is_visible() and sub.first.is_enabled():
+                    sub.first.click()
+                    log.append("'완료'(nvu_btn_submit) 누름")
+                    break
+                done = _safe_eval(fr, _MARK_VIDEO_STEP, ["완료", "등록"])
                 if done:
                     fr.locator("[data-nb-pick]").first.click()
                     log.append(f"'{done}' 누름")

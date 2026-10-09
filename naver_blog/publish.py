@@ -204,6 +204,10 @@ def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | N
                     out.append((line.strip(), None, st["q_color"] if line.startswith("Q. ") else st["a_color"], False, False))
     for line in key_lines:
         out.append((line.strip(), None, st["key_color"], True, bool(st["key_underline"])))
+    # 행동 한 줄(✔ …): 굵게 + 행동 색 (서체 4역할 중 '행동형')
+    for kind, value in blocks:
+        if kind == "text" and value.startswith("✔ "):
+            out.append((value.strip(), None, st["cta_color"], True, False))
     # 쇼핑커넥트 광고 표기: 빨간 굵은 글씨로 눈에 띄게 (글 맨 위 + 맨 아래)
     disc = next((v.strip() for k, v in blocks if k == "text" and "커넥트" in v and "수수료" in v), "")
     if disc:

@@ -40,7 +40,7 @@ TEXT_STYLE = {"heading_size": 24, "heading_color": "#00756a", "q_color": "#00756
               "key_color": "#d9480f", "key_underline": True,
               "divider_style": 3, "heading_box": "버티컬 라인",
               "toc_title_size": 19, "toc_color": "#555555", "quote_size": 19,
-              "disclosure_color": "#e03131"}
+              "disclosure_color": "#e03131", "cta_color": "#1971c2"}
 
 
 def is_qa(text: str) -> bool:
@@ -81,6 +81,8 @@ class Post(BaseModel):
     closing: list[str] = Field(description="마무리 3문장: ①독자 상황에 공감하며 도움이 됐다면 공감 부탁 "
                                                         "②비슷한 정보를 이어서 정리한다는 이웃 추가 안내 ③댓글로 상황·질문을 남기게 하는 참여 유도. "
                                                         "매번 다른 표현으로, 과장 없이")
+    action_line: str = Field(default="", description="마무리 바로 앞에 크게 강조할 '지금 할 행동' 한 줄(25자 안팎). "
+                                                     "예: '충전 전, 앱에서 이번 달 할인율부터 확인하세요'. 위 내용 요약 금지")
     next_teaser: str = Field(description="'다음 글 주제'가 주어졌을 때만 그 글을 예고하는 한 문장. 날짜 약속 없이. 없으면 빈 문자열")
     table_title: str = Field(default="", description="비교표 제목(예: 지류 vs 디지털 한눈에). 비교할 것이 없으면 빈 문자열")
     table_rows: list[list[str]] = Field(default=[], description="비교표. 첫 줄은 머리글, 2~4열·2~6줄, 칸마다 짧게(12자 안팎). "
@@ -186,6 +188,8 @@ class Post(BaseModel):
             out.append(("photo", media["summary_card"]))
         if self.shop_links:
             out.append(("text", f"👉 {self.shop_name or '제품'} 자세히 보기\n" + "\n".join(self.shop_links)))
+        if self.action_line.strip():
+            out.append(("text", "✔ " + self.action_line.strip()))
         if self.closing:
             out.append(("text", "\n".join(c.strip() for c in self.closing if c.strip())))
         if self.next_teaser.strip():
@@ -634,7 +638,8 @@ STYLE_RULES = """
 - 숫자가 나오는 주제면 '이런 경우라면 이만큼' 상황 계산 예시를 하나 꼭 넣습니다(예: "약값이 한 달 30만 원이면
   디지털 상품권 7% 할인으로 2만 1천 원 아껴요"). 계산에 쓰는 숫자는 조사 자료에 있는 것만, 계산은 정확하게.
 - 두 가지 이상을 견주는 내용(종류·요금제·조건 비교)은 table_rows 비교표로 한눈에 보여 줍니다.
-- 마무리는 위 내용을 되풀이하지 말고, 독자가 지금 할 행동 하나(확인할 곳·신청 순서)로 끝냅니다.
+- 독자가 지금 할 행동 하나(확인할 곳·신청 순서)를 action_line 에 씁니다. 위 내용을 되풀이하는 요약으로 끝내지 않습니다.
+- 강조는 한 화면에 하나: 소제목마다 key_line 하나만, 본문에서 굵게·색을 남발하지 않습니다.
 - 날짜는 "올해", "다음 달" 대신 "2026년 11월 5일"처럼 정확히 씁니다. 조사 자료로 확인되지 않은 최신 정보는
   "아직 확정되지 않았어요"처럼 불확실하다고 밝힙니다.
 - 키워드는 제목, 도입, 소제목 하나 이상에 자연스럽게 넣고, 본문에서 억지로 반복하지 않습니다.

@@ -521,7 +521,9 @@ def main():
         pass
     from version import VERSION
     root.title(f"{name or '네이버 블로그'} 자동화  (버전 {VERSION})")
-    root.geometry("940x640")
+    # 화면 높이에 맞춰 창을 키운다 (버튼이 많아져도 아래가 잘리지 않게. 그래도 넘치면 스크롤)
+    sh = root.winfo_screenheight()
+    root.geometry(f"960x{max(560, min(900, sh - 110))}+40+20")
     try:
         ttk.Style().theme_use("vista" if os.name == "nt" else "clam")
     except Exception:
@@ -530,8 +532,25 @@ def main():
     nb = ttk.Notebook(root)
     nb.pack(fill="both", expand=True, padx=8, pady=8)
 
-    run = ttk.Frame(nb, padding=12)
-    nb.add(run, text="  실행  ")
+    # 실행 탭: 버튼이 창보다 길면 마우스 휠·오른쪽 막대로 내려 볼 수 있게
+    outer = ttk.Frame(nb)
+    nb.add(outer, text="  실행  ")
+    canvas = tk.Canvas(outer, highlightthickness=0)
+    bar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+    canvas.configure(yscrollcommand=bar.set)
+    bar.pack(side="right", fill="y")
+    canvas.pack(side="left", fill="both", expand=True)
+    run = ttk.Frame(canvas, padding=12)
+    win = canvas.create_window((0, 0), window=run, anchor="nw")
+    run.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.bind("<Configure>", lambda e: canvas.itemconfigure(win, width=e.width))
+
+    def _wheel(e):
+        if nb.select() == str(outer) and run.winfo_height() > canvas.winfo_height():
+            canvas.yview_scroll(-1 if (getattr(e, "delta", 0) > 0 or getattr(e, "num", 0) == 4) else 1, "units")
+    root.bind_all("<MouseWheel>", _wheel, add="+")
+    root.bind_all("<Button-4>", _wheel, add="+")
+    root.bind_all("<Button-5>", _wheel, add="+")
     shop = is_shop()
     cs = is_cs()
     for col, (group, items) in enumerate(BUTTONS):

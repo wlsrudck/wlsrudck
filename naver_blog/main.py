@@ -342,6 +342,9 @@ def save_rows(rows):
         w.writerows(rows)
 
 
+DAILY_SAFE_MAX = 5
+
+
 def posted_today() -> int:
     today = dt.date.today().isoformat()
     if STATE.exists():
@@ -475,9 +478,15 @@ def main():
             print(f"  photos\\{slugify(r['keyword'])}")
         return
 
+    # 하루 최대 5개: 한동안 조용하다 하루 10~20개씩 쏟아지면 네이버가 자동·어뷰징으로 보고 노출을 떨어뜨리기 쉽다
+    # (꼭 더 쓰려면 config [publish] allow_over_5 = true)
+    if not pub.get("allow_over_5") and int(pub.get("max_posts_per_day", 2)) > DAILY_SAFE_MAX:
+        print(f"하루 글 수를 {pub['max_posts_per_day']}개 → {DAILY_SAFE_MAX}개로 줄여서 써요 (저품질 예방)")
+        pub["max_posts_per_day"] = DAILY_SAFE_MAX
     budget = min(pub["max_posts_per_run"], pub["max_posts_per_day"] - posted_today())
     if not args.dry_run and budget <= 0:
-        print(f"오늘 한도({pub['max_posts_per_day']}개)를 채웠습니다.")
+        print(f"오늘 한도({pub['max_posts_per_day']}개)를 채웠습니다. 내일 이어서 써요 "
+              "(하루에 몰아 쓰는 것보다 매일 꾸준히가 노출에 유리해요).")
         return
     if args.dry_run:
         budget = pub["max_posts_per_run"]
@@ -499,6 +508,9 @@ def main():
             sleep_minutes(pub["between_posts_minutes"], "다음 글까지 대기")
 
         keyword = row["keyword"]
+        from trending_keywords import CONTROVERSY
+        if CONTROVERSY.search(keyword):  # 직접 넣은 키워드는 쓰되, 사생활·범죄·정치 주제라는 걸 알려 준다
+            print(f"  ⚠ '{keyword}' 는 사람 신상·연애사·범죄·정치 쪽 키워드예요. 신고·저품질 위험이 있으니 발행 전에 한 번 더 봐 주세요.")
         memo_rest, videos = split_videos(row.get("memo", ""))
         if videos:  # 메모의 유튜브 주소는 글감이 아니라 넣을 영상 → 메모에서 떼어 낸다
             row = {**row, "memo": memo_rest}

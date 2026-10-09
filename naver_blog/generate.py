@@ -288,6 +288,8 @@ class Post(BaseModel):
             credits.append("정책브리핑(공공누리 제1유형)")
         if any("pixabay" in Path(p).name for p in stock.values()):
             credits.append("Pixabay")
+        if any(Path(p).name.startswith("pexels_") for p in stock.values()):
+            credits.append("Pexels")
         if any(Path(p).name.startswith("commons_") for p in stock.values()):
             credits.append("위키미디어 공용(CC, 사진마다 작가 표시)")
         if any(Path(p).name.startswith("ai_") for p in stock.values()):

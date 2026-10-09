@@ -50,11 +50,14 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     folder.mkdir(parents=True, exist_ok=True)
     media = {"stock": {}}
 
-    key_file = ROOT / "pixabay_key.txt"
-    key = key_file.read_text(encoding="utf-8-sig").strip() if key_file.exists() else ""
-    use_stock = cfg.get("stock_photos", True) and bool(key)
-    if cfg.get("stock_photos", True) and not key:
-        print("  (pixabay_key.txt가 없어 무료 사진은 건너뜁니다)")
+    # 무료 사진: Pixabay(pixabay_key.txt) + Pexels(pexels_key.txt). 키가 있는 곳만 쓴다
+    def _key(name: str) -> str:
+        f = ROOT / name
+        return f.read_text(encoding="utf-8-sig").strip() if f.exists() else ""
+    stock_keys = {"pixabay": _key("pixabay_key.txt"), "pexels": _key("pexels_key.txt")}
+    use_stock = cfg.get("stock_photos", True) and any(stock_keys.values())
+    if cfg.get("stock_photos", True) and not use_stock:
+        print("  (pixabay_key.txt·pexels_key.txt가 없어 무료 사진은 건너뜁니다)")
 
     # AI 이미지 (Google Gemini, google_key.txt 가 있을 때). 글 하나에 ai_max 장까지 (비용 조절)
     import ai_images
@@ -165,7 +168,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
         elif use_stock and post.thumbnail_query.strip() and writing:
             # 썸네일도 후보 여러 장 중 Claude가 제목에 맞는 사진만 고른다. 없으면 매거진형(글자) 썸네일
             try:
-                cands = images.pixabay_candidates(post.thumbnail_query, key, folder, used_ids, n=6)
+                cands = images.stock_candidates(post.thumbnail_query, stock_keys, folder, used_ids, n=6)
                 if cands:
                     previews = [images.candidate_preview(h, folder / "_candidates") for h in cands]
                     n = choose_photo(post.title, " ".join(post.intro), previews, writing)
@@ -239,9 +242,9 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
                 if len(cands) >= 6:
                     break
                 try:
-                    found = images.pixabay_candidates(q, key, folder, seen, n=6 - len(cands))
+                    found = images.stock_candidates(q, stock_keys, folder, seen, n=6 - len(cands))
                 except urllib.error.HTTPError as e:
-                    hint = "pixabay_key 파일의 키를 확인하세요" if e.code in (400, 401) else "Pixabay가 접속을 막았습니다"
+                    hint = "pixabay_key·pexels_key 파일의 키를 확인하세요" if e.code in (400, 401, 403) else "사진 사이트가 접속을 막았습니다"
                     print(f"  무료 사진 검색 실패: HTTP {e.code} ({hint}). 소제목 카드로 대신합니다.")
                     use_stock = False
                     break
@@ -257,6 +260,8 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
                     if n:
                         picked = images.save_candidate(cands[n - 1], folder)
                         used_ids.add(cands[n - 1]["id"])
+                        if cands[n - 1].get("credit"):  # Pexels: 사진 아래에 작가 표시
+                            media.setdefault("credits", {})[str(picked)] = cands[n - 1]["credit"]
                         n_stock += 1
                 except Exception as e:
                     print(f"  무료 사진 고르기 실패({s.heading[:15]}): {str(e).splitlines()[0][:60]}")

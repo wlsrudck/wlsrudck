@@ -438,7 +438,7 @@ def pixabay_photo(query: str, api_key: str, out_dir: Path, exclude: set[int]) ->
         if hit["id"] in exclude or _has_brand(hit) or _has_crime(hit, query) or _off_topic(hit, query) \
                 or _taken("photo", hit["id"], out_dir):
             continue
-        out = out_dir / f"pixabay_{hit['id']}.jpg"
+        out = out_dir / f"{hit.get('source', 'pixabay')}_{hit['id']}.jpg"
         if not out.exists():
             with _get(hit["largeImageURL"], 60) as r:
                 out.write_bytes(r.read())
@@ -485,6 +485,45 @@ def pixabay_candidates(query: str, api_key: str, out_dir: Path, exclude: set[int
         hits = json.load(r).get("hits", [])
     return [h for h in hits if h["id"] not in exclude and not _has_brand(h) and not _has_crime(h, query)
             and not _unsafe(h, query) and not _taken("photo", h["id"], out_dir)][:n]
+
+
+PEXELS_BASE = 10 ** 12  # Pexels 사진 번호를 Pixabay 번호와 겹치지 않게
+
+
+def pexels_candidates(query: str, api_key: str, out_dir: Path, exclude: set[int], n: int = 6) -> list[dict]:
+    """Pexels 무료 사진 (상업적 사용 가능, 출처 표시 권장). Pixabay 후보와 같은 모양으로 돌려준다"""
+    url = "https://api.pexels.com/v1/search?" + urllib.parse.urlencode(
+        {"query": query, "orientation": "landscape", "per_page": 30})
+    req = urllib.request.Request(url, headers={"Authorization": api_key, "User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        photos = json.load(r).get("photos", [])
+    hits = []
+    for p in photos:
+        src = p.get("src") or {}
+        alt = (p.get("alt") or "").lower()
+        hits.append({"id": PEXELS_BASE + int(p["id"]), "source": "pexels", "tags": ",".join(re.findall(r"[a-z]+", alt)),
+                     "webformatURL": src.get("medium") or src.get("large"), "previewURL": src.get("small"),
+                     "largeImageURL": src.get("large2x") or src.get("large") or src.get("original"),
+                     "credit": f"사진: {p.get('photographer') or 'Pexels'} / Pexels"})
+    return [h for h in hits if h["id"] not in exclude and h["largeImageURL"] and not _has_brand(h)
+            and not _has_crime(h, query) and not _unsafe(h, query) and not _taken("photo", h["id"], out_dir)][:n]
+
+
+def stock_candidates(query: str, keys: dict, out_dir: Path, exclude: set[int], n: int = 6) -> list[dict]:
+    """Pixabay + Pexels 후보를 번갈아 섞어 n 장까지. 한쪽이 실패해도 다른 쪽은 쓴다 (둘 다 실패하면 마지막 오류를 낸다)"""
+    lists, err = [], None
+    for name, fn in (("pixabay", pixabay_candidates), ("pexels", pexels_candidates)):
+        if not keys.get(name):
+            continue
+        try:
+            lists.append(fn(query, keys[name], out_dir, exclude, n))
+        except Exception as e:
+            err = e
+            print(f"  ({name} 사진 검색 실패: {str(e).splitlines()[0][:60]})")
+    if not lists and err:
+        raise err
+    mixed = [h for group in zip(*[lst + [None] * (n - len(lst)) for lst in lists]) for h in group if h]
+    return mixed[:n]
 
 
 def candidate_preview(hit: dict, folder: Path) -> Path:

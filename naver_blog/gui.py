@@ -38,6 +38,7 @@ BUTTONS = [
         ("업데이트 받기", "18_update.bat", "새 버전을 인터넷에서 받아 매인·쇼핑·생활메모지기 폴더에 한 번에 깔아요"),
         ("네이버 로그인", "2_login.bat", "로그인이 풀렸을 때 다시 로그인해요"),
         ("구글 AI 키 넣기", "@google_key", "Google AI Studio 에서 만든 키를 붙여 넣어 저장해요"),
+        ("Pexels 키 넣기", "@pexels_key", "무료 사진 사이트 Pexels 키 (pexels.com/api 에서 무료로 받아요)"),
         ("AI 이미지 시험", "16_ai_image_test.bat", "이 블로그 캐릭터와 소제목 그림 한 장을 만들어 봐요"),
         ("그림 스타일 바꾸기", "20_image_style.bat", "AI 그림을 자동 / 카드형 일러스트 / 실사 사진 중에서 골라요 (이 블로그만)"),
         ("사진 폴더 만들기", "2-5_make_photo_folders.bat", "키워드별 내 사진 폴더를 만들어요"),
@@ -85,6 +86,20 @@ def save_google_key() -> None:
     messagebox.showinfo("저장", "저장했어요. [AI 이미지 시험]을 눌러 확인해 보세요.")
 
 
+def save_pexels_key() -> None:
+    """Pexels 무료 사진 키를 붙여 넣어 pexels_key.txt 로 저장"""
+    from tkinter import simpledialog
+    key = simpledialog.askstring("Pexels 키 넣기", "pexels.com/api 에서 받은 키를 붙여 넣으세요 (Ctrl+V)", show="*")
+    if not key:
+        return
+    key = key.strip().strip('"').strip("'").strip()
+    if len(key) < 20 or " " in key:
+        messagebox.showerror("키 확인", f"키가 아닌 것 같아요 (글자 {len(key)}개). Pexels API 화면의 키를 다시 복사해 주세요.")
+        return
+    (ROOT / "pexels_key.txt").write_text(key, encoding="utf-8")
+    messagebox.showinfo("저장", "저장했어요. 다음 글부터 Pixabay와 Pexels 두 곳에서 사진을 찾아요.")
+
+
 def open_path(p: Path) -> None:
     if os.name == "nt":
         os.startfile(p)  # noqa
@@ -97,7 +112,7 @@ def open_path(p: Path) -> None:
 AUTO_KEYWORD = "(상품명 자동)"
 SHOP_CATEGORIES = ["주방템", "청소·세탁템", "수납·정리템", "자취 꿀템 모음"]
 SHOP_HIDDEN = {"11_trending_keywords.bat", "21_news_keywords.bat", "12_evergreen_keywords.bat", "7_season_keywords.bat", "13_autofill_keywords.bat",
-               "@google_key", "16_ai_image_test.bat"}
+               "@google_key", "@pexels_key", "16_ai_image_test.bat"}
 
 
 def is_cs() -> bool:
@@ -515,7 +530,7 @@ def main():
         lf.grid(row=0, column=col, sticky="nsew", padx=6)
         run.columnconfigure(col, weight=1)
         for label, bat, tip in items:
-            cmd = save_google_key if bat == "@google_key" else (lambda b=bat: run_bat(b))
+            cmd = {"@google_key": save_google_key, "@pexels_key": save_pexels_key}.get(bat) or (lambda b=bat: run_bat(b))
             ttk.Button(lf, text=label, command=cmd).pack(fill="x", pady=(6, 0))
             ttk.Label(lf, text=tip, foreground="#777", wraplength=250).pack(fill="x")
     bottom = ttk.Frame(run)

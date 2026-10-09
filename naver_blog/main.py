@@ -138,7 +138,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             retries -= 1
             ai_left += 1  # 다시 그리는 건 장수에 세지 않는다 (retries 로 따로 막는다)
         path = ai_make(ai_images.card_prompt(title, points, s.heading, text, character, with_text=False, idx=i + shift), out,
-                       aspect="4:3")
+                       style=ai_images.illust_style(color, False), aspect="4:3")
         return ai_images.stamp(path) if path else None
 
     if getattr(post, "table_rows", None):
@@ -698,7 +698,11 @@ def main():
         # 짧은 영상: 이 글의 그림·카드로 만든 세로 영상을 글 안(첫 소제목 뒤)에도 넣는다 — 영상은 체류 시간을 늘린다
         # (끄려면 config [clip] in_post = false. 쇼핑 블로그는 기본으로 넣지 않는다)
         in_post = cfg.get("clip", {}).get("in_post", not cfg["writing"].get("shopping"))
-        if (cfg.get("clip", {}).get("auto", False) or in_post) and not reused:
+        made_clip = OUTPUT / f"{dt.date.today()}_{slug}_클립" / "clip.mp4"
+        if in_post and reused and made_clip.exists():  # 오늘 써 둔 글을 다시 넣을 때: 그때 만든 영상을 그대로
+            media["video"] = made_clip
+            print("  짧은 영상: 아까 만든 영상을 그대로 써요")
+        elif cfg.get("clip", {}).get("auto", False) or in_post:
             try:
                 from clip_maker import load_saved, make_clip
                 clip = make_clip(load_saved(OUTPUT / f"{dt.date.today()}_{slug}.json"), cfg)

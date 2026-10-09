@@ -270,7 +270,9 @@ def card_prompt(title: str, points: list[str], heading: str, text: str, characte
     """소제목 일러스트 카드. with_text=False 면 글자 없이 장면만. idx: 몇 번째 소제목(배경·동작을 바꾼다)"""
     scene = (f"참고 그림의 캐릭터({character}, 같은 얼굴·머리·옷)가 소제목 '{heading}' 내용에 어울리는 소품과 함께 "
              f"'{POSES[idx % len(POSES)]}' 동작을 하는 장면. 배경: 내용에 딱 맞는 장소가 있으면 그곳, 없으면 "
-             f"{BACKGROUNDS[idx % len(BACKGROUNDS)]}. 내용: {text[:200]}")
+             f"{BACKGROUNDS[idx % len(BACKGROUNDS)]}. 내용: {text[:200]}\n"
+             "배경의 가게 간판·현수막·표지판·가격표·상자는 글자 없는 색 판이나 단순한 무늬로만 그립니다 "
+             "(가게·브랜드 이름, 가짜 한글·영어 글자를 쓰지 않습니다).")
     if not with_text:
         return "블로그 소제목 일러스트. " + scene
     labels = ", ".join(f"「{p}」" for p in points[:3])

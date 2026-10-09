@@ -22,6 +22,19 @@ STYLE = ("사실적인 사진 느낌, 자연광, 깔끔하고 밝은 색감, 한
          "그림 안에 글자·숫자·간판 문구·로고·워터마크를 절대 넣지 않습니다(책 표지·노트·화면·포장에도 읽히는 글자 없이, 무늬나 흐릿하게). 실존 인물·연예인·정치인을 그리지 않습니다. "
          "사람이 나오면 뒷모습이나 손 위주로, 얼굴이 크게 보이지 않게. 가로형 16:9 구도.")
 
+# 일러스트 방식 (config [images] ai_style = "illustration"): 블로그마다 캐릭터 하나·색 하나로 모든 그림을 통일한다.
+# 캐릭터는 처음 한 번 그려 output/ai_character.png 에 두고, 이후 그림마다 참고 그림으로 같이 보내 같은 얼굴로 그리게 한다.
+CHARACTERS = {
+    "main": ("동그란 안경을 쓴 단발머리 한국인 캐릭터, 밝은 표정, 베이지 가디건과 흰 티셔츠",
+             "싱그러운 초록(#2f9e44)과 연한 민트"),
+    "shop": ("포니테일 머리의 한국인 캐릭터, 웃는 얼굴, 크림색 앞치마와 줄무늬 티셔츠",
+             "따뜻한 베이지와 코랄(#ff8a65)"),
+    "cs": ("짧은 머리에 작은 헤드셋을 쓴 친절한 한국인 상담원 캐릭터, 파란 조끼와 흰 셔츠",
+           "믿음직한 파랑(#1971c2)과 하늘색"),
+}
+ILLUST = ("밝고 따뜻한 3D 카툰 일러스트(부드러운 조명, 둥근 형태, 맑은 색감), 깔끔한 방·책상 배경에 화분·책·머그컵 같은 소품. "
+          "메인 색: {color}. 실존 인물·연예인·정치인을 그리지 않고 로고·워터마크를 넣지 않습니다.")
+
 _model_cache: dict[str, str] = {}
 
 
@@ -84,17 +97,26 @@ def pick_model(key: str, wanted: str = "") -> str:
     return model
 
 
-def generate(prompt: str, out: Path, key: str, model: str = "") -> Path:
-    """이미지 한 장을 만들어 out 에 저장. 실패하면 예외"""
+def _inline(path: Path) -> dict:
+    data = path.read_bytes()
+    mime = "image/png" if data[:4] == b"\x89PNG" else "image/webp" if data[8:12] == b"WEBP" else "image/jpeg"
+    return {"inlineData": {"mimeType": mime, "data": base64.b64encode(data).decode()}}
+
+
+def generate(prompt: str, out: Path, key: str, model: str = "", style: str | None = None, aspect: str = "16:9",
+             refs: list[Path] | None = None) -> Path:
+    """이미지 한 장을 만들어 out 에 저장. 실패하면 예외.
+    style: 그림 방식 설명(없으면 글자 없는 사진 느낌), refs: 참고 그림(같은 캐릭터로 그리게)"""
     model = pick_model(key, model)
-    full = f"{prompt}\n\n{STYLE}"
+    full = f"{prompt}\n\n{style if style is not None else STYLE}"
     if model.startswith("imagen"):
         d = _req(f"{API}/models/{model}:predict?key={key}",
-                 {"instances": [{"prompt": full}], "parameters": {"sampleCount": 1, "aspectRatio": "16:9"}})
+                 {"instances": [{"prompt": full}], "parameters": {"sampleCount": 1, "aspectRatio": aspect}})
         b64 = (d.get("predictions") or [{}])[0].get("bytesBase64Encoded", "")
     else:
-        body = {"contents": [{"parts": [{"text": full}]}],
-                "generationConfig": {"responseModalities": ["IMAGE", "TEXT"], "imageConfig": {"aspectRatio": "16:9"}}}
+        parts = [_inline(r) for r in (refs or []) if r and Path(r).is_file()] + [{"text": full}]
+        body = {"contents": [{"parts": parts}],
+                "generationConfig": {"responseModalities": ["IMAGE", "TEXT"], "imageConfig": {"aspectRatio": aspect}}}
         try:
             d = _req(f"{API}/models/{model}:generateContent?key={key}", body)
         except urllib.error.HTTPError as e:
@@ -136,7 +158,48 @@ def section_prompt(heading: str, text: str, keyword: str) -> str:
             "내용을 한눈에 떠올리게 하는 장면 하나를 그려 주세요 (사물·장소·손동작 중심). 주제와 상관없는 물건은 넣지 않습니다.")
 
 
-if __name__ == "__main__":  # 시험: python ai_images.py "주제"
+def illust_style(color: str, text_ok: bool) -> str:
+    rule = ("" if text_ok else " 그림 안에 글자·숫자·간판 문구를 넣지 않습니다(종이·화면·포장의 글자도 무늬로).")
+    return ILLUST.format(color=color) + rule
+
+
+def character_ref(key: str, character: str, color: str, path: Path, model: str = "") -> Path | None:
+    """블로그 캐릭터 기준 그림. 없으면 한 번 만든다 (지우면 다음 글에서 새 캐릭터로 다시 만든다)"""
+    if path.is_file():
+        return path
+    prompt = (f"블로그 마스코트 캐릭터 기준 그림: {character}. 상반신, 정면을 보고 웃는 모습, 단색 밝은 배경에 캐릭터 하나만. "
+              "앞으로 여러 그림에서 같은 얼굴·머리·옷으로 다시 그릴 기준이 되도록 또렷하게.")
+    try:
+        return generate(prompt, path, key, model, style=illust_style(color, False), aspect="1:1")
+    except Exception as e:
+        print(f"  (캐릭터 기준 그림 실패: {explain(e)})")
+        return None
+
+
+def card_prompt(title: str, points: list[str], heading: str, text: str, character: str, with_text: bool = True) -> str:
+    """소제목 일러스트 카드. with_text=False 면 글자 없이 장면만"""
+    scene = (f"참고 그림의 캐릭터({character}, 같은 얼굴·머리·옷)가 소제목 '{heading}' 내용에 어울리는 동작과 소품과 함께 있는 장면 "
+             f"(예: 노트북 앞에서 턱을 괴고 웃기, 손가락으로 가리키기). 내용: {text[:200]}")
+    if not with_text:
+        return "블로그 소제목 일러스트. " + scene
+    labels = ", ".join(f"「{p}」" for p in points[:3])
+    return ("블로그 소제목 일러스트 카드. " + scene + "\n"
+            f"위쪽 가운데에 아주 크고 두꺼운 한글 제목 「{title}」 — 이 글자를 한 글자도 바꾸지 말고 정확히 씁니다.\n"
+            + (f"제목 아래에 둥근 카드 {len(points[:3])}개를 나란히 놓고, 카드마다 아이콘 하나와 짧은 한글 라벨 {labels} 를 "
+               "글자 그대로 정확히 씁니다.\n" if points else "")
+            + "이 제목과 라벨 말고는 어떤 글자·숫자·영어 낙서도 넣지 않습니다. 글자는 또렷하고 큼직하게.")
+
+
+def _blog_mode() -> str:
+    try:
+        import tomllib
+        cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8-sig"))
+    except Exception:
+        return "main"
+    return "shop" if cfg.get("shopping", {}).get("enabled") else "cs" if cfg.get("cs", {}).get("enabled") else "main"
+
+
+if __name__ == "__main__":  # 시험: 이 블로그 캐릭터 + 소제목 일러스트 카드 한 장
     import sys
     k = load_key()
     if not k:
@@ -145,9 +208,16 @@ if __name__ == "__main__":  # 시험: python ai_images.py "주제"
         sys.exit(1)
     m = pick_model(k)
     print(f"쓸 모델: {m}")
+    character, color = CHARACTERS[_blog_mode()]
+    out_dir = ROOT / "output"
+    out_dir.mkdir(exist_ok=True)
     try:
-        p = generate(section_prompt("시험", sys.argv[1] if len(sys.argv) > 1 else "원룸 책상 위 가습기", "시험"),
-                     ROOT / "output" / "ai_test.png", k)
+        ref = character_ref(k, character, color, out_dir / "ai_character.png")
+        if ref:
+            print(f"이 블로그 캐릭터: {ref}  (마음에 안 들면 이 파일을 지우고 다시 시험하면 새로 그려요)")
+        topic = sys.argv[1] if len(sys.argv) > 1 else "원룸 겨울 난방비 아끼기"
+        p = generate(card_prompt("난방비 아끼기", ["문풍지 붙이기", "온도 20도", "가습기 켜기"], topic, topic, character),
+                     out_dir / "ai_test.png", k, style=illust_style(color, True), aspect="4:3", refs=[ref] if ref else None)
         print(f"만들었어요: {p}")
         try:
             import os

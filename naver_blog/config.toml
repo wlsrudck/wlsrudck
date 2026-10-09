@@ -18,6 +18,10 @@ thumbnail = true        # 글 맨 위에 제목 썸네일 카드 자동 생성
 summary_card = true     # 글 끝에 "한눈에 정리" 카드 자동 생성
 stock_photos = true     # 직접 찍은 사진이 없는 소제목에 Pixabay 무료 사진 넣기 (pixabay_key.txt 필요)
 max_stock_photos = 3    # 글 하나에 넣을 무료 사진 최대 개수
+# AI 그림 (google_key.txt 필요). illustration = 블로그 캐릭터 일러스트(소제목 그림에 제목·핵심 글자), photo = 글자 없는 사진 느낌
+# ai_style = "illustration"
+# ai_character = "동그란 안경을 쓴 단발머리 한국인 캐릭터, 밝은 표정, 베이지 가디건"   # 비워 두면 블로그 종류별 기본 캐릭터
+# ai_color = "싱그러운 초록(#2f9e44)과 연한 민트"
 
 [writing]
 model = "claude-opus-5"

@@ -32,6 +32,9 @@ class Section(BaseModel):
     key_line: str = Field(default="", description="이 소제목에서 독자가 꼭 기억할 한 줄(가격·날짜·핵심 팁 등). "
                                                   "paragraphs 안의 한 줄을 글자 그대로 복사. '아직 확인되지 않았다' 같은 "
                                                   "모른다는 문장은 고르지 않음. 확인된 사실이 없으면 빈 문자열")
+    card_title: str = Field(default="", description="소제목 그림 위에 크게 쓸 제목(번호 없이 10자 이내). 예: '네이버 메이트'")
+    card_points: list[str] = Field(default=[], description="소제목 그림 속 작은 카드 3개에 쓸 핵심(각 7자 이내, 조사 자료 사실만). "
+                                                           "예: ['신청 없음', '매월 선정', '반복 가능']")
 
 
 # 소제목·Q&A 글자 꾸미기 기본값. config.toml의 [style]에서 바꿀 수 있다
@@ -42,6 +45,13 @@ TEXT_STYLE = {"heading_size": 24, "heading_color": "#00756a", "q_color": "#00756
               "toc_title_size": 19, "toc_color": "#555555", "quote_size": 19,
               "disclosure_color": "#e03131", "cta_color": "#1971c2",
               "key_style": "highlight", "highlight_color": "#fff3bf"}
+
+
+RECAP_DOTS = "🟢🔵🟣🟠🔴🟡"
+
+
+def is_recap(text: str) -> bool:
+    return text[:1] in RECAP_DOTS and "\n“" in text
 
 
 def is_qa(text: str) -> bool:
@@ -61,6 +71,13 @@ class Metric(BaseModel):
 class QA(BaseModel):
     question: str
     answer: str
+
+
+class RecapItem(BaseModel):
+    name: str = Field(description="견준 것 하나의 이름(12자 이내). 예: 네이버 메이트")
+    says: str = Field(description="그것을 한마디로 말하는 한 줄(25자 이내, 따옴표 없이). 그것이 독자에게 말하듯. "
+                                  "예: 이번 달 당신 콘텐츠 좋네요.")
+    points: list[str] = Field(description="→ 로 붙일 짧은 정리 2개(각 18자 이내, 조사 자료 사실만). 예: ['네이버가 매월 자동 선정', '반복 선정 가능']")
 
 
 class Post(BaseModel):
@@ -89,6 +106,10 @@ class Post(BaseModel):
     table_rows: list[list[str]] = Field(default=[], description="비교표. 첫 줄은 머리글, 2~3열·2~6줄(모바일용), 칸마다 핵심 단어·숫자만(10자 안팎). "
                                                                "조사 자료의 숫자만. 두 가지 이상을 견줄 거리가 있으면 꼭 만들고, 없으면 빈 목록")
     table_after: int = Field(default=1, description="비교표를 넣을 소제목 번호(1부터). 그 소제목 글 바로 뒤에 들어감")
+    recap_title: str = Field(default="", description="글 끝 '한눈에 다시 보기' 제목. 독자 질문처럼. 예: '결국 네 가지가 어떻게 다를까?'. "
+                                                     "recap이 없으면 빈 문자열")
+    recap: list[RecapItem] = Field(default=[], description="글 끝 요약: 글에서 견주거나 나눈 것(종류·방법·단계)이 2~5개일 때 하나씩. "
+                                                           "없으면 빈 목록")
     related: list[int] = Field(description="'내 블로그의 다른 글' 목록에서 이 글과 관련 있는 글 번호(최대 5개). 목록이 없거나 관련 글이 없으면 빈 목록")
     # 아래 둘은 프로그램이 채운다 (Claude에게 보내는 답 형식에서는 빠진다)
     links: SkipJsonSchema[list[str]] = []
@@ -140,7 +161,8 @@ class Post(BaseModel):
 
     def all_text(self) -> str:
         """금지 표현 점검용: 제목, 이미지 문구, 본문, 태그 전부"""
-        return "\n".join([self.title, *self.thumbnail_text, *self.summary, self.body_text(), *self.tags])
+        recap = [t for r in self.recap for t in (r.name, r.says, *r.points)]
+        return "\n".join([self.title, *self.thumbnail_text, *self.summary, self.body_text(), *recap, *self.tags])
 
     def blocks(self, photos: list[Path], media: dict | None = None):
         """에디터에 넣을 순서대로 ("heading"|"text"|"photo", 값)을 돌려준다.
@@ -179,6 +201,13 @@ class Post(BaseModel):
             out.extend(("text", p) for p in s.paragraphs)
             if media.get("table") and i + 1 == max(1, min(self.table_after, len(self.sections))):
                 out.append(("photo", media["table"]))
+        if self.recap:  # 한눈에 다시 보기: 🟢 이름 / "한마디" / → 정리 두 줄
+            if self.recap_title.strip():
+                out.append(("heading", self.recap_title.strip()))
+            for dot, r in zip(RECAP_DOTS, self.recap):
+                says = r.says.strip().strip('"“”')
+                lines = [f"{dot} {r.name.strip()}", f"“{says}”", *[f"→ {p.strip()}" for p in r.points[:3]]]
+                out.append(("text", "\n".join(lines)))
         if self.qa:
             out.append(("heading", "자주 묻는 질문"))
             for q in self.qa:
@@ -254,6 +283,10 @@ class Post(BaseModel):
             elif kind == "photo":
                 rel = os.path.relpath(value, out_dir).replace(os.sep, "/")
                 body.append(f'<img src="{html.escape(rel)}">')
+            elif is_recap(value):
+                name, says, *pts = value.split("\n")
+                body.append(f'<p><b style="color:{st["heading_color"]}">{html.escape(name)}</b><br><b>{html.escape(says)}</b><br>'
+                            + "<br>".join(f'<span style="color:#555">{html.escape(x)}</span>' for x in pts) + "</p>")
             elif is_qa(value):
                 q, a = value.split("\n", 1)
                 body.append(f'<p><b style="color:{st["q_color"]}">{html.escape(q)}</b><br>'
@@ -659,6 +692,15 @@ STYLE_RULES = """
 - '내 블로그의 다른 글' 목록이 주어지면 이 글과 정말 관련 있는 글만 related에 고릅니다. 본문에서 "○○는 따로 정리해 뒀어요"처럼
   그 글 제목을 자연스럽게 한두 번 언급해도 됩니다. 주소는 프로그램이 글 끝에 붙입니다.
 
+[한눈에 다시 보기]
+- 글에서 종류·방법·단계 2~5개를 견주거나 나눴다면 recap에 하나씩 담고 recap_title을 독자 질문처럼 씁니다.
+  says는 그것이 독자에게 건네는 한마디처럼 짧게(예: 네이버 메이트 → 이번 달 당신 콘텐츠 좋네요.), points는 → 로 붙일 사실 2개.
+  본문 내용을 바꿔 말하는 정리일 뿐, 새로운 사실을 지어내지 않습니다. 견줄 것이 하나뿐이면 빈 목록.
+
+[소제목 그림 글자]
+- 소제목마다 card_title(번호 없이 10자 이내)과 card_points(7자 이내 3개)를 씁니다. 그림 속에 그대로 그려지므로
+  짧고 맞춤법이 정확한 말, 조사 자료로 확인된 사실만 씁니다. 금액·날짜처럼 틀리면 안 되는 숫자는 넣지 않습니다.
+
 [핵심 한 줄]
 - 소제목마다 key_line에 독자가 꼭 기억할 한 줄(금액, 날짜, 조건, 핵심 팁)을 paragraphs 안에서 글자 그대로 골라 적습니다.
   이 줄은 색과 밑줄로 강조됩니다. 강조할 만한 줄이 없으면 빈 문자열."""
@@ -787,6 +829,22 @@ def choose_photo(heading: str, context: str, previews: list[Path], cfg: dict) ->
     except Exception as e:
         print(f"  (사진 고르기 실패: {str(e).splitlines()[0][:60]})")
         return 0
+
+
+def check_card_text(path: Path, expected: list[str], cfg: dict) -> tuple[bool, str]:
+    """AI 가 그린 그림 속 한글이 맞게 쓰였는지 Claude 가 읽어 본다. (맞음?, 이유)"""
+    client = anthropic.Anthropic(api_key=_api_key(), max_retries=3)
+    want = "\n".join(f"- {t}" for t in expected if t.strip())
+    content = [_image_block(path), {"type": "text", "text": (
+        "이 그림에 쓰인 글자를 모두 읽어 보세요. 들어가야 할 글자:\n" + want + "\n\n"
+        "위 글자가 모두 맞춤법 그대로 또렷하게 보이고, 그 밖에 깨지거나 뜻 없는 글자·틀린 한글이 없으면 첫 줄에 OK, "
+        "하나라도 틀리거나 빠지거나 이상한 글자가 있으면 첫 줄에 NG 를 쓰고 둘째 줄에 무엇이 틀렸는지 짧게 쓰세요.")}]
+    try:
+        res = client.messages.create(model=cfg["model"], max_tokens=2000, messages=[{"role": "user", "content": content}])
+        text = "".join(b.text for b in res.content if b.type == "text").strip()
+        return text.upper().startswith("OK"), text.split("\n", 1)[-1][:60]
+    except Exception as e:
+        return False, f"확인 실패 {str(e).splitlines()[0][:40]}"
 
 
 def naver_suggest(keyword: str, limit: int = 10) -> list[str]:

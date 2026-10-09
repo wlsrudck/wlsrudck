@@ -21,8 +21,9 @@ from pathlib import Path
 
 import urllib.error
 
+import ai_images
 import images
-from generate import (UNKNOWN, NotEnoughInfo, Post, SearchFailed, checklist, choose_photo, find_photos, generate_post,
+from generate import (UNKNOWN, NotEnoughInfo, Post, SearchFailed, check_card_text, checklist, choose_photo, find_photos, generate_post,
                       make_threads, my_posts, polish_saved, experience_memo)
 
 ROOT = Path(__file__).parent
@@ -59,13 +60,24 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     ai_key = ai_images.load_key() if cfg.get("ai_images", True) and writing else ""
     ai_left = int(cfg.get("ai_max", 7)) if ai_key else 0
     ai_model = cfg.get("ai_model", "")
+    # 일러스트 방식: 블로그 캐릭터 하나·색 하나로 모든 그림 통일, 소제목 그림에 제목·핵심 3개 글자까지 (Claude 가 맞춤법 확인)
+    illust = ai_left > 0 and cfg.get("ai_style", "illustration") == "illustration"
+    character = cfg.get("ai_character") or ai_images.CHARACTERS["main"][0]
+    color = cfg.get("ai_color") or ai_images.CHARACTERS["main"][1]
+    plain_style = ai_images.illust_style(color, False) if illust else None  # 글자 없는 그림 (썸네일·카드 배경)
+    refs = []
+    if illust:
+        ref = ai_images.character_ref(ai_key, character, color, OUTPUT / "ai_character.png", ai_model)
+        refs = [ref] if ref else []
+    retries = 3  # 글자가 틀려 다시 그리는 횟수 (글 하나에)
 
-    def ai_make(prompt: str, out: Path) -> Path | None:
+    def ai_make(prompt: str, out: Path, style: str | None = None, aspect: str = "16:9") -> Path | None:
         nonlocal ai_left
         if ai_left <= 0:
             return None
         try:
-            path = ai_images.generate(prompt, out, ai_key, ai_model)
+            path = ai_images.generate(prompt, out, ai_key, ai_model, style=style if style is not None else plain_style,
+                                      aspect=aspect, refs=refs)
             ai_left -= 1
             return path
         except Exception as e:
@@ -73,6 +85,31 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             if "403" in str(e) or "429" in str(e) or "400" in str(e):
                 ai_left = 0  # 키·결제 문제면 이번 글에서는 더 시도하지 않는다
             return None
+
+    def ai_card(s, i: int) -> Path | None:
+        """소제목 일러스트 카드: 글자가 틀리면 다시 그리고, 그래도 틀리면 글자 없는 그림으로"""
+        nonlocal ai_left, retries
+        title = (s.card_title or re.sub(r"^\d+\.\s*", "", s.heading)).strip()[:14]
+        points = [p.strip() for p in s.card_points if p.strip()][:3]
+        text = s.key_line + " " + " ".join(s.paragraphs)
+        out = folder / f"ai_{i + 1:02d}.png"
+        prompt = ai_images.card_prompt(title, points, s.heading, text, character)
+        style = ai_images.illust_style(color, True)
+        for attempt in range(2):
+            if ai_left <= 0:
+                return None
+            path = ai_make(prompt, out, style=style, aspect="4:3")
+            if not path:
+                return None
+            ok, why = check_card_text(path, [title, *points], writing)
+            if ok:
+                return path
+            print(f"  (그림 글자 다시: {title} — {why})")
+            if retries <= 0:
+                break
+            retries -= 1
+            ai_left += 1  # 다시 그리는 건 장수에 세지 않는다 (retries 로 따로 막는다)
+        return ai_make(ai_images.card_prompt(title, points, s.heading, text, character, with_text=False), out, aspect="4:3")
 
     if getattr(post, "table_rows", None):
         try:
@@ -84,13 +121,15 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
 
     # 지표·요약 카드: AI 배경 한 장 위에 프로그램이 숫자·글자를 정확히 얹는다 (AI가 글자를 그리면 숫자가 틀릴 수 있어서)
     card_bg = None
-    if ai_left and ((cfg.get("metrics_card", True) and post.metrics) or (cfg.get("summary_card", True) and post.summary)):
+    # 글 끝 '한눈에 다시 보기'(🟢🔵…)가 있으면 요약 카드는 같은 말 되풀이라 빼다
+    want_summary = cfg.get("summary_card", True) and post.summary and not post.recap
+    if ai_left and ((cfg.get("metrics_card", True) and post.metrics) or want_summary):
         card_bg = ai_make(f"블로그 글 '{post.title}'의 정보 카드 배경. 주제와 어울리는 사물·공간을 은은하게, 넓은 여백, "
                           "가운데는 비교적 단순하게.", folder / "ai_cardbg.png")
     if cfg.get("metrics_card", True) and post.metrics:
         media["metrics_card"] = images.make_metrics_card(post.metrics, post.metrics_basis, folder / "metrics.jpg", slug, brand,
                                                          bg=card_bg)
-    if cfg.get("summary_card", True) and post.summary:
+    if want_summary:
         media["summary_card"] = images.make_summary_card(post.title, post.summary, folder / "summary.jpg", slug, brand,
                                                          bg=card_bg)
 
@@ -141,8 +180,9 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             continue
         picked = None
         if ai_left:
-            picked = ai_make(ai_images.section_prompt(s.heading, s.key_line + " " + " ".join(s.paragraphs), keyword or post.title),
-                             folder / f"ai_{i + 1:02d}.png")
+            picked = (ai_card(s, i) if illust else
+                      ai_make(ai_images.section_prompt(s.heading, s.key_line + " " + " ".join(s.paragraphs), keyword or post.title),
+                              folder / f"ai_{i + 1:02d}.png"))
             n_ai += bool(picked)
         if not picked and policy and writing:
             try:
@@ -356,6 +396,13 @@ def main():
         cfg["writing"]["min_chars"] = cs.get("min_chars", 1300)
         cfg["writing"]["max_chars"] = cs.get("max_chars", 2200)
         print("[고객센터 블로그 모드] 공식 홈페이지에서 확인한 번호·시간만 써요. 확인 못 하면 건너뛰어요")
+    # 블로그마다 그림 캐릭터·색 (config [images] ai_character / ai_color 로 바꿀 수 있음)
+
+    mode = "shop" if shop.get("enabled") else "cs" if cs.get("enabled") else "main"
+    img = cfg.setdefault("images", {})
+    img.setdefault("ai_character", ai_images.CHARACTERS[mode][0])
+    img.setdefault("ai_color", ai_images.CHARACTERS[mode][1])
+
 
     rows = load_rows()
     pending = [r for r in rows if not (r.get("status") or "").strip()]

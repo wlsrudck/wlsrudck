@@ -8,7 +8,7 @@ from pathlib import Path
 from playwright.sync_api import Frame, Page, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
-from generate import TEXT_STYLE, Post, is_qa
+from generate import TEXT_STYLE, Post, is_qa, is_recap
 from login import STATE_PATH
 
 # 네이버가 에디터를 개편하면 여기만 고치면 된다. (클래스명 뒤 해시가 바뀌므로 부분 일치 사용)
@@ -208,6 +208,12 @@ def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | N
             out.append((line.strip(), None, None, True, False, False, st["highlight_color"]))
         else:
             out.append((line.strip(), None, st["key_color"], True, bool(st["key_underline"])))
+    # 한눈에 다시 보기: '🟢 이름' 은 소제목 색 굵게, '“한마디”' 는 굵게 (→ 줄은 그대로)
+    for kind, value in blocks:
+        if kind == "text" and is_recap(value):
+            name, says, *_ = value.split("\n")
+            out.append((name.strip(), None, st["heading_color"], True, False))
+            out.append((says.strip(), None, "#222222", True, False))
     # 행동 한 줄(✔ …): 굵게 + 행동 색 (서체 4역할 중 '행동형')
     for kind, value in blocks:
         if kind == "text" and value.startswith("✔ "):

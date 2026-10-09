@@ -68,7 +68,7 @@ def fill(cfg: dict, need: int) -> list[str]:
     print(f"\n키워드가 떨어져서 {need}개를 자동으로 골라요 ({' + '.join(mix)})")
     # 각 출처에서 한 번씩만 찾아 두고, 번갈아 하나씩 뽑는다 (한쪽이 모자라면 다른 쪽에서 채운다)
     pools = {}
-    for m in mix:
+    for m in dict.fromkeys(mix):  # "trending,trending,evergreen" 처럼 같은 걸 두 번 적으면 그 비율(2:1)로 섞는다
         pools[m] = evergreen_candidates(cfg, keys) if m == "evergreen" else trending_candidates(cfg)
     picked: list[dict] = []
     taken: set = set()

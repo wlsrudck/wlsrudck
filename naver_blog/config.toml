@@ -37,7 +37,7 @@ threads = true          # 스레드(Threads)용 연속 게시물도 output 폴�
 [autofill]
 # keywords.csv 에 쓸 키워드가 떨어지면 자동으로 골라 넣고 글을 써요 (발행은 안 하고 임시저장까지만)
 enabled = true
-mix = "evergreen,trending"   # 평생 키워드 + 지금 뜨는 키워드를 번갈아
+mix = "evergreen,trending"   # 평생 키워드 + 지금 뜨는 키워드를 번갈아 (홈판 유입이 많으면 "trending,trending,evergreen" = 2:1)
 count = 0                    # 한 번에 몇 개 (0 = 하루 최대 글 수만큼)
 
 [style]

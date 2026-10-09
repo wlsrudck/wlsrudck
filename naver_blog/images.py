@@ -78,6 +78,31 @@ def make_thumbnail(title: str, out: Path, seed: str, phrase: list[str] | None = 
     return _thumb_magazine(lines, out, rng.choice(MARKERS), brand)
 
 
+def make_collage(photos: list[Path], out: Path, gap: int = 8) -> Path | None:
+    """사진 2~4장을 1080×1080 한 장으로 (모아보기 썸네일용: 여러 글이 들어 있다는 게 한눈에 보이게)"""
+    ims = []
+    for p in photos[:4]:
+        try:
+            with Image.open(p) as src:
+                ims.append(ImageOps.exif_transpose(src).convert("RGB"))
+        except Exception:
+            continue
+    if len(ims) < 2:
+        return None
+    canvas = Image.new("RGB", (1080, 1080), "white")
+    if len(ims) == 2:
+        boxes = [(0, 0, 1080, 536), (0, 544, 1080, 1080)]
+    elif len(ims) == 3:
+        boxes = [(0, 0, 1080, 536), (0, 544, 536, 1080), (544, 544, 1080, 1080)]
+    else:
+        h = (1080 - gap) // 2
+        boxes = [(0, 0, h, h), (h + gap, 0, 1080, h), (0, h + gap, h, 1080), (h + gap, h + gap, 1080, 1080)]
+    for im, (x0, y0, x1, y1) in zip(ims, boxes):
+        canvas.paste(ImageOps.fit(im, (x1 - x0, y1 - y0), Image.LANCZOS), (x0, y0))
+    canvas.save(out, quality=92)
+    return out
+
+
 def _thumb_photo(lines, out, photo: Path, brand: str) -> Path:
     with Image.open(photo) as src:
         im = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGB"), (1080, 1080), Image.LANCZOS)

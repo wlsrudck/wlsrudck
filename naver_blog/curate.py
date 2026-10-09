@@ -98,6 +98,32 @@ def enrich(posts: list[dict]) -> None:
             p["text"] = extra
 
 
+def post_images(urls: list[str], folder: Path) -> list[Path]:
+    """묶은 글들의 대표 사진(og:image)을 받는다 (모아보기 썸네일 콜라주용). 못 받으면 건너뛴다"""
+    folder.mkdir(parents=True, exist_ok=True)
+    out = []
+    for i, url in enumerate(urls[:4], 1):
+        try:
+            mobile = url.replace("://blog.naver.com/", "://m.blog.naver.com/")
+            req = urllib.request.Request(mobile, headers={"User-Agent": "Mozilla/5.0 (Linux; Android 14) Mobile"})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                page = r.read().decode("utf-8", "replace")
+            m = re.search(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', page)
+            if not m:
+                continue
+            img = html.unescape(m.group(1))
+            req = urllib.request.Request(img, headers={"User-Agent": "Mozilla/5.0", "Referer": mobile})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                data = r.read()
+            if len(data) > 5000:
+                p = folder / f"_og_{i}.jpg"
+                p.write_bytes(data)
+                out.append(p)
+        except Exception:
+            continue
+    return out
+
+
 def _history() -> list[dict]:
     try:
         return json.loads(HISTORY.read_text(encoding="utf-8"))
@@ -176,8 +202,10 @@ def main():
     slug = "모아보기_" + re.sub(r"[^0-9A-Za-z가-힣]+", "_", topic_name)[:20]
     folder = OUTPUT / f"{slug}_images"
     folder.mkdir(parents=True, exist_ok=True)
+    # 썸네일: 묶은 글들의 대표 사진 콜라주 + 큰 제목 (못 받으면 글자 썸네일)
+    collage = images.make_collage(post_images([p["url"] for p in picked], folder), folder / "collage.jpg")
     media = {"stock": {}, "thumbnail": images.make_thumbnail(post.title, folder / "thumbnail.jpg", slug,
-                                                            post.thumbnail_text, photo=None,
+                                                            post.thumbnail_text, photo=collage,
                                                             brand=cfg["naver"].get("blog_name", ""))}
     style = themed_style(cfg.get("style"), post.theme)
     preview = OUTPUT / f"{dt.date.today()}_{slug}.html"

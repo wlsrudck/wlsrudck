@@ -513,6 +513,12 @@ def main():
         name = load_config().get("naver", {}).get("blog_name", "")
     except Exception:
         name = ""
+    try:  # 바탕화면에 '클립 올리기' 바로가기 (없을 때 한 번)
+        import threading
+        from shortcut import ensure_clip_shortcut
+        threading.Thread(target=ensure_clip_shortcut, args=(name,), daemon=True).start()
+    except Exception:
+        pass
     from version import VERSION
     root.title(f"{name or '네이버 블로그'} 자동화  (버전 {VERSION})")
     root.geometry("940x640")

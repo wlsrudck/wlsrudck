@@ -470,27 +470,9 @@ def export_for_upload(folder: Path, slug: str, cfg: dict) -> Path | None:
     for extra, suffix in ((folder / "설명_해시태그.txt", "_설명.txt"), (folder / "scene_01.jpg", "_표지.jpg")):
         if extra.exists():
             shutil.copy2(extra, UPLOAD / f"{name}{suffix}")
-    ensure_shortcut(cfg)
+    from shortcut import ensure_clip_shortcut
+    ensure_clip_shortcut(cfg.get("naver", {}).get("blog_name", ""))
     return out
-
-
-def ensure_shortcut(cfg: dict) -> None:
-    """바탕화면에 '클립 올리기 (블로그 이름)' 바로가기를 한 번 만든다 (윈도우만)"""
-    import os
-    if os.name != "nt":
-        return
-    name = f"클립 올리기 ({cfg.get('naver', {}).get('blog_name') or ROOT.name})"
-    name = re.sub(r'[\\/:*?"<>|]', "", name)
-    ps = ("$d=[Environment]::GetFolderPath('Desktop'); $p=Join-Path $d ($env:LNK_NAME + '.lnk');"
-          "if (-not (Test-Path $p)) { $s=(New-Object -ComObject WScript.Shell).CreateShortcut($p);"
-          "$s.TargetPath=$env:LNK_TARGET; $s.Save(); 'made' }")
-    try:
-        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=30,
-                           env={**os.environ, "LNK_NAME": name, "LNK_TARGET": str(UPLOAD)})
-        if "made" in (r.stdout or ""):
-            print(f"      바탕화면에 '{name}' 바로가기를 만들었어요")
-    except Exception:
-        pass
 
 
 def make_clip(saved: dict, cfg: dict, blog: bool = False) -> Path:

@@ -726,6 +726,11 @@ STYLE_RULES = """
   "아직 확정되지 않았어요"처럼 불확실하다고 밝힙니다.
 - 키워드는 제목, 도입, 소제목 하나 이상에 자연스럽게 넣고, 본문에서 억지로 반복하지 않습니다.
 
+[독자에게 쓰는 글]
+- 글 안에 "원고 초안입니다", "요청하신 블로그 글입니다", "수정이 필요하시면 말씀해 주세요", "[사진 삽입]" 같은
+  글을 부탁한 사람에게 하는 말·자리 표시를 절대 넣지 않습니다. 모든 문장은 블로그 독자에게 하는 말입니다.
+- 인사는 글 처음에 한 번만(또는 없이). 중간에 "안녕하세요"로 다시 시작하지 않습니다.
+
 [문장 리듬]
 - 짧은 문장, 중간 문장, 조금 긴 문장을 섞되 같은 순서를 되풀이하지 않습니다.
 - "그리고, 또한, 하지만" 같은 접속어를 연달아 쓰지 않습니다. 이어지는 문단을 같은 말로 시작하지 않습니다.
@@ -757,6 +762,21 @@ STYLE_RULES = """
   이 줄은 색과 밑줄로 강조됩니다. 강조할 만한 줄이 없으면 빈 문자열."""
 
 
+# AI 에게 받은 답을 그대로 붙여 넣은 흔적 (독자에게 하는 말이 아니라 글 쓴 사람에게 하는 말)
+LEFTOVERS = [r"(원고|글|포스팅)\s*초안", r"블로그\s*(원고|글|포스팅)(입니다|이에요|예요)", r"(작성|정리)해\s*드렸습니다",
+             r"(작성|정리)해\s*드릴게요", r"요청하신", r"아래(는|에)\s*.{0,20}(원고|블로그 글|포스팅)", r"수정이\s*필요하시면",
+             r"필요하시면\s*말씀", r"\[[^\]]{1,15}(입력|삽입|넣기)\]", r"(이미지|사진)\s*(삽입|추가)\s*(위치|자리)"]
+
+
+def leftovers_in(post: "Post") -> list[str]:
+    text = post.all_text()
+    found = [m.group(0) for m in (re.search(p, text) for p in LEFTOVERS) if m]
+    middle = "\n".join(p for sec in post.sections for p in sec.paragraphs)  # 도입 뒤에 인사가 또 나오면 글 두 개를 이어 붙인 것
+    if re.search(r"안녕하세요|반갑습니다|찾아주셔서 감사", middle):
+        found.append("중간에 다시 인사")
+    return found
+
+
 def ai_phrases_in(post: "Post") -> list[str]:
     text = post.all_text()
     found = []
@@ -786,7 +806,7 @@ def checklist(post: "Post", memo: str, cfg: dict) -> list[tuple[str, bool, str]]
     greet = any(g in " ".join(post.intro) for g in ("안녕하세요", "반갑습니다", "안녕하십니까"))
     headings = [s for s in post.sections if s.heading.strip()]
     confirmed = [m for m in post.metrics if not m.pending]
-    banned, ai = banned_in(post), ai_phrases_in(post)
+    banned, ai, left = banned_in(post), ai_phrases_in(post), leftovers_in(post)
     has_memo = experience_memo(memo)
     return [
         ("도입 3줄", len(post.intro) == 3 and not greet, "인사말이 들어 있어요" if greet else f"{len(post.intro)}줄"),
@@ -802,6 +822,7 @@ def checklist(post: "Post", memo: str, cfg: dict) -> list[tuple[str, bool, str]]
         ("태그 한 줄", 3 <= len(post.tags) <= 15, f"{len(post.tags)}개"),
         ("금지어", not banned, "없음" if not banned else ", ".join(banned)),
         ("AI 말투", not ai, "없음" if not ai else ", ".join(ai)),
+        ("AI 답변 흔적", not left, "없음" if not left else "지워 주세요: " + ", ".join(left)),
         ("직접 경험(메모)", has_memo, "메모 반영" if has_memo else "메모 없음 → 정보글로만 작성"),
         ("글자 수", lo * 0.8 <= body_len <= hi * 1.3, f"{body_len}자 (목표 {lo}~{hi})"),
     ] + ([("광고 표기", bool(post.disclosure.strip()), "글 맨 위에 있음" if post.disclosure.strip() else "없음 → 꼭 넣기"),

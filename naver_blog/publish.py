@@ -813,6 +813,28 @@ _MARK_VIDEO_STEP = r"""(words) => {
 }"""
 
 
+_DROP_FILE = r"""([b64, name]) => {
+    // 동영상 올리기 창의 '끌어 놓는 자리'에 파일을 떨어뜨린다
+    const el = [...document.querySelectorAll("div, section, label")].filter(e => e.getClientRects().length)
+        .filter(e => /끌어\s*놓|드래그/.test(e.innerText || "")).sort((a, b) => a.innerText.length - b.innerText.length)[0];
+    if (!el) return "";
+    const bin = atob(b64), arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    const dt = new DataTransfer();
+    dt.items.add(new File([arr], name, {type: "video/mp4"}));
+    for (const ev of ["dragenter", "dragover", "drop"])
+        el.dispatchEvent(new DragEvent(ev, {bubbles: true, cancelable: true, dataTransfer: dt}));
+    return (el.className || el.tagName).toString().slice(0, 40);
+}"""
+
+
+def _safe_eval(frame, script: str, arg) -> str:
+    try:
+        return frame.evaluate(script, arg) or ""
+    except Exception:
+        return ""
+
+
 def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str, screenshot_dir: Path | None) -> bool:
     """anchor 문단 뒤에 동영상을 올린다: 동영상 버튼 → 파일 고르기 → 처리 기다리기 → 제목 → 완료.
     네이버 화면이 달라 못 넣으면 False (글은 그대로 저장되게 예외를 밖으로 던지지 않는다)"""
@@ -825,35 +847,67 @@ def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str
         frames = [editor] + [f for f in page.frames if f is not editor]  # 올리기 창이 다른 틀에 뜰 수도 있다
         editor.locator(SELECTORS["video_btn"]).first.click()
         _pause(1.5, 2.5)
-        # 1) 올리기 창 안에 숨은 '파일 넣는 칸'에 바로 넣는다 (끌어다 놓기와 같은 효과, 가장 확실)
+        # 파일을 넣고 나서 올리기 창이 정말 다음 단계로 넘어갔는지('동영상 추가' 버튼이 사라졌는지) 꼭 확인한다.
+        # 엉뚱한 칸(첨부 파일 칸 등)에 넣으면 아무 일도 안 일어나고 창이 그대로 멈춰 있기 때문
+        def moved_on() -> bool:
+            for _ in range(8):
+                _pause(1.2, 1.6)
+                if editor.locator(SELECTORS["video"]).count() > before:
+                    return True
+                if not any(_safe_eval(fr, _MARK_VIDEO_STEP, ["동영상 추가", "동영상추가"]) for fr in frames):
+                    return True
+            return False
+
         put = False
+        # 1) 사람처럼 '동영상 추가' 버튼 → 파일 고르는 창
         for fr in frames:
-            inputs = fr.locator("input[type=file]")
-            for k in range(inputs.count() - 1, -1, -1):  # 방금 뜬 창의 칸이 보통 맨 뒤
-                inp = inputs.nth(k)
-                accept = (inp.get_attribute("accept") or "").lower()
-                if accept and "video" not in accept and "mp4" not in accept:
-                    continue  # 사진 칸 등은 건너뛴다
+            picked = _safe_eval(fr, _MARK_VIDEO_STEP, ["동영상 추가", "동영상추가"])
+            if not picked:
+                continue
+            try:
+                with page.expect_file_chooser(timeout=8000) as fc:
+                    fr.locator("[data-nb-pick]").first.click()
+                fc.value.set_files(str(video))
+                put = moved_on()
+                log.append(f"'{picked}' → 파일 고르는 창: " + ("넘어감" if put else "창이 그대로"))
+            except Exception as e:
+                log.append(f"'{picked}' 버튼 실패: {str(e).splitlines()[0][:60]}")
+            break
+        # 2) 안 되면 창 안에 숨은 '파일 넣는 칸'에 바로 넣기 (영상용 칸부터, 넣을 때마다 넘어갔는지 확인)
+        if not put:
+            cands = []
+            for fr in frames:
+                inputs = fr.locator("input[type=file]")
+                for k in range(inputs.count() - 1, -1, -1):
+                    accept = (inputs.nth(k).get_attribute("accept") or "").lower()
+                    if accept and "video" not in accept and "mp4" not in accept:
+                        continue  # 사진 칸 등은 건너뛴다
+                    cands.append((0 if accept else 1, inputs.nth(k), accept))
+            for _, inp, accept in sorted(cands, key=lambda c: c[0]):
                 try:
                     inp.set_input_files(str(video))
-                    put = True
-                    log.append(f"파일 칸에 넣음 (accept={accept or '없음'})")
-                    break
                 except Exception as e:
                     log.append(f"파일 칸 넣기 실패: {str(e).splitlines()[0][:60]}")
-            if put:
-                break
-        # 2) 안 되면 '동영상 추가' 버튼 → 파일 고르는 창
-        if not put:
-            for fr in frames:
-                picked = fr.evaluate(_MARK_VIDEO_STEP, ["동영상 추가", "동영상추가", "동영상 선택", "파일 선택"])
-                if picked:
-                    log.append(f"올리기 창 버튼: {picked}")
-                    with page.expect_file_chooser(timeout=10000) as fc:
-                        fr.locator("[data-nb-pick]").first.click()
-                    fc.value.set_files(str(video))
-                    put = True
+                    continue
+                put = moved_on()
+                log.append(f"파일 칸(accept={accept or '없음'}): " + ("넘어감" if put else "창이 그대로"))
+                if put:
                     break
+        # 3) 그래도 안 되면 '이곳에 끌어 놓으세요' 자리에 파일을 끌어다 놓는다
+        if not put:
+            import base64
+            data = base64.b64encode(video.read_bytes()).decode()
+            for fr in frames:
+                try:
+                    ok = fr.evaluate(_DROP_FILE, [data, video.name])
+                except Exception as e:
+                    log.append(f"끌어 놓기 실패: {str(e).splitlines()[0][:60]}")
+                    continue
+                if ok:
+                    put = moved_on()
+                    log.append(f"끌어 놓기({ok}): " + ("넘어감" if put else "창이 그대로"))
+                    if put:
+                        break
         if not put:
             raise RuntimeError("영상 파일을 넣을 곳을 못 찾음")
         log.append(f"파일 고름: {video.name}")
@@ -862,6 +916,11 @@ def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str
             _pause(2.5, 3.5)
             if editor.locator(SELECTORS["video"]).count() > before:
                 log.append("본문에 영상 들어옴")
+                if screenshot_dir:
+                    try:
+                        (screenshot_dir / "editor_video.txt").write_text("\n".join(log), encoding="utf-8")
+                    except Exception:
+                        pass
                 return True
             for fr in frames:
                 try:

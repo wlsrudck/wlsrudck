@@ -44,14 +44,12 @@ class Section(BaseModel):
     key_line: str = Field(default="", description="이 소제목에서 독자가 꼭 기억할 한 줄(가격·날짜·핵심 팁 등). "
                                                   "paragraphs 안의 한 줄을 글자 그대로 복사. '아직 확인되지 않았다' 같은 "
                                                   "모른다는 문장은 고르지 않음. 확인된 사실이 없으면 빈 문자열")
-    card_type: str = Field(default="", description="이 소제목 그림 모양: 'info'(인포 카드 — 숫자·조건·이유·순서 3가지를 정리하는 부분) "
-                                                    "또는 ''(보통 그림). 한 글에 info 는 1~2개만")
-    card_lines: list[str] = Field(default=[], description="card_type 이 info 일 때 카드 3줄. 각 줄은 '굵은 키워드|짧은 설명' "
-                                                          "(키워드 10자, 설명 18자 이내, 조사 자료 사실만, 본문 문장 그대로 복사 금지). "
-                                                          "예: ['3.2조 기술수출|선급금 2,629억 원 포함', '10월 허가 기대|허가 후 한 달 안 출시']")
-    card_title: str = Field(default="", description="소제목 그림 위에 크게 쓸 제목(번호 없이 10자 이내). 예: '네이버 메이트'")
-    card_points: list[str] = Field(default=[], description="소제목 그림 속 작은 카드 3개에 쓸 핵심 '단어'(각 8자 이내, 문장 금지, "
-                                                           "본문 문장을 그대로 옮기지 않음). 예: ['신청 없음', '매월 선정', '반복 가능']")
+
+    # 아래 넷은 글을 다 쓴 뒤 따로 받는 '꾸미기' 정보 (decorate). 본문 요청 형식이 커지면 API 가 거절해서 나눴다
+    card_type: SkipJsonSchema[str] = ""
+    card_lines: SkipJsonSchema[list[str]] = []
+    card_title: SkipJsonSchema[str] = ""
+    card_points: SkipJsonSchema[list[str]] = []
 
 
 # 소제목·Q&A 글자 꾸미기 기본값. config.toml의 [style]에서 바꿀 수 있다
@@ -136,6 +134,87 @@ class RecapItem(BaseModel):
     points: list[str] = Field(description="→ 로 붙일 짧은 정리 2개(각 18자 이내, 조사 자료 사실만). 예: ['네이버가 매월 자동 선정', '반복 선정 가능']")
 
 
+class SectionDecor(BaseModel):
+    model_config = STRICT
+    number: int = Field(description="소제목 번호(1부터, 아래 글의 번호 그대로)")
+    card_type: str = Field( description="이 소제목 그림 모양: 'info'(인포 카드 — 숫자·조건·이유·순서 3가지를 정리하는 부분) "
+                                                    "또는 ''(보통 그림). 한 글에 info 는 1~2개만")
+    card_lines: list[str] = Field( description="card_type 이 info 일 때 카드 3줄. 각 줄은 '굵은 키워드|짧은 설명' "
+                                                          "(키워드 10자, 설명 18자 이내, 조사 자료 사실만, 본문 문장 그대로 복사 금지). "
+                                                          "예: ['3.2조 기술수출|선급금 2,629억 원 포함', '10월 허가 기대|허가 후 한 달 안 출시']")
+    card_title: str = Field( description="소제목 그림 위에 크게 쓸 제목(번호 없이 10자 이내). 예: '네이버 메이트'")
+    card_points: list[str] = Field( description="소제목 그림 속 작은 카드 3개에 쓸 핵심 '단어'(각 8자 이내, 문장 금지, "
+                                                           "본문 문장을 그대로 옮기지 않음). 예: ['신청 없음', '매월 선정', '반복 가능']")
+
+
+
+class Decor(BaseModel):
+    model_config = STRICT
+    recap_title: str = Field( description="글 끝 '한눈에 다시 보기' 제목. 독자 질문처럼. 예: '결국 네 가지가 어떻게 다를까?'. "
+                                                     "recap이 없으면 빈 문자열")
+    recap: list[RecapItem] = Field( description="글 끝 요약: 글에서 견주거나 나눈 것(종류·방법·단계)이 2~5개일 때 하나씩. "
+                                                           "없으면 빈 목록")
+    image_style: str = Field( description="이 글의 AI 그림 방식: 'photo'(실사 사진 — 장소·음식·물건·현장 모습이 중요한 글: "
+                                                     "여행, 맛집, 살림, 계절, 사건 현장, 날씨) 또는 'card'(카드형 일러스트 — 제목·핵심 3개 글자가 "
+                                                     "들어감. 제도·신청 방법·비교·절차·숫자 정리처럼 설명이 중요한 글)")
+    theme: str = Field( description="이 글 성격에 맞는 꾸밈 테마 이름 하나(글자 그대로): "
+                       + " / ".join(f"{k}({v[0]})" for k, v in THEMES.items()))
+    sections: list[SectionDecor] = Field(description="소제목마다 하나씩 (소제목이 있는 것만)")
+
+
+DECOR_RULES = """아래 블로그 글에 붙일 꾸미기 정보를 주세요. 글 내용(조사로 확인된 사실)만 쓰고 새 사실을 지어내지 않습니다.
+
+[한눈에 다시 보기]
+- 글에서 종류·방법·단계 2~5개를 견주거나 나눴다면 recap에 하나씩 담고 recap_title을 독자 질문처럼 씁니다.
+  says는 그것이 독자에게 건네는 한마디처럼 짧게(예: 네이버 메이트 → 이번 달 당신 콘텐츠 좋네요.), points는 → 로 붙일 사실 2개.
+  본문 내용을 바꿔 말하는 정리일 뿐, 새로운 사실을 지어내지 않습니다. 견줄 것이 하나뿐이면 빈 목록.
+
+[그림 방식]
+- image_style: 독자가 '모습'을 보고 싶어 하는 글(여행지, 음식, 살림 도구, 계절 풍경, 현장)은 photo,
+  '정리'를 보고 싶어 하는 글(지원금·제도·신청 순서·요금 비교·계산)은 card 를 고릅니다.
+
+[꾸밈 테마]
+- theme 에는 글 성격에 가장 어울리는 테마 이름 하나를 목록에서 글자 그대로 고릅니다(색과 인용구 모양이 바뀝니다).
+
+[인포 카드]
+- 숫자·조건·이유·순서처럼 '3가지로 정리되는' 소제목 1~2개에 card_type='info' 와 card_lines 3줄을 씁니다.
+  카드는 한눈에 보는 요약이고 자세한 설명은 본문에서 합니다. 같은 문장을 카드와 본문에 두 번 쓰지 않습니다.
+
+[소제목 그림 글자]
+- 소제목마다 card_title(번호 없이 10자 이내)과 card_points(8자 이내 단어 3개)를 씁니다. card_points 는 문장이 아니라
+  꼬리표 같은 단어입니다(예: '3.2조 계약', '10월 허가', '임상 1상'). 본문 문장을 그대로 옮기면 같은 말을 두 번 읽게 됩니다. 그림 속에 그대로 그려지므로
+  짧고 맞춤법이 정확한 말, 조사 자료로 확인된 사실만 씁니다. 금액·날짜처럼 틀리면 안 되는 숫자는 넣지 않습니다.
+
+"""
+
+
+def decorate(post: "Post", cfg: dict) -> None:
+    """글을 다 쓴 뒤 꾸미기 정보(인포 카드·그림 글자·테마·그림 방식·한눈에 다시 보기)를 작은 요청으로 따로 받는다.
+    실패해도 글은 그대로 (꾸미기 없이) 쓴다"""
+    lines = [f"제목: {post.title}"]
+    for i, sec in enumerate(post.sections, 1):
+        if sec.heading.strip():
+            lines.append(f"\n[{i}] {sec.heading}\n" + "\n".join(sec.paragraphs)[:700])
+    try:
+        client = anthropic.Anthropic(api_key=_api_key(), max_retries=4)
+        res = client.beta.messages.parse(
+            model=cfg["model"], max_tokens=4000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
+            messages=[{"role": "user", "content": DECOR_RULES + "\n\n" + "\n".join(lines)}], output_format=Decor)
+        d = res.parsed_output
+    except Exception as e:
+        print(f"  (꾸미기 정보 받기 실패 — 꾸미기 없이 써요: {str(e).splitlines()[0][:80]})")
+        return
+    if d is None:
+        return
+    post.theme, post.image_style = d.theme, d.image_style
+    post.recap_title, post.recap = d.recap_title, d.recap
+    for sd in d.sections:
+        if 1 <= sd.number <= len(post.sections):
+            sec = post.sections[sd.number - 1]
+            sec.card_type, sec.card_lines = sd.card_type, sd.card_lines
+            sec.card_title, sec.card_points = sd.card_title, sd.card_points
+
+
 class Post(BaseModel):
     model_config = STRICT
 
@@ -164,18 +243,13 @@ class Post(BaseModel):
     table_rows: list[list[str]] = Field(default=[], description="비교표. 첫 줄은 머리글, 2~3열·2~6줄(모바일용), 칸마다 핵심 단어·숫자만(10자 안팎). "
                                                                "조사 자료의 숫자만. 두 가지 이상을 견줄 거리가 있으면 꼭 만들고, 없으면 빈 목록")
     table_after: int = Field(default=1, description="비교표를 넣을 소제목 번호(1부터). 그 소제목 글 바로 뒤에 들어감")
-    recap_title: str = Field(default="", description="글 끝 '한눈에 다시 보기' 제목. 독자 질문처럼. 예: '결국 네 가지가 어떻게 다를까?'. "
-                                                     "recap이 없으면 빈 문자열")
-    recap: list[RecapItem] = Field(default=[], description="글 끝 요약: 글에서 견주거나 나눈 것(종류·방법·단계)이 2~5개일 때 하나씩. "
-                                                           "없으면 빈 목록")
-    image_style: str = Field(default="", description="이 글의 AI 그림 방식: 'photo'(실사 사진 — 장소·음식·물건·현장 모습이 중요한 글: "
-                                                     "여행, 맛집, 살림, 계절, 사건 현장, 날씨) 또는 'card'(카드형 일러스트 — 제목·핵심 3개 글자가 "
-                                                     "들어감. 제도·신청 방법·비교·절차·숫자 정리처럼 설명이 중요한 글)")
-    theme: str = Field(default="", description="이 글 성격에 맞는 꾸밈 테마 이름 하나(글자 그대로): "
-                       + " / ".join(f"{k}({v[0]})" for k, v in THEMES.items()))
     related: list[int] = Field(description="'내 블로그의 다른 글' 목록에서 이 글과 관련 있는 글 번호(최대 5개). 목록이 없거나 관련 글이 없으면 빈 목록")
     # 아래 둘은 프로그램이 채운다 (Claude에게 보내는 답 형식에서는 빠진다)
     links: SkipJsonSchema[list[str]] = []
+    recap_title: SkipJsonSchema[str] = ""  # ↓ 꾸미기 정보 (decorate 가 채운다)
+    recap: SkipJsonSchema[list[RecapItem]] = []
+    image_style: SkipJsonSchema[str] = ""
+    theme: SkipJsonSchema[str] = ""
     suggest: SkipJsonSchema[list[str]] = []  # 네이버 검색창 자동완성 연관 키워드 (점검표용)
     updated: SkipJsonSchema[str] = ""
     disclosure: SkipJsonSchema[str] = ""  # 쇼핑커넥트 광고 표기 (글 맨 위)
@@ -819,27 +893,6 @@ STYLE_RULES = """
 - '내 블로그의 다른 글' 목록이 주어지면 이 글과 정말 관련 있는 글만 related에 고릅니다. 본문에서 "○○는 따로 정리해 뒀어요"처럼
   그 글 제목을 자연스럽게 한두 번 언급해도 됩니다. 주소는 프로그램이 글 끝에 붙입니다.
 
-[한눈에 다시 보기]
-- 글에서 종류·방법·단계 2~5개를 견주거나 나눴다면 recap에 하나씩 담고 recap_title을 독자 질문처럼 씁니다.
-  says는 그것이 독자에게 건네는 한마디처럼 짧게(예: 네이버 메이트 → 이번 달 당신 콘텐츠 좋네요.), points는 → 로 붙일 사실 2개.
-  본문 내용을 바꿔 말하는 정리일 뿐, 새로운 사실을 지어내지 않습니다. 견줄 것이 하나뿐이면 빈 목록.
-
-[그림 방식]
-- image_style: 독자가 '모습'을 보고 싶어 하는 글(여행지, 음식, 살림 도구, 계절 풍경, 현장)은 photo,
-  '정리'를 보고 싶어 하는 글(지원금·제도·신청 순서·요금 비교·계산)은 card 를 고릅니다.
-
-[꾸밈 테마]
-- theme 에는 글 성격에 가장 어울리는 테마 이름 하나를 목록에서 글자 그대로 고릅니다(색과 인용구 모양이 바뀝니다).
-
-[인포 카드]
-- 숫자·조건·이유·순서처럼 '3가지로 정리되는' 소제목 1~2개에 card_type='info' 와 card_lines 3줄을 씁니다.
-  카드는 한눈에 보는 요약이고 자세한 설명은 본문에서 합니다. 같은 문장을 카드와 본문에 두 번 쓰지 않습니다.
-
-[소제목 그림 글자]
-- 소제목마다 card_title(번호 없이 10자 이내)과 card_points(8자 이내 단어 3개)를 씁니다. card_points 는 문장이 아니라
-  꼬리표 같은 단어입니다(예: '3.2조 계약', '10월 허가', '임상 1상'). 본문 문장을 그대로 옮기면 같은 말을 두 번 읽게 됩니다. 그림 속에 그대로 그려지므로
-  짧고 맞춤법이 정확한 말, 조사 자료로 확인된 사실만 씁니다. 금액·날짜처럼 틀리면 안 되는 숫자는 넣지 않습니다.
-
 [핵심 한 줄]
 - 소제목마다 key_line에 독자가 꼭 기억할 한 줄(금액, 날짜, 조건, 핵심 팁)을 paragraphs 안에서 글자 그대로 골라 적습니다.
   이 줄은 색과 밑줄로 강조됩니다. 강조할 만한 줄이 없으면 빈 문자열."""
@@ -1201,8 +1254,13 @@ def polish_saved(post: Post, memo: str, cfg: dict) -> Post:
         output_format=Post,
     )
     if res.stop_reason == "end_turn" and res.parsed_output is not None:
+        old = post
         post = res.parsed_output
         post.links, post.updated = keep["links"], keep["updated"]
+        # 꾸미기 정보는 고쳐 쓰기 형식에 없으니 원래 글에서 그대로 옮긴다
+        post.theme, post.image_style, post.recap_title, post.recap = old.theme, old.image_style, old.recap_title, old.recap
+        for a, b in zip(post.sections, old.sections):
+            a.card_type, a.card_lines, a.card_title, a.card_points = b.card_type, b.card_lines, b.card_title, b.card_points
         dedupe_intro(post)
         fix_key_lines(post)
     return post
@@ -1362,4 +1420,5 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
         else:
             names = list(dict.fromkeys(source_name(u, found[u]) for u in urls[:4]))
             post.sources = ["출처: " + ", ".join(names)]
+    decorate(post, cfg)
     return post

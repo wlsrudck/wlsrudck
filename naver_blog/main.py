@@ -114,7 +114,10 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
         """소제목 일러스트 카드: 글자가 틀리면 다시 그리고, 그래도 틀리면 글자 없는 그림으로"""
         nonlocal ai_left, retries
         title = (s.card_title or re.sub(r"^\d+\.\s*", "", s.heading)).strip()[:14]
-        points = [p.strip() for p in s.card_points if p.strip()][:3]
+        # 그림 속 카드는 '단어'만 (문장이면 바로 아래 본문과 똑같아져 같은 말을 두 번 읽게 된다)
+        points = [p.strip() for p in s.card_points if p.strip() and len(p.strip()) <= 12][:3]
+        if len(points) < 2:
+            points = []
         text = s.key_line + " " + " ".join(s.paragraphs)
         out = folder / f"ai_{i + 1:02d}.png"
         prompt = ai_images.card_prompt(title, points, s.heading, text, character, idx=i + shift)

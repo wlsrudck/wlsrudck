@@ -160,12 +160,14 @@ def main():
         return
     print()
     for i, r in enumerate(rows, 1):
-        vol = f"지난달 검색 {r['volume']:,}" if r.get("volume") else "새 이슈"
+        # 검색광고 API 의 '월간 검색수'는 달력 한 달이 아니라 오늘까지 최근 30일. 10 미만은 '< 10' 으로만 알려 준다
+        v = r.get("volume")
+        vol = f"최근 30일 검색 {v:,}" if v and v > 10 else "최근 30일 검색 거의 없음 = 막 뜬 새 이슈"
         print(f"  {i:2d}. {r['keyword']}  ({vol}) → {r['category']}")
         print(f"        왜: {r['why']}   (기사: {r['title'][:40]})")
         if r["written"]:
             print(f"        └ 비슷한 글 있음: {r['written'][:40]}")
-    print("  (오늘 터진 뉴스는 지난달 검색량이 원래 거의 없어요. 숫자가 작아도 괜찮아요)")
+    print("  (검색량은 오늘까지 최근 30일 숫자예요. 오늘 터진 뉴스는 아직 쌓이지 않아 거의 없게 나와요. 그래도 괜찮아요)")
     ans = input("\nkeywords.csv에 넣을 번호 (예: 1,3 / 엔터 = 비슷한 글 없는 것 위에서 3개 / 0 = 넣지 않음): ").strip()
     if ans == "0":
         return

@@ -79,13 +79,27 @@ def _family() -> tuple[Path, list[Path]]:
     return base, [f for f in folders if (f / "main.py").exists() and (f / "config.toml").exists()]
 
 
+def _loose_updates(folders: list[Path]) -> list[Path]:
+    """zip 을 풀다 생긴 설정 없는 프로그램 폴더 (바탕화면의 naver_blog, 매인\\naver_blog 처럼 안에 한 겹 더 생긴 것).
+    여기 든 새 버전도 원래 폴더들로 옮겨 준다"""
+    cands = []
+    for f in folders:
+        cands += [f / "naver_blog", f.parent / "naver_blog"]
+        try:
+            cands += [d for d in f.parent.iterdir() if d.is_dir()]
+        except Exception:
+            pass
+    return [d for d in dict.fromkeys(cands) if d not in folders and (d / "main.py").exists()
+            and (d / "version.py").exists() and not (d / "config.toml").exists()]
+
+
 def sync_shop() -> str:
     """메인·쇼핑·고객센터 폴더 중 가장 새 버전의 프로그램을 나머지로 복사한다 (어느 창을 먼저 열어도 맞춰지게).
     설정·키워드·로그인·글 기록은 건드리지 않는다. 한 일을 글자로 돌려준다"""
     _, folders = _family()
     if len(folders) < 2:
         return ""
-    newest = max(folders, key=_ver)
+    newest = max(folders + _loose_updates(folders), key=_ver)
     v = _ver(newest)
     done = []
     for f in folders:

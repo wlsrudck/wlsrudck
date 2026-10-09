@@ -27,6 +27,8 @@ class Section(BaseModel):
                                          "소제목 내용을 보여주는 사물·장소")
     alt_queries: list[str] = Field(default=[], description="stock_query로 못 찾을 때 쓸 다른 영어 검색어 2개 (더 넓은 말로)")
     paragraphs: list[str] = Field(description="문단 목록. 한 문단은 2~4문장")
+    caption: str = Field(default="", description="이 소제목 사진 아래에 붙일 짧은 설명 한 줄(20자 안팎). 사진이 보여 주는 것을 "
+                                                 "내용과 이어서. 예: '디지털 상품권은 앱에서 바로 충전돼요'. 지어낸 경험 금지")
     key_line: str = Field(default="", description="이 소제목에서 독자가 꼭 기억할 한 줄(가격·날짜·핵심 팁 등). "
                                                   "paragraphs 안의 한 줄을 글자 그대로 복사. '아직 확인되지 않았다' 같은 "
                                                   "모른다는 문장은 고르지 않음. 확인된 사실이 없으면 빈 문자열")
@@ -80,6 +82,10 @@ class Post(BaseModel):
                                                         "②비슷한 정보를 이어서 정리한다는 이웃 추가 안내 ③댓글로 상황·질문을 남기게 하는 참여 유도. "
                                                         "매번 다른 표현으로, 과장 없이")
     next_teaser: str = Field(description="'다음 글 주제'가 주어졌을 때만 그 글을 예고하는 한 문장. 날짜 약속 없이. 없으면 빈 문자열")
+    table_title: str = Field(default="", description="비교표 제목(예: 지류 vs 디지털 한눈에). 비교할 것이 없으면 빈 문자열")
+    table_rows: list[list[str]] = Field(default=[], description="비교표. 첫 줄은 머리글, 2~4열·2~6줄, 칸마다 짧게(12자 안팎). "
+                                                               "조사 자료의 숫자만. 두 가지 이상을 견줄 거리가 있으면 꼭 만들고, 없으면 빈 목록")
+    table_after: int = Field(default=1, description="비교표를 넣을 소제목 번호(1부터). 그 소제목 글 바로 뒤에 들어감")
     related: list[int] = Field(description="'내 블로그의 다른 글' 목록에서 이 글과 관련 있는 글 번호(최대 5개). 목록이 없거나 관련 글이 없으면 빈 목록")
     # 아래 둘은 프로그램이 채운다 (Claude에게 보내는 답 형식에서는 빠진다)
     links: SkipJsonSchema[list[str]] = []
@@ -95,6 +101,21 @@ class Post(BaseModel):
         """저장해 둔 글 불러오기 (예전 버전에서 저장해 새 칸이 없는 글도 읽히게)"""
         data = {"closing": [], "next_teaser": "", "related": [], **data}
         return cls.model_validate(data)
+
+    def photo_captions(self, photos: list[Path], media: dict | None = None) -> dict[str, str]:
+        """{사진 경로: 사진 아래 설명}. 소제목 사진에만 (썸네일·카드는 그림 안에 글자가 있어 설명을 달지 않음)"""
+        media = media or {}
+        stock = media.get("stock", {})
+        caps = {}
+        for i, s in enumerate(self.sections):
+            c = s.caption.strip()
+            if not c:
+                continue
+            if s.photo and 1 <= s.photo <= len(photos):
+                caps.setdefault(str(photos[s.photo - 1]), c)
+            elif i in stock and not Path(stock[i]).name.startswith("section_"):
+                caps[str(stock[i])] = c
+        return caps
 
     def body_text(self) -> str:
         parts = list(self.intro)
@@ -153,6 +174,8 @@ class Post(BaseModel):
             elif i in stock:
                 out.append(("photo", stock[i]))
             out.extend(("text", p) for p in s.paragraphs)
+            if media.get("table") and i + 1 == max(1, min(self.table_after, len(self.sections))):
+                out.append(("photo", media["table"]))
         if self.qa:
             out.append(("heading", "자주 묻는 질문"))
             for q in self.qa:
@@ -608,6 +631,10 @@ STYLE_RULES = """
 - 핵심 질문(Primary)에 답한 뒤, 독자가 이어서 궁금해할 질문(Secondary) 하나를 소제목 하나로 더 다룹니다.
 - 단순 정보 나열로 끝내지 않습니다. 비교(A와 B 중 누구에게 무엇이 맞는지), 주의할 점(리스크), 행동 기준
   ("이런 경우라면 ~부터 확인")을 담습니다. 전문가·실무자라고 자칭하거나 없는 경력을 암시하지 않습니다.
+- 숫자가 나오는 주제면 '이런 경우라면 이만큼' 상황 계산 예시를 하나 꼭 넣습니다(예: "약값이 한 달 30만 원이면
+  디지털 상품권 7% 할인으로 2만 1천 원 아껴요"). 계산에 쓰는 숫자는 조사 자료에 있는 것만, 계산은 정확하게.
+- 두 가지 이상을 견주는 내용(종류·요금제·조건 비교)은 table_rows 비교표로 한눈에 보여 줍니다.
+- 마무리는 위 내용을 되풀이하지 말고, 독자가 지금 할 행동 하나(확인할 곳·신청 순서)로 끝냅니다.
 - 날짜는 "올해", "다음 달" 대신 "2026년 11월 5일"처럼 정확히 씁니다. 조사 자료로 확인되지 않은 최신 정보는
   "아직 확정되지 않았어요"처럼 불확실하다고 밝힙니다.
 - 키워드는 제목, 도입, 소제목 하나 이상에 자연스럽게 넣고, 본문에서 억지로 반복하지 않습니다.

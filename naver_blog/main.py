@@ -74,6 +74,14 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
                 ai_left = 0  # 키·결제 문제면 이번 글에서는 더 시도하지 않는다
             return None
 
+    if getattr(post, "table_rows", None):
+        try:
+            t = images.make_table_card(post.table_title, post.table_rows, folder / "table.jpg", slug, brand)
+            if t:
+                media["table"] = t
+        except Exception as e:
+            print(f"  (비교표 카드 실패: {str(e).splitlines()[0][:60]})")
+
     # 지표·요약 카드: AI 배경 한 장 위에 프로그램이 숫자·글자를 정확히 얹는다 (AI가 글자를 그리면 숫자가 틀릴 수 있어서)
     card_bg = None
     if ai_left and ((cfg.get("metrics_card", True) and post.metrics) or (cfg.get("summary_card", True) and post.summary)):
@@ -189,7 +197,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
                                                    photo=thumb_photo, brand=brand)
     print(f"  이미지 준비: 썸네일 {('사진형' if thumb_photo else '매거진형') if 'thumbnail' in media else '없음'}, "
           f"지표 카드 {'만듦' if 'metrics_card' in media else '없음'}, "
-          f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 소제목 이미지: AI {n_ai}장 + 정책브리핑 사진 {n_policy}장 + 내용에 맞는 무료 사진 {n_stock}장 + 소제목 카드 {n_card}장")
+          f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 비교표 {'만듦' if 'table' in media else '없음'}, 소제목 이미지: AI {n_ai}장 + 정책브리핑 사진 {n_policy}장 + 내용에 맞는 무료 사진 {n_stock}장 + 소제목 카드 {n_card}장")
     return media
 
 

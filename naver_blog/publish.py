@@ -863,8 +863,45 @@ def _check_editor(page: Page, editor, post: Post) -> list[str]:
     return notes
 
 
+_MARK_CAPTION = r"""(anchor) => {
+    // anchor 문단 바로 뒤에 붙은 사진 부품의 '사진 설명' 칸을 찾아 표시한다
+    document.querySelectorAll("[data-nb-cap]").forEach(e => e.removeAttribute("data-nb-cap"));
+    const norm = t => (t || "").replace(/\s+/g, " ").trim();
+    const paras = [...document.querySelectorAll(".se-component.se-text .se-text-paragraph")]
+        .filter(p => norm(p.innerText) === norm(anchor));
+    const p = paras.pop();
+    if (!p) return false;
+    let comp = p.closest(".se-component");
+    for (let k = 0; k < 3 && comp; k++) {
+        comp = comp.nextElementSibling;
+        if (comp && /se-image/.test(comp.className)) {
+            const cap = comp.querySelector("[class*='caption'] .se-text-paragraph, [class*='caption'] [contenteditable], [class*='caption']");
+            if (!cap) return false;
+            if (norm(cap.innerText) && !/사진\s*설명/.test(cap.innerText)) return false;  // 이미 설명이 있으면 그대로
+            cap.setAttribute("data-nb-cap", "1");
+            return true;
+        }
+    }
+    return false;
+}"""
+
+
+def _type_caption(page: Page, editor, anchor: str, caption: str) -> bool:
+    """방금 넣은 사진 아래 '사진 설명을 입력하세요' 칸에 설명 한 줄을 넣는다. 못 찾으면 그냥 넘어간다"""
+    try:
+        if not editor.evaluate(_MARK_CAPTION, anchor):
+            return False
+        editor.locator("[data-nb-cap]").first.click(timeout=3000)
+        _pause(0.2, 0.4)
+        page.keyboard.insert_text(caption)
+        _pause(0.2, 0.4)
+        return True
+    except Exception:
+        return False
+
+
 def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screenshot_dir: Path | None = None,
-                  key_lines=()) -> int:
+                  key_lines=(), captions: dict | None = None) -> int:
     """글자를 전부 먼저 입력하고, 그다음 사진을 제자리에 끼워 넣는다.
     사진을 올린 뒤 커서를 다시 글 칸으로 옮기는 동작이 불안정해서 이렇게 나눴다.
     실패한 사진은 건너뛰고, 넣은 사진 수를 돌려준다."""
@@ -910,13 +947,19 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screens
     # 단, 네이버는 처음 올린 사진을 대표 사진으로 잡으므로 맨 앞 사진(썸네일)만 먼저 올린다.
     # (썸네일은 도입 끝줄에 붙고 다른 사진과 자리가 겹치지 않아 순서가 꼬이지 않는다)
     order = photos[:1] + list(reversed(photos[1:]))
-    done = 0
+    done = n_cap = 0
     for photo, anchor in order:
         try:
             _insert_photo_after(page, editor, photo, anchor or first_line)
             done += 1
+            cap = (captions or {}).get(str(photo), "").strip()
+            if cap and _type_caption(page, editor, anchor or first_line, cap):
+                n_cap += 1
         except Exception as e:
             print(f"  사진 넣기 실패, 건너뜀 ({photo.name}): {e}")
+
+    if captions:
+        print(f"  사진 설명: {n_cap}/{len([p for p, _ in photos if str(p) in captions])}장")
 
     # 사진 다음에 넣어야 같은 자리에서 구분선 → 소제목 → 사진 순서가 된다
     fallback = _insert_heading_parts(page, editor, heads, st, screenshot_dir) if heads else []
@@ -1051,7 +1094,8 @@ def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, aut
             editor.locator(SELECTORS["body"]).first.click()
             _pause()
             blocks = post.blocks(photos, media)
-            done = _write_blocks(page, editor, blocks, style, screenshot_dir, post.key_lines())
+            done = _write_blocks(page, editor, blocks, style, screenshot_dir, post.key_lines(),
+                                 captions=post.photo_captions(photos, media))
             total = sum(1 for k, _ in blocks if k == "photo")
             print(f"  네이버 입력: 본문 완료, 사진 {done}/{total}장")
             _pause(1.5, 3.0)

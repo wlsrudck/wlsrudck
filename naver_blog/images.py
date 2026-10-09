@@ -534,3 +534,53 @@ def make_section_card(heading: str, line: str, out: Path, seed: str, brand: str 
         d.text((1000, 670), brand, font=_font(28), fill="#8a8d93", anchor="rm")
     im.save(out, quality=92)
     return out
+
+
+def make_table_card(title: str, rows: list[list[str]], out: Path, seed: str, brand: str = "") -> Path | None:
+    """비교표 카드: 머리글 줄은 진한 색 띠, 칸마다 짧은 글자. 글자는 프로그램이 정확히 그린다"""
+    rows = [[str(c).strip() for c in r] for r in rows if r and any(str(c).strip() for c in r)]
+    if len(rows) < 2:
+        return None
+    cols = min(4, max(len(r) for r in rows))
+    rows = [(r + [""] * cols)[:cols] for r in rows[:7]]
+    marker = random.Random(seed).choice(MARKERS)
+    W, pad, top = 1080, 70, 190
+    im = Image.new("RGB", (W, 2000), "#f6f4ef")
+    d = ImageDraw.Draw(im)
+    tf = _font(56)
+    tl = _wrap(d, title.strip() or "한눈에 비교", tf, W - pad * 2)[:2]
+    for j, l in enumerate(tl):
+        d.text((pad, 80 + j * 68), l, font=tf, fill="#16181b")
+    top = 80 + len(tl) * 68 + 50
+    first_w = 0.34 if cols >= 3 else 0.42
+    widths = [int((W - pad * 2) * first_w)] + [int((W - pad * 2) * (1 - first_w) / (cols - 1))] * (cols - 1)
+    fs = 34
+
+    def cell_lines(text, w, font):
+        return _wrap(d, text, font, w - 40)[:3] or [""]
+
+    y = top
+    for ri, r in enumerate(rows):
+        font = _font(fs + (2 if ri == 0 else 0))
+        lines = [cell_lines(c, widths[ci], font) for ci, c in enumerate(r)]
+        h = max(len(l) for l in lines) * (fs + 14) + 44
+        if ri == 0:
+            d.rounded_rectangle([pad, y, W - pad, y + h], radius=18, fill="#1f2a37")
+        else:
+            d.rectangle([pad, y, W - pad, y + h], fill="white" if ri % 2 else "#fbfaf7")
+            d.line([pad, y + h, W - pad, y + h], fill="#e2ded5", width=2)
+        x = pad
+        for ci, ls in enumerate(lines):
+            color = "white" if ri == 0 else ("#16181b" if ci == 0 else "#2b2f36")
+            for li, l in enumerate(ls):
+                d.text((x + 22, y + 22 + li * (fs + 14)), l, font=font, fill=color)
+            x += widths[ci]
+        y += h
+    d.rectangle([pad, top - 12, pad + 120, top - 6], fill=marker)
+    y += 40
+    if brand:
+        d.text((W - pad, y + 10), brand, font=_font(28), fill="#8a8d93", anchor="rm")
+        y += 50
+    im = im.crop((0, 0, W, max(y + 30, 600)))
+    im.save(out, quality=92)
+    return out

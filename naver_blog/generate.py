@@ -333,6 +333,11 @@ class Post(BaseModel):
             out.append(("text", self.toc()))
         if media.get("metrics_card"):
             out.append(("photo", media["metrics_card"]))
+        # 가장 관련 있는 내 글 1개는 본문 가운데에 (홈판으로 들어온 사람이 읽다가 바로 넘어가게). 나머지는 글 끝에
+        mid_link, end_links = "", list(self.links)
+        if self.links and len(self.sections) >= 3 and not self.simple:
+            mid_link, end_links = self.links[0], self.links[1:]
+            mid_at = max(1, len(self.sections) // 2 - 1)  # 소제목 4개면 2번째 뒤, 6개면 3번째 뒤
         for i, s in enumerate(self.sections):
             if s.heading:
                 out.append(("heading", s.heading))
@@ -349,6 +354,9 @@ class Post(BaseModel):
             if i == 0 and self.videos:  # 공식 영상 (주소 한 줄 = 편집기가 영상으로 바꿔 보여 준다)
                 out.append(("text", "▶ 공식 영상으로 보기"))
                 out.extend(("text", v) for v in self.videos)
+            if mid_link and i == mid_at:
+                title, _, url = mid_link.partition("|")
+                out.append(("text", f"📌 같이 보면 좋은 글\n▶ {title.strip()}\n{url.strip()}"))
         if self.recap:  # 한눈에 다시 보기: 🟢 이름 / "한마디" / → 정리 두 줄
             if self.recap_title.strip():
                 out.append(("heading", self.recap_title.strip()))
@@ -374,9 +382,9 @@ class Post(BaseModel):
             out.append(("text", "\n".join(c.strip() for c in self.closing if c.strip())))
         if self.next_teaser.strip():
             out.append(("text", self.next_teaser.strip()))
-        if self.links:  # 내 블로그 다른 글 (제목|주소)
+        if end_links:  # 내 블로그 다른 글 (제목|주소)
             lines = ["함께 보면 좋은 글"]
-            for item in self.links:
+            for item in end_links:
                 title, _, url = item.partition("|")
                 lines += [f"▶ {title.strip()}", url.strip()]
             out.append(("text", "\n".join(lines)))
@@ -891,7 +899,8 @@ STYLE_RULES = """
 - closing 세 문장은 매번 다른 말로 씁니다. 같은 인사·같은 문장을 글마다 반복하지 않습니다.
 - 다음 글에 무엇을 쓰겠다는 예고·약속("다음 글에서는 ~를 정리할게요")은 어디에도 쓰지 않습니다.
 - '내 블로그의 다른 글' 목록이 주어지면 이 글과 정말 관련 있는 글만 related에 고릅니다. 본문에서 "○○는 따로 정리해 뒀어요"처럼
-  그 글 제목을 자연스럽게 한두 번 언급해도 됩니다. 주소는 프로그램이 글 끝에 붙입니다.
+  그 글 제목을 자연스럽게 한두 번 언급해도 됩니다. 가장 관련 깊은 글을 related 맨 앞에 둡니다
+  (그 글은 프로그램이 본문 가운데에 링크로 넣고, 나머지는 글 끝에 붙입니다).
 
 [핵심 한 줄]
 - 소제목마다 key_line에 독자가 꼭 기억할 한 줄(금액, 날짜, 조건, 핵심 팁)을 paragraphs 안에서 글자 그대로 골라 적습니다.

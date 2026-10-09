@@ -835,6 +835,49 @@ def _safe_eval(frame, script: str, arg) -> str:
         return ""
 
 
+_VIDEO_POPUP_INFO = r"""() => {
+    const pop = document.querySelector(".se-popup-video-upload, [data-name*='video-upload']");
+    if (!pop) return "";
+    const out = [];
+    pop.querySelectorAll("input, button, label, iframe, [role=button]").forEach(e => {
+        out.push([e.tagName, e.type || "", e.getAttribute("accept") || "", (e.className || "").toString().slice(0, 50),
+                  (e.innerText || e.getAttribute("aria-label") || e.src || "").trim().slice(0, 30)].join(" | "));
+    });
+    return out.slice(0, 40).join("\n");
+}"""
+
+_CLOSE_VIDEO_POPUP = r"""() => {
+    const pop = document.querySelector(".se-popup-video-upload, [data-name*='video-upload']");
+    if (!pop) return "없음";
+    const btn = [...pop.querySelectorAll("button, [role=button]")].find(b =>
+        /close|닫기/i.test((b.className || "") + " " + (b.getAttribute("aria-label") || "") + " " + (b.innerText || "")));
+    if (btn) { btn.click(); return "닫기 버튼"; }
+    return "버튼 없음";
+}"""
+
+
+def _close_video_popup(page: Page, editor) -> str:
+    """동영상 올리기 창을 닫는다: 닫기 버튼 → Esc → 그래도 남으면 창을 화면에서 걷어 낸다"""
+    frames = [editor] + [f for f in page.frames if f is not editor]
+    how = []
+    for fr in frames:
+        r = _safe_eval(fr, _CLOSE_VIDEO_POPUP, None)
+        if r and r != "없음":
+            how.append(r)
+    _pause(0.8, 1.2)
+    try:
+        page.keyboard.press("Escape")
+    except Exception:
+        pass
+    _pause(0.5, 0.8)
+    for fr in frames:
+        if _safe_eval(fr, "() => !!document.querySelector('.se-popup-video-upload, [data-name*=\\'video-upload\\']')", None):
+            _safe_eval(fr, """() => document.querySelectorAll(".se-popup-video-upload, [data-name*='video-upload']")
+                .forEach(e => (e.closest("[data-group=popupLayer]") || e).remove())""", None)
+            how.append("걷어 냄")
+    return ", ".join(how) or "이미 닫힘"
+
+
 def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str, screenshot_dir: Path | None) -> bool:
     """anchor 문단 뒤에 동영상을 올린다: 동영상 버튼 → 파일 고르기 → 처리 기다리기 → 제목 → 완료.
     네이버 화면이 달라 못 넣으면 False (글은 그대로 저장되게 예외를 밖으로 던지지 않는다)"""
@@ -941,10 +984,13 @@ def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str
         log.append("5분 기다려도 본문에 영상이 안 들어옴")
     except Exception as e:
         log.append(f"오류: {str(e).splitlines()[0][:80]}")
-        try:
-            page.keyboard.press("Escape")
-        except Exception:
-            pass
+    # 못 넣었으면 올리기 창의 생김새를 기록하고 창을 꼭 닫는다 (열어 두면 그 뒤 글 꾸미기 클릭을 전부 가로막는다)
+    for fr in [editor] + [f for f in page.frames if f is not editor]:
+        info = _safe_eval(fr, _VIDEO_POPUP_INFO, None)
+        if info:
+            log.append("올리기 창 모습:\n" + info)
+            break
+    log.append("창 닫기: " + _close_video_popup(page, editor))
     if screenshot_dir:
         try:
             (screenshot_dir / "editor_video.txt").write_text("\n".join(log) + "\n\n" + editor.evaluate(_DUMP_BUTTONS),

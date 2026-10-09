@@ -105,6 +105,34 @@ def capture(url: str) -> list[Path]:
     return saved
 
 
+def contact_sheet(parts: list[Path]) -> Path:
+    """찍은 그림들을 한 장으로: 긴 화면을 여러 줄(세로 띠)로 잘라 옆으로 나란히 놓는다 (채팅에 한 장만 보내면 되게)"""
+    from PIL import Image, ImageDraw
+    imgs = [Image.open(p).convert("RGB") for p in parts]
+    w = WIDTH  # 휴대폰 1배 크기로 줄여서 붙인다
+    imgs = [im.resize((w, round(im.height * w / im.width))) for im in imgs]
+    strip = Image.new("RGB", (w, sum(im.height for im in imgs)), "white")
+    y = 0
+    for im in imgs:
+        strip.paste(im, (0, y))
+        y += im.height
+    H = strip.height
+    cols = max(1, min(8, round((H / (w * 1.4)) ** 0.5)))  # 전체가 대략 네모나게
+    col_h = -(-H // cols)
+    gap, overlap, top = 24, 40, 30  # 띠 사이 간격, 잘리는 줄이 양쪽에 다 보이게 겹치는 부분, 번호 칸
+    sheet = Image.new("RGB", (cols * w + (cols - 1) * gap, col_h + overlap + top), "#e9ecef")
+    d = ImageDraw.Draw(sheet)
+    for i in range(cols):
+        y0 = i * col_h
+        piece = strip.crop((0, y0, w, min(H, y0 + col_h + overlap)))
+        x = i * (w + gap)
+        sheet.paste(piece, (x, top))
+        d.text((x + 6, 8), f"{i + 1}", fill="#333")
+    out = parts[0].parent / "한장으로_보기.jpg"
+    sheet.save(out, quality=88)
+    return out
+
+
 def main():
     url = sys.argv[1] if len(sys.argv) > 1 else ""
     if not url:
@@ -134,8 +162,15 @@ def main():
     if not files:
         print("찍힌 게 없어요.")
         return
-    print(f"\n{len(files)}장 저장했어요: {files[0].parent}")
-    print("폴더에서 Ctrl+A 로 전부 고른 뒤 채팅창으로 한 번에 끌어다 놓으면 돼요 (01, 02... 순서대로).")
+    try:
+        one = contact_sheet(files)
+    except Exception as e:
+        print(f"(한 장으로 모으기 실패: {str(e).splitlines()[0][:80]})")
+        one = None
+    print(f"\n저장했어요: {files[0].parent}")
+    if one:
+        print(f"→ '{one.name}' 한 장만 채팅창에 끌어다 놓으면 돼요. (왼쪽 띠부터 위→아래로 읽어요)")
+    print(f"  크게 보고 싶을 땐 01~{len(files):02}.png 를 보면 돼요.")
     try:
         os.startfile(files[0].parent)  # noqa  (윈도우에서 폴더를 연다)
     except Exception:

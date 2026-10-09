@@ -541,7 +541,7 @@ def make_table_card(title: str, rows: list[list[str]], out: Path, seed: str, bra
     rows = [[str(c).strip() for c in r] for r in rows if r and any(str(c).strip() for c in r)]
     if len(rows) < 2:
         return None
-    cols = min(4, max(len(r) for r in rows))
+    cols = min(3, max(len(r) for r in rows))  # 모바일에서 읽히게 3열까지
     rows = [(r + [""] * cols)[:cols] for r in rows[:7]]
     marker = random.Random(seed).choice(MARKERS)
     W, pad, top = 1080, 70, 190

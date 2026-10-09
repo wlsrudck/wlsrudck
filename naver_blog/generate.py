@@ -86,7 +86,7 @@ class Post(BaseModel):
                                                      "예: '충전 전, 앱에서 이번 달 할인율부터 확인하세요'. 위 내용 요약 금지")
     next_teaser: str = Field(description="'다음 글 주제'가 주어졌을 때만 그 글을 예고하는 한 문장. 날짜 약속 없이. 없으면 빈 문자열")
     table_title: str = Field(default="", description="비교표 제목(예: 지류 vs 디지털 한눈에). 비교할 것이 없으면 빈 문자열")
-    table_rows: list[list[str]] = Field(default=[], description="비교표. 첫 줄은 머리글, 2~4열·2~6줄, 칸마다 짧게(12자 안팎). "
+    table_rows: list[list[str]] = Field(default=[], description="비교표. 첫 줄은 머리글, 2~3열·2~6줄(모바일용), 칸마다 핵심 단어·숫자만(10자 안팎). "
                                                                "조사 자료의 숫자만. 두 가지 이상을 견줄 거리가 있으면 꼭 만들고, 없으면 빈 목록")
     table_after: int = Field(default=1, description="비교표를 넣을 소제목 번호(1부터). 그 소제목 글 바로 뒤에 들어감")
     related: list[int] = Field(description="'내 블로그의 다른 글' 목록에서 이 글과 관련 있는 글 번호(최대 5개). 목록이 없거나 관련 글이 없으면 빈 목록")

@@ -729,7 +729,7 @@ STYLE_RULES = """
 [독자에게 쓰는 글]
 - 글 안에 "원고 초안입니다", "요청하신 블로그 글입니다", "수정이 필요하시면 말씀해 주세요", "[사진 삽입]" 같은
   글을 부탁한 사람에게 하는 말·자리 표시를 절대 넣지 않습니다. 모든 문장은 블로그 독자에게 하는 말입니다.
-- 인사는 글 처음에 한 번만(또는 없이). 중간에 "안녕하세요"로 다시 시작하지 않습니다.
+- 인사말("안녕하세요", "반갑습니다", "찾아주셔서 감사해요")은 글 어디에도 쓰지 않습니다. 독자는 답을 찾으러 왔습니다.
 
 [문장 리듬]
 - 짧은 문장, 중간 문장, 조금 긴 문장을 섞되 같은 순서를 되풀이하지 않습니다.
@@ -773,7 +773,7 @@ def leftovers_in(post: "Post") -> list[str]:
     found = [m.group(0) for m in (re.search(p, text) for p in LEFTOVERS) if m]
     middle = "\n".join(p for sec in post.sections for p in sec.paragraphs)  # 도입 뒤에 인사가 또 나오면 글 두 개를 이어 붙인 것
     if re.search(r"안녕하세요|반갑습니다|찾아주셔서 감사", middle):
-        found.append("중간에 다시 인사")
+        found.append("본문에 인사말")
     return found
 
 

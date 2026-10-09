@@ -198,6 +198,32 @@ def illust_style(color: str, text_ok: bool) -> str:
     return ILLUST.format(color=color) + rule
 
 
+# 캐릭터를 새로 그릴 때 섞는 재료 (매번 다른 캐릭터가 나오게)
+_WHO = ["20대 여성", "30대 여성", "40대 여성", "50대 여성", "20대 남성", "30대 남성", "40대 남성", "50대 남성",
+        "60대 할머니", "60대 할아버지"]
+_HAIR = ["짧은 단발머리", "긴 생머리", "포니테일", "뽀글뽀글 파마머리", "짧은 스포츠머리", "가르마 탄 옆머리", "똥머리(번 헤어)",
+         "곱슬 숏컷", "희끗희끗한 짧은 머리", "앞머리 있는 보브컷"]
+_LOOK = ["동그란 안경", "뿔테 안경", "볼에 주근깨", "큰 눈과 웃는 입", "머리띠", "야구 모자", "니트 비니", "작은 귀걸이",
+         "콧수염", "보조개"]
+_WEAR = ["베이지 가디건", "줄무늬 티셔츠", "청재킷", "초록 후드티", "노란 니트", "체크 셔츠", "흰 셔츠와 조끼", "앞치마",
+         "남색 맨투맨", "멜빵바지"]
+CHAR_FILE = "ai_character.txt"  # 정해진 캐릭터 설명 (그림과 같은 폴더)
+
+
+def random_character() -> str:
+    import random
+    return (f"{random.choice(_HAIR)}에 {random.choice(_LOOK)}, {random.choice(_WEAR)} 차림의 "
+            f"한국인 {random.choice(_WHO)} 캐릭터, 밝은 표정")
+
+
+def saved_character(folder: Path) -> str:
+    f = folder / CHAR_FILE
+    try:
+        return f.read_text(encoding="utf-8").strip() if f.is_file() else ""
+    except Exception:
+        return ""
+
+
 def character_ref(key: str, character: str, color: str, path: Path, model: str = "") -> Path | None:
     """블로그 캐릭터 기준 그림. 없으면 한 번 만든다 (지우면 다음 글에서 새 캐릭터로 다시 만든다)"""
     if path.is_file():
@@ -205,7 +231,9 @@ def character_ref(key: str, character: str, color: str, path: Path, model: str =
     prompt = (f"블로그 마스코트 캐릭터 기준 그림: {character}. 상반신, 정면을 보고 웃는 모습, 단색 밝은 배경에 캐릭터 하나만. "
               "앞으로 여러 그림에서 같은 얼굴·머리·옷으로 다시 그릴 기준이 되도록 또렷하게.")
     try:
-        return generate(prompt, path, key, model, style=illust_style(color, False), aspect="1:1")
+        out = generate(prompt, path, key, model, style=illust_style(color, False), aspect="1:1")
+        (path.parent / CHAR_FILE).write_text(character, encoding="utf-8")  # 앞으로 글마다 같은 설명으로
+        return out
     except Exception as e:
         print(f"  (캐릭터 기준 그림 실패: {explain(e)})")
         return None
@@ -248,6 +276,7 @@ if __name__ == "__main__":  # 시험: 이 블로그 캐릭터 + 소제목 일러
     m = pick_model(k)
     print(f"쓸 모델: {m}")
     character, color = CHARACTERS[_blog_mode()]
+    character = (_blog_cfg().get("images", {}).get("ai_character") or saved_character(ROOT / "output") or character)
     out_dir = ROOT / "output"
     out_dir.mkdir(exist_ok=True)
     if _blog_cfg().get("images", {}).get("ai_style", "auto") == "photo":  # 실사 스타일: 글자 없는 생활 사진 한 장
@@ -285,11 +314,17 @@ if __name__ == "__main__":  # 시험: 이 블로그 캐릭터 + 소제목 일러
         if ref:
             show(ref)
         show(p)
-        print("\n그림 두 장을 열었어요: 이 블로그 캐릭터(ai_character) + 소제목 그림 예시(ai_test)")
+        print(f"\n그림 두 장을 열었어요: 이 블로그 캐릭터(ai_character) + 소제목 그림 예시(ai_test)\n  지금 캐릭터: {character}")
         print("  캐릭터가 마음에 들면 → 그냥 엔터 (앞으로 글마다 이 캐릭터로 그려요)")
-        print("  캐릭터를 새로 그리려면 → 1 입력 후 엔터")
-        if input("> ").strip() != "1":
+        print("  아무 캐릭터나 새로 → 1 + 엔터   /   원하는 캐릭터를 직접 → 2 + 엔터")
+        ans = input("> ").strip()
+        if ans not in ("1", "2"):
             print("이 캐릭터로 정했어요.")
             break
+        if ans == "2":
+            want = input("어떤 캐릭터로 할까요? (예: 파마머리 50대 아저씨, 빨간 앞치마, 뿔테 안경)\n> ").strip()
+            character = (want + ", 한국인 캐릭터, 밝은 표정") if want else random_character()
+        else:
+            character = random_character()
         ref_path.unlink(missing_ok=True)
-        print("새 캐릭터를 그리는 중...")
+        print(f"새 캐릭터를 그리는 중: {character}")

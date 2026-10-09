@@ -69,7 +69,9 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
         if ai_left:
             print(f"  그림 방식(자동): {'실사 사진' if ai_style == 'photo' else '카드형 일러스트'}")
     illust = ai_left > 0 and ai_style == "illustration"
-    character = cfg.get("ai_character") or ai_images.CHARACTERS["main"][0]
+    # 캐릭터: config 에 직접 적은 것 → [AI 이미지 시험]에서 정한 것(output/ai_character.txt) → 블로그 종류별 기본
+    character = (cfg.get("ai_character") or ai_images.saved_character(OUTPUT)
+                 or ai_images.CHARACTERS[cfg.get("_mode", "main")][0])
     color = cfg.get("ai_color") or ai_images.CHARACTERS["main"][1]
     plain_style = ai_images.illust_style(color, False) if illust else None  # 글자 없는 그림 (썸네일·카드 배경)
     refs = []
@@ -436,7 +438,7 @@ def main():
 
     mode = "shop" if shop.get("enabled") else "cs" if cs.get("enabled") else "main"
     img = cfg.setdefault("images", {})
-    img.setdefault("ai_character", ai_images.CHARACTERS[mode][0])
+    img["_mode"] = mode
     img.setdefault("ai_color", ai_images.CHARACTERS[mode][1])
 
 

@@ -822,19 +822,40 @@ def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str
             log.append("영상 넣을 위치를 찾지 못함")
             raise RuntimeError("위치")
         before = editor.locator(SELECTORS["video"]).count()
-        btn = editor.locator(SELECTORS["video_btn"]).first
-        try:  # 버튼을 누르면 바로 파일 고르는 창이 뜨는 경우
-            with page.expect_file_chooser(timeout=6000) as fc:
-                btn.click()
-            fc.value.set_files(str(video))
-        except Exception:  # 올리기 창이 먼저 뜨는 경우: 창 안의 '동영상 추가' 버튼
-            picked = editor.evaluate(_MARK_VIDEO_STEP, ["동영상 추가", "동영상추가", "파일 선택", "동영상 선택", "추가"])
-            log.append(f"올리기 창 버튼: {picked or '못 찾음'}")
-            if not picked:
-                raise RuntimeError("올리기 버튼")
-            with page.expect_file_chooser(timeout=10000) as fc:
-                editor.locator("[data-nb-pick]").first.click()
-            fc.value.set_files(str(video))
+        frames = [editor] + [f for f in page.frames if f is not editor]  # 올리기 창이 다른 틀에 뜰 수도 있다
+        editor.locator(SELECTORS["video_btn"]).first.click()
+        _pause(1.5, 2.5)
+        # 1) 올리기 창 안에 숨은 '파일 넣는 칸'에 바로 넣는다 (끌어다 놓기와 같은 효과, 가장 확실)
+        put = False
+        for fr in frames:
+            inputs = fr.locator("input[type=file]")
+            for k in range(inputs.count() - 1, -1, -1):  # 방금 뜬 창의 칸이 보통 맨 뒤
+                inp = inputs.nth(k)
+                accept = (inp.get_attribute("accept") or "").lower()
+                if accept and "video" not in accept and "mp4" not in accept:
+                    continue  # 사진 칸 등은 건너뛴다
+                try:
+                    inp.set_input_files(str(video))
+                    put = True
+                    log.append(f"파일 칸에 넣음 (accept={accept or '없음'})")
+                    break
+                except Exception as e:
+                    log.append(f"파일 칸 넣기 실패: {str(e).splitlines()[0][:60]}")
+            if put:
+                break
+        # 2) 안 되면 '동영상 추가' 버튼 → 파일 고르는 창
+        if not put:
+            for fr in frames:
+                picked = fr.evaluate(_MARK_VIDEO_STEP, ["동영상 추가", "동영상추가", "동영상 선택", "파일 선택"])
+                if picked:
+                    log.append(f"올리기 창 버튼: {picked}")
+                    with page.expect_file_chooser(timeout=10000) as fc:
+                        fr.locator("[data-nb-pick]").first.click()
+                    fc.value.set_files(str(video))
+                    put = True
+                    break
+        if not put:
+            raise RuntimeError("영상 파일을 넣을 곳을 못 찾음")
         log.append(f"파일 고름: {video.name}")
         # 업로드·처리 기다리기 (최대 5분). 제목 칸이 비어 있으면 글 제목을 넣는다
         for _ in range(100):
@@ -842,17 +863,22 @@ def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str
             if editor.locator(SELECTORS["video"]).count() > before:
                 log.append("본문에 영상 들어옴")
                 return True
-            try:
-                box = editor.locator("input[placeholder*='제목'], textarea[placeholder*='제목']").first
-                if box.count() and box.is_visible() and not box.input_value().strip():
-                    box.fill(title[:60])
-                    log.append("영상 제목 넣음")
-            except Exception:
-                pass
-            done = editor.evaluate(_MARK_VIDEO_STEP, ["완료", "확인", "등록"])
-            if done:
-                editor.locator("[data-nb-pick]").first.click()
-                log.append(f"'{done}' 누름")
+            for fr in frames:
+                try:
+                    box = fr.locator("input[placeholder*='제목'], textarea[placeholder*='제목']").first
+                    if box.count() and box.is_visible() and not box.input_value().strip():
+                        box.fill(title[:60])
+                        log.append("영상 제목 넣음")
+                except Exception:
+                    pass
+                try:
+                    done = fr.evaluate(_MARK_VIDEO_STEP, ["완료"])  # 다른 창의 확인·등록을 잘못 누르지 않게
+                except Exception:
+                    done = ""
+                if done:
+                    fr.locator("[data-nb-pick]").first.click()
+                    log.append(f"'{done}' 누름")
+                    break
         log.append("5분 기다려도 본문에 영상이 안 들어옴")
     except Exception as e:
         log.append(f"오류: {str(e).splitlines()[0][:80]}")

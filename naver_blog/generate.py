@@ -32,6 +32,11 @@ class Section(BaseModel):
     key_line: str = Field(default="", description="이 소제목에서 독자가 꼭 기억할 한 줄(가격·날짜·핵심 팁 등). "
                                                   "paragraphs 안의 한 줄을 글자 그대로 복사. '아직 확인되지 않았다' 같은 "
                                                   "모른다는 문장은 고르지 않음. 확인된 사실이 없으면 빈 문자열")
+    card_type: str = Field(default="", description="이 소제목 그림 모양: 'info'(인포 카드 — 숫자·조건·이유·순서 3가지를 정리하는 부분) "
+                                                    "또는 ''(보통 그림). 한 글에 info 는 1~2개만")
+    card_lines: list[str] = Field(default=[], description="card_type 이 info 일 때 카드 3줄. 각 줄은 '굵은 키워드|짧은 설명' "
+                                                          "(키워드 10자, 설명 18자 이내, 조사 자료 사실만, 본문 문장 그대로 복사 금지). "
+                                                          "예: ['3.2조 기술수출|선급금 2,629억 원 포함', '10월 허가 기대|허가 후 한 달 안 출시']")
     card_title: str = Field(default="", description="소제목 그림 위에 크게 쓸 제목(번호 없이 10자 이내). 예: '네이버 메이트'")
     card_points: list[str] = Field(default=[], description="소제목 그림 속 작은 카드 3개에 쓸 핵심 '단어'(각 8자 이내, 문장 금지, "
                                                            "본문 문장을 그대로 옮기지 않음). 예: ['신청 없음', '매월 선정', '반복 가능']")
@@ -161,7 +166,8 @@ class Post(BaseModel):
     shop_links: SkipJsonSchema[list[str]] = []  # 쇼핑커넥트 링크
     shop_name: SkipJsonSchema[str] = ""  # 상품명 (링크 앞 안내 문장용)
     simple: SkipJsonSchema[bool] = False  # 판매 글: 목차 없이 짧게
-    videos: SkipJsonSchema[list[str]] = []  # 메모에 적은 공식 유튜브 영상 주소 (첫 소제목 뒤에 넣는다)
+    videos: SkipJsonSchema[list[str]] = []
+    notice: SkipJsonSchema[str] = ""  # 투자 글 면책 문장 (프로그램이 붙인다)  # 메모에 적은 공식 유튜브 영상 주소 (첫 소제목 뒤에 넣는다)
 
     @classmethod
     def load(cls, data: dict) -> "Post":
@@ -270,6 +276,8 @@ class Post(BaseModel):
             out.append(("text", f"👉 {self.shop_name or '제품'} 자세히 보기\n" + "\n".join(self.shop_links)))
         if self.action_line.strip():
             out.append(("text", "✔ " + self.action_line.strip()))
+        if self.notice.strip():
+            out.append(("text", self.notice.strip()))
         if self.closing:
             out.append(("text", "\n".join(c.strip() for c in self.closing if c.strip())))
         if self.next_teaser.strip():
@@ -801,6 +809,10 @@ STYLE_RULES = """
 
 [꾸밈 테마]
 - theme 에는 글 성격에 가장 어울리는 테마 이름 하나를 목록에서 글자 그대로 고릅니다(색과 인용구 모양이 바뀝니다).
+
+[인포 카드]
+- 숫자·조건·이유·순서처럼 '3가지로 정리되는' 소제목 1~2개에 card_type='info' 와 card_lines 3줄을 씁니다.
+  카드는 한눈에 보는 요약이고 자세한 설명은 본문에서 합니다. 같은 문장을 카드와 본문에 두 번 쓰지 않습니다.
 
 [소제목 그림 글자]
 - 소제목마다 card_title(번호 없이 10자 이내)과 card_points(8자 이내 단어 3개)를 씁니다. card_points 는 문장이 아니라

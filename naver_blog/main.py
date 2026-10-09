@@ -43,6 +43,7 @@ def make_photo_folders(rows) -> None:
         (PHOTOS / slugify(r["keyword"])).mkdir(parents=True, exist_ok=True)
 
 
+INVEST = re.compile(r"주가|주식|종목|관련주|테마주|ETF|공모주|상장|코인|비트코인|리플|XRP|목표주가|배당|증시|코스피|코스닥|나스닥")
 PEOPLE_TOPIC = re.compile(r"프로필|본명|열애|결별|결혼|이혼|근황|출연진|나이|누구|배우|가수|아이돌|감독|선수|기자|"
                           r"유튜버|대표|회장|의원|장관|대통령")
 
@@ -207,7 +208,9 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
 
     # 소제목마다 관련 이미지 하나: 직접 찍은 사진 → 정책브리핑·무료 사진(후보 여러 장 중 Claude가 내용에 맞는 것만) → 소제목 카드
     cand_dir = folder / "_candidates"
-    own_used, n_stock, n_card, n_policy, n_ai = set(), 0, 0, 0, 0
+    own_used, n_stock, n_card, n_policy, n_ai, n_info = set(), 0, 0, 0, 0, 0
+    from generate import THEMES
+    theme_color = THEMES.get(cfg.get("_theme", ""), THEMES["기본 청록"])[1]["heading_color"]
     # 위키미디어 공용 사진 (출처 표시만 하면 쓸 수 있는 실제 사진). 글 하나에 commons_max 장까지
     use_commons = cfg.get("commons_photos", True) and bool(writing)
     commons_max, n_commons, commons_seen = int(cfg.get("commons_max", 3)), 0, set()
@@ -219,8 +222,18 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             continue
         picked = None
         queries = [q for q in [s.stock_query, *s.alt_queries] if q.strip()]
+        # 인포 카드: '3가지로 정리되는' 소제목은 프로그램이 직접 그린다 (글자 정확, 그림 값 없음)
+        info_rows = [tuple((ln.split("|", 1) + [""])[:2]) for ln in s.card_lines if ln.strip()]
+        info_rows = [(k.strip()[:14], v.strip()[:24]) for k, v in info_rows if k.strip()]
+        if s.card_type == "info" and len(info_rows) >= 2 and n_info < 2:
+            try:
+                picked = images.make_info_card(s.card_title or s.heading, info_rows, folder / f"info_{i + 1:02d}.jpg",
+                                               theme_color, brand)
+                n_info += 1
+            except Exception as e:
+                print(f"  (인포 카드 실패: {str(e).splitlines()[0][:60]})")
         # 실제 사진이 맞으면 먼저: 정책브리핑(공공누리) → 위키미디어 공용(CC) → 없으면 AI 그림 → 무료 사진
-        if policy and writing:
+        if not picked and policy and writing:
             try:
                 n = choose_photo(s.heading, " ".join(s.paragraphs), policy, writing)
                 if n:
@@ -298,7 +311,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             ai_images.stamp(media["thumbnail"])  # AI 배경 썸네일에도 표시
     print(f"  이미지 준비: 썸네일 {('사진형' if thumb_photo else '매거진형') if 'thumbnail' in media else '없음'}, "
           f"지표 카드 {'만듦' if 'metrics_card' in media else '없음'}, "
-          f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 비교표 {'만듦' if 'table' in media else '없음'}, 소제목 이미지: AI {n_ai}장 + 정책브리핑 사진 {n_policy}장 + 위키미디어 사진 {n_commons}장 + 내용에 맞는 무료 사진 {n_stock}장 + 소제목 카드 {n_card}장")
+          f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 비교표 {'만듦' if 'table' in media else '없음'}, 소제목 이미지: 인포 카드 {n_info}장 + AI {n_ai}장 + 정책브리핑 사진 {n_policy}장 + 위키미디어 사진 {n_commons}장 + 내용에 맞는 무료 사진 {n_stock}장 + 소제목 카드 {n_card}장")
     return media
 
 
@@ -638,6 +651,9 @@ def main():
             if not post.shop_links:
                 print("  ⚠ 상품 링크 칸이 비어 있어요. 임시저장 글에 쇼핑커넥트 링크를 직접 넣어 주세요.")
 
+        if INVEST.search(post.title + " " + keyword) and "추천이 아니" not in post.all_text():
+            post.notice = ("이 글은 공개된 공시·기사·증권사 자료를 정리한 참고용이에요. 특정 종목의 매수·매도 추천이 아니니, "
+                           "투자 판단과 책임은 본인 기준으로 해 주세요.")
         post.videos = []
         for v in videos:  # 퍼가기가 허용된 영상만 (비공개·퍼가기 금지면 빼고 알려 준다)
             info = video_info(v)

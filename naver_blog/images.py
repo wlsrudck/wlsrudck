@@ -600,6 +600,56 @@ def make_section_card(heading: str, line: str, out: Path, seed: str, brand: str 
     return out
 
 
+def _tint(hex_color: str, amount: float) -> tuple:
+    """색을 흰색 쪽으로 amount(0~1)만큼 옅게"""
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return tuple(int(c + (255 - c) * amount) for c in (r, g, b))
+
+
+def make_info_card(title: str, rows: list[tuple[str, str]], out: Path, color: str = "#1c3d6e", brand: str = "") -> Path:
+    """인포 카드: 큰 제목 + 번호 붙은 줄 3개(굵은 키워드 + 짧은 설명). 글자를 프로그램이 그려 한글이 틀리지 않는다"""
+    W, pad, box_h = 1080, 64, 190
+    rows = [(k.strip(), v.strip()) for k, v in rows if k.strip()][:3]
+    probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    title = re.sub(r"^\d+\.\s*", "", title).strip()
+    tsize = _fit_size(probe, [title], W - pad * 2, 76, 46)
+    n_title = len(_wrap(probe, title, _font(tsize), W - pad * 2)[:2])
+    H = 70 + n_title * int(tsize * 1.25) + 50 + len(rows) * (box_h + 24) + 60  # 내용만큼만 (빈 공간 없이)
+    im = Image.new("RGB", (W, H), _tint(color, 0.92))
+    d = ImageDraw.Draw(im)
+    tl = _wrap(d, title, _font(tsize), W - pad * 2)[:2]
+    y = 70
+    for l in tl:
+        d.text((W // 2, y), l, font=_font(tsize), fill="#16181b", anchor="ma")
+        y += int(tsize * 1.25)
+    d.rounded_rectangle([W // 2 - 60, y + 6, W // 2 + 60, y + 14], radius=4, fill=color)
+    y += 50
+    for n, (key, desc) in enumerate(rows, 1):
+        x0, x1 = pad, W - pad
+        d.rounded_rectangle([x0 + 4, y + 6, x1 + 4, y + box_h + 6], radius=26, fill=_tint(color, 0.75))  # 그림자
+        d.rounded_rectangle([x0, y, x1, y + box_h], radius=26, fill="white")
+        d.rounded_rectangle([x0, y, x0 + 18, y + box_h], radius=9, fill=color)
+        cx, cy = x0 + 90, y + box_h // 2
+        d.ellipse([cx - 40, cy - 40, cx + 40, cy + 40], fill=color)
+        d.text((cx, cy), str(n), font=_font(46), fill="white", anchor="mm")
+        tx, tw = x0 + 160, x1 - x0 - 200
+        ksize = _fit_size(d, [key], tw, 50, 34)
+        dl = _wrap(d, desc, _font(34), tw)[:2] if desc else []
+        block = ksize * 1.2 + len(dl) * 46
+        ty = y + (box_h - block) / 2
+        d.text((tx, ty), key, font=_font(ksize), fill=color)
+        ty += ksize * 1.25
+        for l in dl:
+            d.text((tx, ty), l, font=_font(34), fill="#4a4e55")
+            ty += 46
+        y += box_h + 24
+    if brand:
+        d.text((W - pad, H - 30), brand, font=_font(26), fill="#8a8d93", anchor="rm")
+    im.save(out, quality=92)
+    return out
+
+
 def make_table_card(title: str, rows: list[list[str]], out: Path, seed: str, brand: str = "") -> Path | None:
     """비교표 카드: 머리글 줄은 진한 색 띠, 칸마다 짧은 글자. 글자는 프로그램이 정확히 그린다"""
     rows = [[str(c).strip() for c in r] for r in rows if r and any(str(c).strip() for c in r)]

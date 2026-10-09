@@ -43,6 +43,10 @@ def make_photo_folders(rows) -> None:
         (PHOTOS / slugify(r["keyword"])).mkdir(parents=True, exist_ok=True)
 
 
+PEOPLE_TOPIC = re.compile(r"프로필|본명|열애|결별|결혼|이혼|근황|출연진|나이|누구|배우|가수|아이돌|감독|선수|기자|"
+                          r"유튜버|대표|회장|의원|장관|대통령")
+
+
 def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: str = "", writing: dict | None = None,
                   keyword: str = "") -> dict:
     """썸네일, 지표 카드, 요약 카드, 무료 사진을 만들어 output/<slug>_images/에 저장한다."""
@@ -67,6 +71,11 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     # 일러스트 방식: 블로그 캐릭터 하나·색 하나로 모든 그림 통일, 소제목 그림에 제목·핵심 3개 글자까지 (Claude 가 맞춤법 확인)
     # ai_style: illustration(카드형 일러스트) / photo(실사) / auto(글마다 Claude 가 주제에 맞게 고름)
     ai_style = cfg.get("ai_style", "auto")
+    # 실존 인물 이야기(연예인·인물 근황 등)에는 사람처럼 생긴 캐릭터를 넣지 않는다 — 그 사람 사진으로 오해받을 수 있다
+    people_topic = bool(PEOPLE_TOPIC.search(post.title + " " + keyword))
+    if people_topic and ai_style != "photo":
+        ai_style = "photo"
+        print("  (실존 인물 이야기라 그림에 사람·캐릭터를 넣지 않아요)")
     if ai_style == "auto":
         ai_style = "photo" if post.image_style == "photo" else "illustration"
         if ai_left:
@@ -86,13 +95,13 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     retries = 3  # 글자가 틀려 다시 그리는 횟수 (글 하나에)
     shift = random.randrange(30)  # 배경·동작·구도 목록을 글마다 다른 곳에서 시작 (글끼리 비슷해지지 않게)
 
-    def ai_make(prompt: str, out: Path, style: str | None = None, aspect: str = "16:9") -> Path | None:
+    def ai_make(prompt: str, out: Path, style: str | None = None, aspect: str = "16:9", with_character: bool = True) -> Path | None:
         nonlocal ai_left
         if ai_left <= 0:
             return None
         try:
             path = ai_images.generate(prompt, out, ai_key, ai_model, style=style if style is not None else plain_style,
-                                      aspect=aspect, refs=refs)
+                                      aspect=aspect, refs=refs if with_character else None)
             ai_left -= 1
             return ai_images.shrink(path)  # 글에 올라가는 그림은 가로 1200px JPEG 로 (캐릭터 기준 그림은 그대로)
         except Exception as e:
@@ -142,7 +151,8 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     want_summary = cfg.get("summary_card", True) and post.summary and not post.recap
     if ai_left and ((cfg.get("metrics_card", True) and post.metrics) or want_summary):
         card_bg = ai_make(f"블로그 글 '{post.title}'의 정보 카드 배경. 주제와 어울리는 사물·공간을 은은하게, 넓은 여백, "
-                          "가운데는 비교적 단순하게.", folder / "ai_cardbg.png")
+                          "가운데는 비교적 단순하게. 사람·캐릭터 없이.", folder / "ai_cardbg.png",
+                          with_character=False)
     if cfg.get("metrics_card", True) and post.metrics:
         media["metrics_card"] = images.make_metrics_card(post.metrics, post.metrics_basis, folder / "metrics.jpg", slug, brand,
                                                          bg=card_bg)
@@ -159,8 +169,8 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     if ai_left and not photos and cfg.get("thumbnail", True):
         thumb_photo = ai_make(f"블로그 글 '{post.title}'의 대표 이미지. 주제를 한눈에 보여 주는 장면"
                               + (f"(찍을 대상: {post.thumbnail_query})" if post.thumbnail_query.strip() else "")
-                              + ". 사람 없이 물건·장소 중심.",
-                              folder / "ai_thumb.png")
+                              + ". 사람·캐릭터 없이 물건·장소 중심.",
+                              folder / "ai_thumb.png", with_character=False)  # 썸네일마다 같은 얼굴이면 홈판에서 다 똑같아 보인다
     if not thumb_photo and cfg.get("thumbnail", True) and cfg.get("thumbnail_style", "auto") == "auto":
         # 썸네일 배경: 직접 찍은 사진이 있으면 그걸, 없으면 무료 사진을 따로 찾는다
         if photos:
@@ -231,7 +241,8 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
         if not picked and ai_left:
             picked = ai_card(s, i) if illust else ai_make(
                 ai_images.section_prompt(s.heading, s.key_line + " " + " ".join(s.paragraphs), keyword or post.title,
-                                         " / ".join([s.stock_query, *s.alt_queries[:1]]), i + shift),
+                                         " / ".join([s.stock_query, *s.alt_queries[:1]]), i + shift,
+                                         people_ok=not people_topic),
                 folder / f"ai_{i + 1:02d}.png")
             if picked and not illust:
                 ai_images.stamp(picked)

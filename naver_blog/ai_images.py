@@ -162,12 +162,12 @@ PEOPLE = ["사람 없이 물건과 장소만", "사람 없이 물건과 장소�
           "사람 없이 물건과 장소만", "멀리서 작게 보이는 뒷모습 한 명(중년 남성)"]
 
 
-def section_prompt(heading: str, text: str, keyword: str, scene: str = "", idx: int = 0) -> str:
+def section_prompt(heading: str, text: str, keyword: str, scene: str = "", idx: int = 0, people_ok: bool = True) -> str:
     """소제목 실사 그림. scene: 글을 쓸 때 소제목마다 정한 장면(사진 검색어), idx: 몇 번째 소제목(구도를 바꾼다)"""
     return (f"네이버 블로그 글 '{keyword}'의 소제목 '{heading}'에 넣을 사진.\n"
             + (f"찍을 대상: {scene}\n" if scene.strip() else "")
             + f"이 부분 내용: {text[:250]}\n"
-            f"구도: {SHOTS[idx % len(SHOTS)]}. 사람: {PEOPLE[idx % len(PEOPLE)]}.\n"
+            f"구도: {SHOTS[idx % len(SHOTS)]}. 사람: {PEOPLE[idx % len(PEOPLE)] if people_ok else '사람·얼굴·손 모두 없이'}.\n"
             "내용을 한눈에 떠올리게 하는 구체적인 물건·장소를 찍습니다. 주제와 상관없는 물건이나, "
             "책상 앞에 앉은 여성 같은 흔한 인물 사진은 넣지 않습니다.")
 

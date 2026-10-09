@@ -22,8 +22,9 @@ from pathlib import Path
 import urllib.error
 
 import ai_images
+import commons_photos
 import images
-from generate import (UNKNOWN, NotEnoughInfo, Post, SearchFailed, check_card_text, checklist, themed_style, choose_photo, find_photos, generate_post,
+from generate import (UNKNOWN, split_videos, video_info, NotEnoughInfo, Post, SearchFailed, check_card_text, checklist, themed_style, choose_photo, find_photos, generate_post,
                       make_threads, my_posts, polish_saved, experience_memo)
 
 ROOT = Path(__file__).parent
@@ -177,6 +178,9 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     # 소제목마다 관련 이미지 하나: 직접 찍은 사진 → 정책브리핑·무료 사진(후보 여러 장 중 Claude가 내용에 맞는 것만) → 소제목 카드
     cand_dir = folder / "_candidates"
     own_used, n_stock, n_card, n_policy, n_ai = set(), 0, 0, 0, 0
+    # 위키미디어 공용 사진 (출처 표시만 하면 쓸 수 있는 실제 사진). 글 하나에 commons_max 장까지
+    use_commons = cfg.get("commons_photos", True) and bool(writing)
+    commons_max, n_commons, commons_seen = int(cfg.get("commons_max", 3)), 0, set()
     for i, s in enumerate(post.sections):
         if not s.heading.strip():
             continue
@@ -184,14 +188,9 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             own_used.add(s.photo)
             continue
         picked = None
-        if ai_left:
-            picked = ai_card(s, i) if illust else ai_make(
-                ai_images.section_prompt(s.heading, s.key_line + " " + " ".join(s.paragraphs), keyword or post.title),
-                folder / f"ai_{i + 1:02d}.png")
-            if picked and not illust:
-                ai_images.stamp(picked)
-            n_ai += bool(picked)
-        if not picked and policy and writing:
+        queries = [q for q in [s.stock_query, *s.alt_queries] if q.strip()]
+        # 실제 사진이 맞으면 먼저: 정책브리핑(공공누리) → 위키미디어 공용(CC) → 없으면 AI 그림 → 무료 사진
+        if policy and writing:
             try:
                 n = choose_photo(s.heading, " ".join(s.paragraphs), policy, writing)
                 if n:
@@ -200,7 +199,25 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
                     n_policy += 1
             except Exception as e:
                 print(f"  정책브리핑 사진 고르기 실패({s.heading[:15]}): {str(e).splitlines()[0][:60]}")
-        queries = [q for q in [s.stock_query, *s.alt_queries] if q.strip()]
+        if not picked and use_commons and queries and writing and n_commons < commons_max:
+            try:
+                cands = commons_photos.candidates(queries, folder / "_commons", seen=commons_seen)
+                if cands:
+                    n = choose_photo(s.heading, " ".join(s.paragraphs), [c[0] for c in cands], writing)
+                    if n:
+                        src, credit = cands[n - 1]
+                        picked = Path(shutil.copy2(src, folder / src.name))
+                        media.setdefault("credits", {})[str(picked)] = credit
+                        n_commons += 1
+            except Exception as e:
+                print(f"  위키미디어 사진 고르기 실패({s.heading[:15]}): {str(e).splitlines()[0][:60]}")
+        if not picked and ai_left:
+            picked = ai_card(s, i) if illust else ai_make(
+                ai_images.section_prompt(s.heading, s.key_line + " " + " ".join(s.paragraphs), keyword or post.title),
+                folder / f"ai_{i + 1:02d}.png")
+            if picked and not illust:
+                ai_images.stamp(picked)
+            n_ai += bool(picked)
         if not picked and use_stock and queries and writing:
             cands, seen = [], set(used_ids)
             for q in queries:
@@ -238,6 +255,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
         if picked:
             media["stock"][i] = picked
     shutil.rmtree(cand_dir, ignore_errors=True)
+    shutil.rmtree(folder / "_commons", ignore_errors=True)
 
     if cfg.get("thumbnail", True):
         media["thumbnail"] = images.make_thumbnail(post.title, folder / "thumbnail.jpg", slug, post.thumbnail_text,
@@ -246,7 +264,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             ai_images.stamp(media["thumbnail"])  # AI 배경 썸네일에도 표시
     print(f"  이미지 준비: 썸네일 {('사진형' if thumb_photo else '매거진형') if 'thumbnail' in media else '없음'}, "
           f"지표 카드 {'만듦' if 'metrics_card' in media else '없음'}, "
-          f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 비교표 {'만듦' if 'table' in media else '없음'}, 소제목 이미지: AI {n_ai}장 + 정책브리핑 사진 {n_policy}장 + 내용에 맞는 무료 사진 {n_stock}장 + 소제목 카드 {n_card}장")
+          f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 비교표 {'만듦' if 'table' in media else '없음'}, 소제목 이미지: AI {n_ai}장 + 정책브리핑 사진 {n_policy}장 + 위키미디어 사진 {n_commons}장 + 내용에 맞는 무료 사진 {n_stock}장 + 소제목 카드 {n_card}장")
     return media
 
 
@@ -391,7 +409,7 @@ def main():
         cfg.setdefault("autofill", {})["enabled"] = False  # 상품 링크는 사람이 넣어야 해서 자동 채우기는 하지 않는다
         # 판매 글: 목차·지표 카드·요약 카드·무료 사진·카드뉴스·스레드 없이, 상품 사진 중심으로 짧게
         img = cfg.setdefault("images", {})
-        for k in ("metrics_card", "summary_card", "stock_photos", "section_cards", "card_news", "policy_photos", "ai_images"):
+        for k in ("metrics_card", "summary_card", "stock_photos", "section_cards", "card_news", "policy_photos", "ai_images", "commons_photos"):
             img[k] = bool(shop.get(k, False))
         cfg["writing"]["threads"] = bool(shop.get("threads", False))
         cfg["writing"]["min_chars"] = shop.get("min_chars", 800)
@@ -461,6 +479,9 @@ def main():
             sleep_minutes(pub["between_posts_minutes"], "다음 글까지 대기")
 
         keyword = row["keyword"]
+        memo_rest, videos = split_videos(row.get("memo", ""))
+        if videos:  # 메모의 유튜브 주소는 글감이 아니라 넣을 영상 → 메모에서 떼어 낸다
+            row = {**row, "memo": memo_rest}
         slug = slugify(keyword)
         photos = find_photos(PHOTOS / slug)
         product = None
@@ -571,6 +592,14 @@ def main():
             if not post.shop_links:
                 print("  ⚠ 상품 링크 칸이 비어 있어요. 임시저장 글에 쇼핑커넥트 링크를 직접 넣어 주세요.")
 
+        post.videos = []
+        for v in videos:  # 퍼가기가 허용된 영상만 (비공개·퍼가기 금지면 빼고 알려 준다)
+            info = video_info(v)
+            if info:
+                post.videos.append(v)
+                print(f"  영상 넣음: {info.get('title', '')[:30]} — 채널: {info.get('author_name', '?')} (공식 채널이 맞는지 확인해 주세요)")
+            else:
+                print(f"  ⚠ 영상을 넣지 않았어요(비공개이거나 퍼가기 금지): {v}")
         OUTPUT.mkdir(exist_ok=True)
         media = prepare_media(post, slug, photos, cfg.get("images", {}), cfg["naver"].get("blog_name", ""), cfg["writing"],
                               keyword=keyword)

@@ -158,6 +158,7 @@ class Post(BaseModel):
     shop_links: SkipJsonSchema[list[str]] = []  # 쇼핑커넥트 링크
     shop_name: SkipJsonSchema[str] = ""  # 상품명 (링크 앞 안내 문장용)
     simple: SkipJsonSchema[bool] = False  # 판매 글: 목차 없이 짧게
+    videos: SkipJsonSchema[list[str]] = []  # 메모에 적은 공식 유튜브 영상 주소 (첫 소제목 뒤에 넣는다)
 
     @classmethod
     def load(cls, data: dict) -> "Post":
@@ -169,9 +170,13 @@ class Post(BaseModel):
         """{사진 경로: 사진 아래 설명}. 소제목 사진에만 (썸네일·카드는 그림 안에 글자가 있어 설명을 달지 않음)"""
         media = media or {}
         stock = media.get("stock", {})
+        credits = media.get("credits", {})  # 위키미디어 공용 사진: 사진 바로 아래에 작가·라이선스 (CC 라이선스 조건)
         caps = {}
         for i, s in enumerate(self.sections):
             c = s.caption.strip()
+            if i in stock and str(stock[i]) in credits:
+                caps[str(stock[i])] = (c + " · " if c else "") + credits[str(stock[i])]
+                continue
             if not c:
                 continue
             if s.photo and 1 <= s.photo <= len(photos):
@@ -240,6 +245,9 @@ class Post(BaseModel):
             out.extend(("text", p) for p in s.paragraphs)
             if media.get("table") and i + 1 == max(1, min(self.table_after, len(self.sections))):
                 out.append(("photo", media["table"]))
+            if i == 0 and self.videos:  # 공식 영상 (주소 한 줄 = 편집기가 영상으로 바꿔 보여 준다)
+                out.append(("text", "▶ 공식 영상으로 보기"))
+                out.extend(("text", v) for v in self.videos)
         if self.recap:  # 한눈에 다시 보기: 🟢 이름 / "한마디" / → 정리 두 줄
             if self.recap_title.strip():
                 out.append(("heading", self.recap_title.strip()))
@@ -277,6 +285,8 @@ class Post(BaseModel):
             credits.append("정책브리핑(공공누리 제1유형)")
         if any("pixabay" in Path(p).name for p in stock.values()):
             credits.append("Pixabay")
+        if any(Path(p).name.startswith("commons_") for p in stock.values()):
+            credits.append("위키미디어 공용(CC, 사진마다 작가 표시)")
         if any(Path(p).name.startswith("ai_") for p in stock.values()):
             credits.append("일부 이미지는 AI로 만들었어요")
         if credits:
@@ -519,6 +529,30 @@ def _api_key() -> str | None:
 
 
 QUESTION_PREFIX = "궁금한 점:"  # 키워드 자동 채우기가 적는 메모. 작성자의 경험이 아니라 독자가 궁금해할 점
+
+
+YOUTUBE = re.compile(r"https?://(?:www\.|m\.)?(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)[\w\-]{6,}[^\s,]*")
+
+
+def split_videos(memo: str) -> tuple[str, list[str]]:
+    """메모에서 유튜브 주소를 떼어 낸다 → (나머지 메모, [주소]). '영상:' 같은 앞말도 같이 지운다"""
+    vids = YOUTUBE.findall(memo or "")
+    rest = YOUTUBE.sub("", memo or "")
+    rest = re.sub(r"(공식\s*)?(영상|유튜브)\s*[:：]\s*(?=[,\s]|$)", "", rest)
+    return re.sub(r"\s{2,}", " ", rest).strip(" ,\n"), vids
+
+
+def video_info(url: str) -> dict:
+    """유튜브 공식 정보(제목·채널). 비공개·퍼가기 금지 영상이면 빈 dict"""
+    import json
+    import urllib.request
+    try:
+        q = urllib.parse.urlencode({"url": url, "format": "json"})
+        req = urllib.request.Request(f"https://www.youtube.com/oembed?{q}", headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.load(r)
+    except Exception:
+        return {}
 
 
 def experience_memo(memo: str) -> bool:

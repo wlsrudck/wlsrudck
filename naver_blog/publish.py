@@ -836,6 +836,7 @@ def _check_editor(page: Page, editor, post: Post) -> list[str]:
     time.sleep(3)  # 링크 미리보기 카드는 늦게 생긴다
     allowed = {_host(u) for u in list(post.shop_links) + [x.partition("|")[2] for x in post.links] if u.strip()}
     allowed |= {"naver.me", "blog.naver.com", "smartstore.naver.com", "brand.naver.com", "shopping.naver.com"}
+    allowed |= {_host(v) for v in post.videos} | {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
     notes = []
     removed = 0
     for _ in range(5):  # 한 번에 하나씩 지우고 다시 살핀다

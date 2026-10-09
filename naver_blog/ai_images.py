@@ -33,7 +33,7 @@ CHARACTERS = {
     "cs": ("짧은 머리에 작은 헤드셋을 쓴 친절한 한국인 상담원 캐릭터, 파란 조끼와 흰 셔츠",
            "믿음직한 파랑(#1971c2)과 하늘색"),
 }
-ILLUST = ("밝고 따뜻한 3D 카툰 일러스트(부드러운 조명, 둥근 형태, 맑은 색감), 깔끔한 방·책상 배경에 화분·책·머그컵 같은 소품. "
+ILLUST = ("밝고 따뜻한 3D 카툰 일러스트(부드러운 조명, 둥근 형태, 맑은 색감). "
           "메인 색: {color}. 실존 인물·연예인·정치인을 그리지 않고 로고·워터마크를 넣지 않습니다. "
           "캐릭터에게 의사 가운·청진기·약사 복장처럼 전문가로 보이는 차림을 입히지 않습니다. "
           "실제 판매 상품(특정 브랜드 제품)을 그리지 않습니다.")
@@ -239,10 +239,22 @@ def character_ref(key: str, character: str, color: str, path: Path, model: str =
         return None
 
 
-def card_prompt(title: str, points: list[str], heading: str, text: str, character: str, with_text: bool = True) -> str:
-    """소제목 일러스트 카드. with_text=False 면 글자 없이 장면만"""
-    scene = (f"참고 그림의 캐릭터({character}, 같은 얼굴·머리·옷)가 소제목 '{heading}' 내용에 어울리는 동작과 소품과 함께 있는 장면 "
-             f"(예: 노트북 앞에서 턱을 괴고 웃기, 손가락으로 가리키기). 내용: {text[:200]}")
+# 글 꾸밈 테마(generate.THEMES)에 맞춘 그림 색 — 글자 색과 그림 색이 어울리고, 글마다 달라진다
+THEME_COLORS = {"차분한 정보": "차분한 남색과 하늘색", "따뜻한 생활": "따뜻한 주황과 베이지", "산뜻한 건강": "싱그러운 초록과 연두",
+                "주의 알림": "선명한 빨강과 연분홍", "설레는 나들이": "청록과 하늘색", "똑똑한 비교": "보라와 라벤더",
+                "기본 청록": "청록과 민트"}
+# 소제목마다 돌려 가며 쓰는 배경 (내용에 딱 맞는 곳이 있으면 그곳이 먼저)
+BACKGROUNDS = ["아늑한 거실 소파 앞", "밝은 주방 식탁", "동네 골목길", "햇살 드는 카페 창가", "은행·주민센터 창구 앞",
+               "공원 벤치", "버스·지하철 안", "마트 장보기 통로", "원룸 책상", "아파트 현관 앞"]
+POSES = ["턱을 괴고 웃기", "손가락으로 가리키기", "엄지척", "깜짝 놀라기", "휴대폰을 들여다보기", "메모하기", "고개를 갸웃하기"]
+
+
+def card_prompt(title: str, points: list[str], heading: str, text: str, character: str, with_text: bool = True,
+                idx: int = 0) -> str:
+    """소제목 일러스트 카드. with_text=False 면 글자 없이 장면만. idx: 몇 번째 소제목(배경·동작을 바꾼다)"""
+    scene = (f"참고 그림의 캐릭터({character}, 같은 얼굴·머리·옷)가 소제목 '{heading}' 내용에 어울리는 소품과 함께 "
+             f"'{POSES[idx % len(POSES)]}' 동작을 하는 장면. 배경: 내용에 딱 맞는 장소가 있으면 그곳, 없으면 "
+             f"{BACKGROUNDS[idx % len(BACKGROUNDS)]}. 내용: {text[:200]}")
     if not with_text:
         return "블로그 소제목 일러스트. " + scene
     labels = ", ".join(f"「{p}」" for p in points[:3])

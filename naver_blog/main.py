@@ -72,13 +72,16 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     # 캐릭터: config 에 직접 적은 것 → [AI 이미지 시험]에서 정한 것(output/ai_character.txt) → 블로그 종류별 기본
     character = (cfg.get("ai_character") or ai_images.saved_character(OUTPUT)
                  or ai_images.CHARACTERS[cfg.get("_mode", "main")][0])
-    color = cfg.get("ai_color") or ai_images.CHARACTERS["main"][1]
+    # 그림 색: 글 꾸밈 테마를 따라간다 (없으면 config 의 ai_color → 블로그 기본 색)
+    color = (ai_images.THEME_COLORS.get(cfg.get("_theme", "")) or cfg.get("ai_color")
+             or ai_images.CHARACTERS[cfg.get("_mode", "main")][1])
     plain_style = ai_images.illust_style(color, False) if illust else None  # 글자 없는 그림 (썸네일·카드 배경)
     refs = []
     if illust:
         ref = ai_images.character_ref(ai_key, character, color, OUTPUT / "ai_character.png", ai_model)
         refs = [ref] if ref else []
     retries = 3  # 글자가 틀려 다시 그리는 횟수 (글 하나에)
+    shift = random.randrange(30)  # 배경·동작·구도 목록을 글마다 다른 곳에서 시작 (글끼리 비슷해지지 않게)
 
     def ai_make(prompt: str, out: Path, style: str | None = None, aspect: str = "16:9") -> Path | None:
         nonlocal ai_left
@@ -102,7 +105,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
         points = [p.strip() for p in s.card_points if p.strip()][:3]
         text = s.key_line + " " + " ".join(s.paragraphs)
         out = folder / f"ai_{i + 1:02d}.png"
-        prompt = ai_images.card_prompt(title, points, s.heading, text, character)
+        prompt = ai_images.card_prompt(title, points, s.heading, text, character, idx=i + shift)
         style = ai_images.illust_style(color, True)
         for attempt in range(2):
             if ai_left <= 0:
@@ -118,7 +121,8 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
                 break
             retries -= 1
             ai_left += 1  # 다시 그리는 건 장수에 세지 않는다 (retries 로 따로 막는다)
-        path = ai_make(ai_images.card_prompt(title, points, s.heading, text, character, with_text=False), out, aspect="4:3")
+        path = ai_make(ai_images.card_prompt(title, points, s.heading, text, character, with_text=False, idx=i + shift), out,
+                       aspect="4:3")
         return ai_images.stamp(path) if path else None
 
     if getattr(post, "table_rows", None):
@@ -224,7 +228,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
         if not picked and ai_left:
             picked = ai_card(s, i) if illust else ai_make(
                 ai_images.section_prompt(s.heading, s.key_line + " " + " ".join(s.paragraphs), keyword or post.title,
-                                         " / ".join([s.stock_query, *s.alt_queries[:1]]), i),
+                                         " / ".join([s.stock_query, *s.alt_queries[:1]]), i + shift),
                 folder / f"ai_{i + 1:02d}.png")
             if picked and not illust:
                 ai_images.stamp(picked)
@@ -612,11 +616,12 @@ def main():
             else:
                 print(f"  ⚠ 영상을 넣지 않았어요(비공개이거나 퍼가기 금지): {v}")
         OUTPUT.mkdir(exist_ok=True)
+        style = themed_style(cfg.get("style"), post.theme)  # 글 성격에 맞춰 색·인용구 모양을 고른다 (그림 색도 같이)
+        cfg.setdefault("images", {})["_theme"] = style.get("theme", "")
         media = prepare_media(post, slug, photos, cfg.get("images", {}), cfg["naver"].get("blog_name", ""), cfg["writing"],
                               keyword=keyword)
         preview = OUTPUT / f"{dt.date.today()}_{slug}.html"
         checks = checklist(post, row.get("memo", ""), cfg["writing"])
-        style = themed_style(cfg.get("style"), post.theme)  # 글 성격에 맞춰 색·인용구 모양을 고른다
         if style.get("theme"):
             print(f"  꾸밈 테마: {style['theme']}")
         preview.write_text(post.to_html(photos, OUTPUT, media, style, checks), encoding="utf-8")

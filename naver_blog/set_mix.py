@@ -14,6 +14,7 @@ CHOICES = {
     "1": ("trending,trending,evergreen", "홈판 위주 (지금 뜨는 2 : 평생 1) — 홈판 유입이 대부분인 블로그"),
     "2": ("evergreen,trending", "반반 (평생 1 : 지금 뜨는 1)"),
     "3": ("evergreen,evergreen,trending", "검색 위주 (평생 2 : 지금 뜨는 1) — 검색 유입이 많은 블로그"),
+    "4": ("trending,news,evergreen", "홈판 + 뉴스 화제 (지금 뜨는 1 : 뉴스 화제 1 : 평생 1) — 생활·돈 이슈 블로그"),
 }
 
 

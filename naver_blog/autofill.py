@@ -1,6 +1,7 @@
 """키워드 자동 채우기: keywords.csv 에 쓸 키워드가 떨어지면 프로그램이 알아서 골라 넣는다.
 
 - 평생 키워드(꾸준히 검색되는 것)와 지금 뜨는 키워드를 반반 섞는다 (설정: [autofill] mix)
+  mix 에 news 를 넣으면 네이버 뉴스 많이 본·댓글 많은 기사에서 고른 생활·돈 글감도 섞는다
 - S·A 등급, 이미 쓴 글과 겹치지 않는 것, 가사·쇼핑·이슈성 말이 없는 것만
 - 지금 뜨는 키워드는 연예 쪽보다 생활·경제·IT 쪽을 먼저 고른다
 - 발행은 하지 않는다. 고른 키워드로 글을 써서 임시저장까지만 (발행은 사람이 확인 후)
@@ -44,6 +45,16 @@ def trending_candidates(cfg: dict) -> list[dict]:
     return good
 
 
+def news_candidates(cfg: dict) -> list[dict]:
+    """네이버 뉴스 많이 본·댓글 많은 기사에서 고른 생활·돈 글감 (하루 한 번 읽고 저장해 둔 것을 쓴다)"""
+    try:
+        from news_trends import find_news
+        return [r for r in find_news(cfg) if r["grade"] == "A" and not r["written"]]
+    except Exception as e:
+        print(f"  (뉴스 글감 읽기 실패: {str(e).splitlines()[0][:80]})")
+        return []
+
+
 def question_memo(keyword: str) -> str:
     """메모 칸에 '궁금한 점: ...' 을 적는다. 네이버 자동완성(사람들이 실제로 이어서 검색하는 말)에서 3개.
     경험이 아니라 질문이므로 글에 경험처럼 쓰이지 않는다. 직접 겪은 일이 있으면 이 메모를 지우고 적으면 된다."""
@@ -69,7 +80,8 @@ def fill(cfg: dict, need: int) -> list[str]:
     # 각 출처에서 한 번씩만 찾아 두고, 번갈아 하나씩 뽑는다 (한쪽이 모자라면 다른 쪽에서 채운다)
     pools = {}
     for m in dict.fromkeys(mix):  # "trending,trending,evergreen" 처럼 같은 걸 두 번 적으면 그 비율(2:1)로 섞는다
-        pools[m] = evergreen_candidates(cfg, keys) if m == "evergreen" else trending_candidates(cfg)
+        pools[m] = (evergreen_candidates(cfg, keys) if m == "evergreen" else news_candidates(cfg) if m == "news"
+                    else trending_candidates(cfg))
     picked: list[dict] = []
     taken: set = set()
     while len(picked) < need and any(pools.values()):

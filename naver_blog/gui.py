@@ -26,6 +26,7 @@ BUTTONS = [
     ]),
     ("키워드 찾기", [
         ("지금 뜨는 키워드", "11_trending_keywords.bat", "크리에이터 어드바이저 인기 유입 검색어 (이슈)"),
+        ("뉴스 화제 키워드", "21_news_keywords.bat", "네이버 뉴스 많이 본·댓글 많은 기사에서 '나랑 관련 있는' 생활·돈 글감을 골라요"),
         ("평생 키워드", "12_evergreen_keywords.bat", "1년 내내 꾸준히 검색되는 키워드 (연금형)"),
         ("주제로 키워드 찾기", "6_keyword_finder.bat", "큰 주제를 넣으면 롱테일 키워드를 찾아요"),
         ("시즌 키워드", "7_season_keywords.bat", "다가오는 계절·행사 키워드"),
@@ -95,7 +96,7 @@ def open_path(p: Path) -> None:
 
 AUTO_KEYWORD = "(상품명 자동)"
 SHOP_CATEGORIES = ["주방템", "청소·세탁템", "수납·정리템", "자취 꿀템 모음"]
-SHOP_HIDDEN = {"11_trending_keywords.bat", "12_evergreen_keywords.bat", "7_season_keywords.bat", "13_autofill_keywords.bat",
+SHOP_HIDDEN = {"11_trending_keywords.bat", "21_news_keywords.bat", "12_evergreen_keywords.bat", "7_season_keywords.bat", "13_autofill_keywords.bat",
                "@google_key", "16_ai_image_test.bat"}
 
 
@@ -509,7 +510,7 @@ def main():
         else:
             items = [it for it in items if it[1] != "15_find_products.bat"]
         if cs:  # 고객센터 블로그는 이슈·계절 키워드를 쓰지 않는다
-            items = [it for it in items if it[1] not in ("11_trending_keywords.bat", "7_season_keywords.bat")]
+            items = [it for it in items if it[1] not in ("11_trending_keywords.bat", "7_season_keywords.bat", "21_news_keywords.bat")]
         lf = ttk.LabelFrame(run, text=group, padding=10)
         lf.grid(row=0, column=col, sticky="nsew", padx=6)
         run.columnconfigure(col, weight=1)

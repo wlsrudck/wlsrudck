@@ -18,12 +18,14 @@ from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).parent
 CACHE = ROOT / "output" / "news_trends.json"
+CACHE_V = 2  # 고르는 규칙이 바뀌면 올린다 (같은 날 저장해 둔 옛 목록을 다시 쓰지 않게)
 PAGES = ["https://news.naver.com/main/ranking/popularDay.naver",   # 많이 본 뉴스
          "https://news.naver.com/main/ranking/popularMemo.naver"]  # 댓글 많은 뉴스
 
 
 class NewsPick(BaseModel):
-    keyword: str = Field(description="블로그 정보글로 쓸 검색 키워드(2~5단어). 예: '도시가스 요금 인상', '청년도약계좌 금리'")
+    keyword: str = Field(description="사람들이 검색창에 실제로 칠 짧은 말(2~3단어, 12자 안팎). "
+                                     "예: '도시가스 요금 인상', '주담대 규제', '환급 앱 수수료'")
     category: str = Field(description="생활정보 / 경제·재테크 / IT·AI 중 하나")
     why: str = Field(description="독자가 왜 '내 일'로 궁금해할지 한 줄(25자 안팎)")
     title: str = Field(description="근거가 된 기사 제목 그대로")
@@ -42,6 +44,8 @@ PROMPT = """아래는 오늘 네이버 뉴스에서 많이 보거나 댓글이 �
 - 기사 하나의 사건이 아니라, 독자가 검색해서 '확인하거나 신청하거나 대비'할 수 있는 키워드로 바꿉니다
   (예: '서울 지하철 요금 1550원으로' → '지하철 요금 인상 시기')
 - 빼는 것: 정치인·정당 공방, 선거, 연예인·유명인 사생활, 범죄·사고 속 특정 인물, 스포츠 경기 결과, 외교·안보 다툼, 주가 하루 등락
+- 키워드는 기사 제목을 늘어놓은 긴 말이 아니라, 궁금한 사람이 검색창에 칠 짧은 말(2~3단어)로 씁니다.
+- 회사 하나의 내부 일(특정 회사 성과급·인사)처럼 독자가 확인·신청·대비할 게 없는 이야기는 고르지 않습니다.
 - 비슷한 키워드는 하나로 합칩니다. 제목에 근거가 없는 키워드를 지어내지 않습니다.
 
 기사 제목:
@@ -105,7 +109,7 @@ def find_news(cfg: dict, use_cache: bool = True) -> list[dict]:
     if use_cache and CACHE.exists():
         try:
             data = json.loads(CACHE.read_text(encoding="utf-8"))
-            if data.get("date") == today:
+            if data.get("date") == today and data.get("v") == CACHE_V:
                 picks = data["picks"]
         except Exception:
             picks = None
@@ -121,7 +125,7 @@ def find_news(cfg: dict, use_cache: bool = True) -> list[dict]:
             print(f"  (글감 고르기 실패: {str(e).splitlines()[0][:80]})")
             return []
         CACHE.parent.mkdir(exist_ok=True)
-        CACHE.write_text(json.dumps({"date": today, "picks": picks}, ensure_ascii=False), encoding="utf-8")
+        CACHE.write_text(json.dumps({"date": today, "v": CACHE_V, "picks": picks}, ensure_ascii=False), encoding="utf-8")
     have = {r["keyword"].replace(" ", "") for r in load_rows()}
     titles_mine = written_titles(cfg["naver"]["blog_id"])
     out = []
@@ -132,7 +136,7 @@ def find_news(cfg: dict, use_cache: bool = True) -> list[dict]:
         topic = {"경제·재테크": "경제", "IT·AI": "IT"}.get(p.get("category", ""), "생활")
         out.append({**p, "keyword": kw, "category": mapping.get(topic, ""),
                     "written": already_written(kw, titles_mine), "kind": "뉴스 화제", "grade": "A"})
-    # 검색량이 아주 적은(아무도 안 찾는) 키워드는 뒤로. 검색광고 키가 없으면 그대로
+    # 검색량은 참고로만 보여 준다. 오늘 터진 뉴스는 지난 한 달 검색량이 원래 거의 0이라 등급을 내리지 않는다
     try:
         from keyword_finder import load_keys, monthly_volumes
         keys = load_keys()
@@ -141,11 +145,9 @@ def find_news(cfg: dict, use_cache: bool = True) -> list[dict]:
             for r in out:
                 v = vols.get(r["keyword"])
                 r["volume"] = v[0] if v else None
-                if r["volume"] is not None and r["volume"] < 100:
-                    r["grade"] = "B"
     except Exception:
         pass
-    out.sort(key=lambda r: (r["grade"] != "A", bool(r["written"])))
+    out.sort(key=lambda r: bool(r["written"]))
     return out
 
 
@@ -158,18 +160,19 @@ def main():
         return
     print()
     for i, r in enumerate(rows, 1):
-        vol = f"월 {r['volume']:,}" if r.get("volume") else "검색량 ?"
-        print(f"  {i:2d}. [{r['grade']}] {r['keyword']}  ({vol}) → {r['category']}")
+        vol = f"지난달 검색 {r['volume']:,}" if r.get("volume") else "새 이슈"
+        print(f"  {i:2d}. {r['keyword']}  ({vol}) → {r['category']}")
         print(f"        왜: {r['why']}   (기사: {r['title'][:40]})")
         if r["written"]:
             print(f"        └ 비슷한 글 있음: {r['written'][:40]}")
-    ans = input("\nkeywords.csv에 넣을 번호 (예: 1,3 / 엔터 = A등급 중 비슷한 글 없는 것 전부 / 0 = 넣지 않음): ").strip()
+    print("  (오늘 터진 뉴스는 지난달 검색량이 원래 거의 없어요. 숫자가 작아도 괜찮아요)")
+    ans = input("\nkeywords.csv에 넣을 번호 (예: 1,3 / 엔터 = 비슷한 글 없는 것 위에서 3개 / 0 = 넣지 않음): ").strip()
     if ans == "0":
         return
     if ans:
         picked = [rows[int(x) - 1] for x in re.split(r"[,\s]+", ans) if x.isdigit() and 1 <= int(x) <= len(rows)]
     else:
-        picked = [r for r in rows if r["grade"] == "A" and not r["written"]]
+        picked = [r for r in rows if not r["written"]][:3]
     if not picked:
         print("넣을 키워드가 없어요.")
         return

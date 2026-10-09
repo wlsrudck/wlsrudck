@@ -214,12 +214,16 @@ def card_prompt(title: str, points: list[str], heading: str, text: str, characte
             + "이 제목과 라벨 말고는 어떤 글자·숫자·영어 낙서도 넣지 않습니다. 글자는 또렷하고 큼직하게.")
 
 
-def _blog_mode() -> str:
+def _blog_cfg() -> dict:
     try:
         import tomllib
-        cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8-sig"))
+        return tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8-sig"))
     except Exception:
-        return "main"
+        return {}
+
+
+def _blog_mode() -> str:
+    cfg = _blog_cfg()
     return "shop" if cfg.get("shopping", {}).get("enabled") else "cs" if cfg.get("cs", {}).get("enabled") else "main"
 
 
@@ -235,6 +239,19 @@ if __name__ == "__main__":  # 시험: 이 블로그 캐릭터 + 소제목 일러
     character, color = CHARACTERS[_blog_mode()]
     out_dir = ROOT / "output"
     out_dir.mkdir(exist_ok=True)
+    if _blog_cfg().get("images", {}).get("ai_style", "illustration") == "photo":  # 실사 스타일: 글자 없는 생활 사진 한 장
+        topic = sys.argv[1] if len(sys.argv) > 1 else "원룸 겨울 난방비 아끼기"
+        try:
+            p = stamp(generate(section_prompt("난방비 아끼기", topic, topic), out_dir / "ai_test.png", k))
+            print(f"실사 스타일 예시를 만들었어요: {p}")
+            try:
+                import os
+                os.startfile(p)  # noqa
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"실패: {explain(e)}")
+        sys.exit(0)
     ref_path = out_dir / "ai_character.png"
     topic = sys.argv[1] if len(sys.argv) > 1 else "원룸 겨울 난방비 아끼기"
 

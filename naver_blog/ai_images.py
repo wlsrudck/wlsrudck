@@ -172,6 +172,22 @@ def section_prompt(heading: str, text: str, keyword: str, scene: str = "", idx: 
             "책상 앞에 앉은 여성 같은 흔한 인물 사진은 넣지 않습니다.")
 
 
+def shrink(path: Path, width: int = 1200) -> Path:
+    """AI 그림(PNG, 1~2MB)을 가로 1200px JPEG(수백 KB)로 줄인다 — 에디터에 여러 장 올릴 때 빠르고 덜 버벅이게"""
+    try:
+        from PIL import Image
+        im = Image.open(path).convert("RGB")
+        if im.width > width:
+            im = im.resize((width, round(im.height * width / im.width)), Image.LANCZOS)
+        out = path.with_suffix(".jpg")
+        im.save(out, quality=88, optimize=True)
+        if out != path:
+            path.unlink(missing_ok=True)
+        return out
+    except Exception:
+        return path
+
+
 def stamp(path: Path, label: str = "AI 생성") -> Path:
     """오른쪽 아래에 작은 'AI 생성' 표시를 얹는다 (AI 로 만든 그림이라는 걸 그림 가까이에서 알리기)"""
     try:

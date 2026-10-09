@@ -91,7 +91,7 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             path = ai_images.generate(prompt, out, ai_key, ai_model, style=style if style is not None else plain_style,
                                       aspect=aspect, refs=refs)
             ai_left -= 1
-            return path
+            return ai_images.shrink(path)  # 글에 올라가는 그림은 가로 1200px JPEG 로 (캐릭터 기준 그림은 그대로)
         except Exception as e:
             print(f"  (AI 이미지 실패: {ai_images.explain(e)})")
             if "403" in str(e) or "429" in str(e) or "400" in str(e):

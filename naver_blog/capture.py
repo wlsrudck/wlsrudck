@@ -1,7 +1,7 @@
 """블로그 글을 휴대폰 화면 그대로 한 번에 길게 캡처한다 (17_capture.bat / 창의 [글 캡처하기]).
 
 - 글 주소를 붙여 넣으면 그 글을, 그냥 엔터면 이 폴더 블로그의 가장 최근 글을 찍는다
-- 휴대폰(모바일) 화면으로 열어 끝까지 내려 사진을 모두 불러온 뒤 위에서부터 차례로 찍는다
+- 휴대폰(모바일) 화면으로 열어 제목부터 본문 끝까지만 찍는다 (댓글·다른 글 목록은 빼서 장수가 늘지 않게)
 - 긴 글은 화면 몇 장 크기로 나눠 output/captures/날짜_시각/01.png, 02.png ... 로 저장하고 폴더를 열어 준다
   (나눠 두면 카톡·채팅에 그대로 올리기 좋다)
 - 로그인 정보(auth/state.json)가 있으면 같이 써서 비공개 글도 찍힌다
@@ -19,7 +19,14 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 STATE = ROOT / "auth" / "state.json"
 OUT = ROOT / "output" / "captures"
-WIDTH, PART_H = 412, 1800  # 휴대폰 화면 너비, 한 장 높이(화면 2~3개 분량)
+WIDTH, PART_H = 412, 2200  # 휴대폰 화면 너비, 한 장 높이(화면 2~3개 분량)
+MAX_H = 20000  # 본문을 못 찾았을 때 최대 높이
+# 글 본문이 끝나는 위치 (스마트에디터 본문 → 옛 본문 순서로 찾는다). 못 찾으면 0
+BODY_END = """() => {
+    const el = document.querySelector('.se-main-container, #postViewArea, .post_ct, #viewTypeSelector');
+    if (!el) return 0;
+    return Math.round(el.getBoundingClientRect().bottom + window.scrollY);
+}"""
 
 
 def _blog_id() -> str:
@@ -67,24 +74,25 @@ def capture(url: str) -> list[Path]:
         page = ctx.new_page()
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(2500)
-        # 끝까지 천천히 내려서 사진을 모두 불러온다
-        last = 0
-        for _ in range(200):
-            page.mouse.wheel(0, 700)
-            page.wait_for_timeout(250)
+        # 본문 끝까지만 천천히 내려서 사진을 불러온다 (그 아래 댓글·다른 글 목록은 끝없이 늘어나므로 찍지 않는다)
+        end = 0
+        for _ in range(150):
+            end = page.evaluate(BODY_END)
             h = page.evaluate("document.documentElement.scrollHeight")
             y = page.evaluate("window.scrollY + window.innerHeight")
-            if y >= h - 5:
-                if h == last:
-                    break
-                last = h
-                page.wait_for_timeout(800)
+            if (end and y >= end + 300) or y >= h - 5:
+                break
+            page.mouse.wheel(0, 700)
+            page.wait_for_timeout(300)
+        page.wait_for_timeout(800)
+        end = page.evaluate(BODY_END)
         page.evaluate("window.scrollTo(0, 0)")
         page.wait_for_timeout(1000)
         # 위·아래에 붙어 다니는 메뉴 막대가 그림마다 겹치지 않게 숨긴다
         page.add_style_tag(content="[class*='floating'],[class*='Floating'],[class*='app_banner'],[class*='AppBanner']"
                                    "{display:none !important}")
         total = page.evaluate("document.documentElement.scrollHeight")
+        total = min(total, end + 60) if end else min(total, MAX_H)
         y, n = 0, 1
         while y < total:
             h = min(PART_H, total - y)
@@ -127,7 +135,7 @@ def main():
         print("찍힌 게 없어요.")
         return
     print(f"\n{len(files)}장 저장했어요: {files[0].parent}")
-    print("이 폴더의 그림을 순서대로 보내 주면 돼요.")
+    print("폴더에서 Ctrl+A 로 전부 고른 뒤 채팅창으로 한 번에 끌어다 놓으면 돼요 (01, 02... 순서대로).")
     try:
         os.startfile(files[0].parent)  # noqa  (윈도우에서 폴더를 연다)
     except Exception:

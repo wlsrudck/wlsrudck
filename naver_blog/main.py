@@ -23,7 +23,7 @@ import urllib.error
 
 import ai_images
 import images
-from generate import (UNKNOWN, NotEnoughInfo, Post, SearchFailed, check_card_text, checklist, choose_photo, find_photos, generate_post,
+from generate import (UNKNOWN, NotEnoughInfo, Post, SearchFailed, check_card_text, checklist, themed_style, choose_photo, find_photos, generate_post,
                       make_threads, my_posts, polish_saved, experience_memo)
 
 ROOT = Path(__file__).parent
@@ -567,7 +567,10 @@ def main():
                               keyword=keyword)
         preview = OUTPUT / f"{dt.date.today()}_{slug}.html"
         checks = checklist(post, row.get("memo", ""), cfg["writing"])
-        preview.write_text(post.to_html(photos, OUTPUT, media, cfg.get("style"), checks), encoding="utf-8")
+        style = themed_style(cfg.get("style"), post.theme)  # 글 성격에 맞춰 색·인용구 모양을 고른다
+        if style.get("theme"):
+            print(f"  꾸밈 테마: {style['theme']}")
+        preview.write_text(post.to_html(photos, OUTPUT, media, style, checks), encoding="utf-8")
         print(f"  미리보기 저장: {preview} ({len(post.body_text())}자)")
         saved = {"keyword": keyword, "slug": slug, "date": str(dt.date.today()), "version": VERSION,
                  "photos": [str(p) for p in photos], "post": post.model_dump()}
@@ -614,7 +617,7 @@ def main():
         for attempt in range(2):
             try:
                 post_to_naver(post, photos, media, cfg["naver"]["blog_id"], pub["auto_publish"], pub["headless"], OUTPUT,
-                              cfg.get("style"), category)
+                              style, category)
                 break
             except LoginRequired:
                 if attempt:

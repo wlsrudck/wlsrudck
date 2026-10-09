@@ -54,6 +54,43 @@ def is_recap(text: str) -> bool:
     return text[:1] in RECAP_DOTS and "\n“" in text
 
 
+# 글 성격별 꾸밈 테마: Claude 가 글마다 하나를 고르면 소제목·인용구·형광펜·행동 한 줄 색과 인용구 모양이 바뀐다.
+# (config [style] auto_theme = false 면 [style] 에 적은 색을 그대로 쓴다. 광고 표기 빨강은 테마와 상관없이 그대로)
+THEMES = {
+    "차분한 정보": ("정책·제도·지원금·금융·세금·신청 방법",
+               {"heading_color": "#1c3d6e", "quote_color": "#1c3d6e", "q_color": "#1c3d6e", "toc_color": "#555555",
+                "highlight_color": "#d0ebff", "cta_color": "#1971c2", "quote_style": "따옴표"}),
+    "따뜻한 생활": ("살림·요리·육아·자취·생활 꿀팁",
+               {"heading_color": "#b8541b", "quote_color": "#b8541b", "q_color": "#b8541b", "toc_color": "#6b5a4e",
+                "highlight_color": "#fff3bf", "cta_color": "#e8590c", "quote_style": "포스트잇"}),
+    "산뜻한 건강": ("건강·운동·병원·약·자연",
+               {"heading_color": "#2b8a3e", "quote_color": "#2b8a3e", "q_color": "#2b8a3e", "toc_color": "#555555",
+                "highlight_color": "#d3f9d8", "cta_color": "#2f9e44", "quote_style": "라인&따옴표"}),
+    "주의 알림": ("사기·피해 예방·마감 임박·주의사항·고장·사고",
+              {"heading_color": "#c92a2a", "quote_color": "#c92a2a", "q_color": "#c92a2a", "toc_color": "#555555",
+               "highlight_color": "#ffe3e3", "cta_color": "#e03131", "quote_style": "따옴표"}),
+    "설레는 나들이": ("여행·축제·예약·공연·이벤트·계절 행사",
+                {"heading_color": "#0b7285", "quote_color": "#0b7285", "q_color": "#0b7285", "toc_color": "#555555",
+                 "highlight_color": "#c5f6fa", "cta_color": "#1098ad", "quote_style": "말풍선"}),
+    "똑똑한 비교": ("상품·IT·요금제·브랜드 비교·고르는 법",
+               {"heading_color": "#5f3dc4", "quote_color": "#5f3dc4", "q_color": "#5f3dc4", "toc_color": "#555555",
+                "highlight_color": "#e5dbff", "cta_color": "#7048e8", "quote_style": "라인&따옴표"}),
+    "기본 청록": ("어디에도 딱 맞지 않을 때",
+              {"heading_color": "#00756a", "quote_color": "#00756a", "q_color": "#00756a", "toc_color": "#555555",
+               "highlight_color": "#fff3bf", "cta_color": "#1971c2", "quote_style": "포스트잇"}),
+}
+
+
+def themed_style(base: dict | None, theme: str) -> dict:
+    """[style] 설정 위에 글 테마를 덮는다. 테마 이름이 없거나 모르는 이름이면 아무 테마나 하나 (글마다 다르게)"""
+    import random
+    base = dict(base or {})
+    if not base.get("auto_theme", True):
+        return base
+    name = theme if theme in THEMES else random.choice([t for t in THEMES if t != "기본 청록"])
+    return {**base, **THEMES[name][1], "theme": name}
+
+
 def is_qa(text: str) -> bool:
     return text.startswith("Q. ") and "\nA. " in text
 
@@ -110,6 +147,8 @@ class Post(BaseModel):
                                                      "recap이 없으면 빈 문자열")
     recap: list[RecapItem] = Field(default=[], description="글 끝 요약: 글에서 견주거나 나눈 것(종류·방법·단계)이 2~5개일 때 하나씩. "
                                                            "없으면 빈 목록")
+    theme: str = Field(default="", description="이 글 성격에 맞는 꾸밈 테마 이름 하나(글자 그대로): "
+                       + " / ".join(f"{k}({v[0]})" for k, v in THEMES.items()))
     related: list[int] = Field(description="'내 블로그의 다른 글' 목록에서 이 글과 관련 있는 글 번호(최대 5개). 목록이 없거나 관련 글이 없으면 빈 목록")
     # 아래 둘은 프로그램이 채운다 (Claude에게 보내는 답 형식에서는 빠진다)
     links: SkipJsonSchema[list[str]] = []
@@ -293,9 +332,18 @@ class Post(BaseModel):
                             f'<span style="color:{st["a_color"]}">{html.escape(a).replace(chr(10), "<br>")}</span></p>')
             else:
                 keys = set(self.key_lines())
-                deco = "text-decoration:underline;" if st["key_underline"] else ""
-                lines = [f'<b style="color:{st["key_color"]};{deco}">{html.escape(l)}</b>' if l.strip() in keys
-                         else html.escape(l) for l in value.split("\n")]
+                if st.get("key_style", "highlight") == "highlight":  # 형광펜
+                    key_css = f"background:{st['highlight_color']}"
+                else:
+                    key_css = f"color:{st['key_color']};" + ("text-decoration:underline;" if st["key_underline"] else "")
+
+                def fmt(l: str) -> str:
+                    if l.strip() in keys:
+                        return f'<b style="{key_css}">{html.escape(l)}</b>'
+                    if l.startswith("✔ "):
+                        return f'<b style="color:{st["cta_color"]}">{html.escape(l)}</b>'
+                    return html.escape(l)
+                lines = [fmt(l) for l in value.split("\n")]
                 body.append("<p>" + "<br>".join(lines) + "</p>")
         if not any(not m.pending for m in self.metrics):
             warn_metric = ('<p style="background:#fff3cd;border:1px solid #e0b000;padding:12px;border-radius:6px">'
@@ -696,6 +744,9 @@ STYLE_RULES = """
 - 글에서 종류·방법·단계 2~5개를 견주거나 나눴다면 recap에 하나씩 담고 recap_title을 독자 질문처럼 씁니다.
   says는 그것이 독자에게 건네는 한마디처럼 짧게(예: 네이버 메이트 → 이번 달 당신 콘텐츠 좋네요.), points는 → 로 붙일 사실 2개.
   본문 내용을 바꿔 말하는 정리일 뿐, 새로운 사실을 지어내지 않습니다. 견줄 것이 하나뿐이면 빈 목록.
+
+[꾸밈 테마]
+- theme 에는 글 성격에 가장 어울리는 테마 이름 하나를 목록에서 글자 그대로 고릅니다(색과 인용구 모양이 바뀝니다).
 
 [소제목 그림 글자]
 - 소제목마다 card_title(번호 없이 10자 이내)과 card_points(7자 이내 3개)를 씁니다. 그림 속에 그대로 그려지므로

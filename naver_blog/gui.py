@@ -20,6 +20,7 @@ CONFIG = ROOT / "config.toml"
 BUTTONS = [
     ("글쓰기", [
         ("글 1개 써서 임시저장", "4_run_save_draft.bat", "keywords.csv 에서 상태가 빈 키워드 하나로 글을 써서 임시저장해요"),
+        ("내 글 목록 뽑기", "23_export_posts.bat", "내 블로그 글 전체 목록을 파일로 저장해요 (Claude 채팅에 올려 분석받기)"),
         ("모아보기 글 만들기", "22_curation_post.bat", "예전에 쓴 내 글 4~6개를 한 주제로 묶어 임시저장해요 (조회수·체류시간↑)"),
         ("미리보기만 (저장 안 함)", "3_test_write_only.bat", "블로그에 올리지 않고 output 폴더에 미리보기만 만들어요"),
         ("클립 영상 만들기", "8_make_clip.bat", "오늘 쓴 글로 네이버 클립용 세로 영상을 만들어요"),

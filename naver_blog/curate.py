@@ -110,6 +110,15 @@ def build(cfg: dict, topic: str = "") -> tuple | None:
 
     from generate import Post, Section, _api_key
     posts = rss_posts(cfg["naver"]["blog_id"])
+    try:  # 최근 50개(RSS)보다 오래된 글까지: 블로그 글 목록 전체 (제목만)
+        from my_posts_export import all_posts
+        seen = {p["url"] for p in posts}
+        older = [{**p, "text": ""} for p in all_posts(cfg["naver"]["blog_id"], quiet=True) if p["url"] not in seen]
+        if older:
+            print(f"내 글 {len(posts) + len(older)}개에서 골라요.")
+        posts += older[:400]
+    except Exception:
+        pass
     if len(posts) < 4:
         print("묶을 글이 4개보다 적어요. 글이 더 쌓이면 다시 해 주세요.")
         return None

@@ -64,7 +64,7 @@ def to_mobile(url: str) -> str:
     if bid:
         return f"https://m.blog.naver.com/{bid}/{no}"
     url = url.strip()
-    return url if url.startswith("http") else "https://" + url
+    return url if "://" in url else "https://" + url
 
 
 def url_variants(url: str) -> list[str]:

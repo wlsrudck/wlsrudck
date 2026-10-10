@@ -295,7 +295,8 @@ class Post(BaseModel):
         return "\n\n".join(parts)
 
     def toc(self) -> str:
-        items = [s.heading for s in self.sections if s.heading] + (["자주 묻는 질문"] if self.qa else [])
+        items = [s.heading for s in self.sections if s.heading] + \
+            (["자주 묻는 질문"] if any(q.question.strip() and q.answer.strip() for q in self.qa) else [])
         # 본문 소제목(1. 2. 3.)과 글자가 겹치지 않게 ① ② ③ 번호를 쓴다 (에디터에서 목차 줄만 따로 꾸밀 수 있게)
         circled = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮"
         lines = [(circled[i] if i < len(circled) else f"{i + 1}.") + " " + re.sub(r"^\d+\.\s*", "", h)
@@ -365,10 +366,11 @@ class Post(BaseModel):
                 head = [f"{dot} {r.name.strip()}", f"“{says}”"] if r.name.strip() else [f"{dot} “{says}”"]  # 이름이 비면 동그라미만 덩그러니 남지 않게
                 lines = [*head, *[f"→ {p.strip()}" for p in r.points[:3]]]
                 out.append(("text", "\n".join(lines)))
-        if self.qa:
+        qa = [q for q in self.qa if q.question.strip() and q.answer.strip()]  # 빈 질문·답은 'Q. / A.' 만 남으니 뺀다
+        if qa:
             out.append(("heading", "자주 묻는 질문"))
-            for q in self.qa:
-                out.append(("text", f"Q. {q.question}\nA. {q.answer}"))
+            for q in qa:
+                out.append(("text", f"Q. {q.question.strip()}\nA. {q.answer.strip()}"))
         # 남은 사진은 끝에 모아 넣는다. 단, 상세페이지에서 잘라 온 조각(detail_)은 본문에 맞는 자리에 고른 것만 쓴다
         out.extend(("photo", p) for i, p in enumerate(photos, 1) if i not in used and not p.name.startswith("detail_"))
         if media.get("summary_card"):
@@ -1406,6 +1408,7 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
 
     dedupe_intro(post)
     fix_key_lines(post)
+    post.qa = [q for q in post.qa if q.question.strip() and q.answer.strip()]
     post.suggest = suggest
     post.links = [f"{mine[i - 1][0]}|{mine[i - 1][1]}" for i in dict.fromkeys(post.related) if 1 <= i <= len(mine)][:5]
     post.updated = time.strftime("%Y-%m-%d")

@@ -332,7 +332,8 @@ def load_rows():
     split = []
     for r in lines:
         kws = [k.strip() for k in r[0].splitlines() if k.strip()]
-        split += [[k, *r[1:]] for k in kws] if len(kws) > 1 else [r]
+        # 여러 키워드를 한 글로 섞어 쓴 상태 표시는 나눈 줄에 물려주지 않는다 (줄마다 새로 쓰게)
+        split += [[k, r[1] if len(r) > 1 else "", ""] + list(r[3:]) for k in kws] if len(kws) > 1 else [r]
     lines = split
     rows = [{"keyword": r[0].strip(), "memo": r[1] if len(r) > 1 else "", "status": r[2] if len(r) > 2 else "",
              "category": r[3].strip() if len(r) > 3 else "", "link": r[4].strip() if len(r) > 4 else "",

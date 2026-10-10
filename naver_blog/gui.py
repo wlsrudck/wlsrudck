@@ -232,8 +232,27 @@ class KeywordTab(ttk.Frame):
         except Exception as e:
             messagebox.showerror("읽기 실패", f"keywords.csv 를 읽지 못했어요.\n{e}")
             self.rows = []
+        self.dedupe()
         self.cat_box["values"] = known_categories(self.rows)
         self.refresh()
+
+    def dedupe(self):
+        """똑같은 키워드가 두 줄 이상이면 한 줄만 남긴다 (아직 안 쓴 줄을 남긴다. 상품 링크가 다른 쇼핑 줄은 그대로)"""
+        keep, seen, dropped = [], {}, 0
+        for r in self.rows:
+            k = (r["keyword"].replace(" ", ""), r.get("link", ""))
+            if r["keyword"] == AUTO_KEYWORD or k not in seen:
+                seen[k] = len(keep)
+                keep.append(r)
+                continue
+            dropped += 1
+            old = keep[seen[k]]
+            if old["status"].strip() and not r["status"].strip():  # 쓴 줄과 안 쓴 줄이 겹치면 안 쓴 줄을 남긴다
+                keep[seen[k]] = {**r, "memo": r["memo"] or old["memo"], "category": r["category"] or old["category"]}
+        if dropped:
+            self.rows = keep
+            if self.save():
+                messagebox.showinfo("정리", f"똑같은 키워드 {dropped}줄을 하나로 합쳤어요.")
 
     def refresh(self):
         self.tree.delete(*self.tree.get_children())

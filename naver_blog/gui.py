@@ -214,6 +214,8 @@ class KeywordTab(ttk.Frame):
         btns.grid(row=4, column=0, columnspan=4, sticky="e", pady=(6, 0))
         if self.shop:
             ttk.Button(btns, text="링크 여러 개 한 번에", command=self.bulk_add).pack(side="left", padx=3)
+        else:
+            ttk.Button(btns, text="키워드 여러 개 한 번에", command=self.bulk_keywords).pack(side="left", padx=3)
         ttk.Button(btns, text="새로 추가", command=self.add).pack(side="left", padx=3)
         ttk.Button(btns, text="선택한 줄 고치기", command=self.update_row).pack(side="left", padx=3)
         ttk.Button(btns, text="다시 쓰게 하기 (상태 비우기)", command=self.reset_status).pack(side="left", padx=3)
@@ -310,6 +312,48 @@ class KeywordTab(ttk.Frame):
         if messagebox.askyesno("정리", f"아직 안 쓴 키워드 중 {len(bad)}개를 지울까요?\n(가사·음원, 연예·사람 이슈 / 메모 적은 줄은 남겨요)\n\n{names}"):
             self.rows = [r for r in self.rows if r not in bad]
             self.save()
+
+    def bulk_keywords(self):
+        """키워드 여러 개를 한 줄에 하나씩 붙여 넣어 한 번에 추가 (줄마다: 키워드 [| 메모])"""
+        win = tk.Toplevel(self)
+        win.title("키워드 여러 개 한 번에 넣기")
+        win.transient(self.winfo_toplevel())
+        ttk.Label(win, text="한 줄에 키워드 하나. 메모를 같이 넣으려면 키워드 뒤에 | 를 쓰고 이어서 쓰세요.\n"
+                            "붙여넣기: Ctrl+V 또는 마우스 오른쪽 클릭 → 붙여넣기. 이미 목록에 있는 키워드는 건너뛰어요.").pack(anchor="w", padx=10, pady=6)
+        box = tk.Text(win, width=80, height=16)
+        box.pack(padx=10)
+        box.bind("<Control-KeyPress>", clip_key)
+        menu = tk.Menu(win, tearoff=0)
+        menu.add_command(label="붙여넣기", command=lambda: box.event_generate("<<Paste>>"))
+        menu.add_command(label="모두 지우기", command=lambda: box.delete("1.0", "end"))
+        box.bind("<Button-3>", lambda e: (box.focus_set(), menu.tk_popup(e.x_root, e.y_root)))
+        box.focus_set()
+        opt = ttk.Frame(win)
+        opt.pack(fill="x", padx=10, pady=6)
+        cat = tk.StringVar(value=self.cat.get())
+        ttk.Label(opt, text="카테고리").pack(side="left")
+        ttk.Combobox(opt, textvariable=cat, values=known_categories(self.rows), width=18).pack(side="left", padx=4)
+
+        def ok():
+            have = {r["keyword"].replace(" ", "") for r in self.rows}
+            n = skip = 0
+            for line in box.get("1.0", "end").splitlines():
+                kw, _, memo = line.partition("|")
+                kw = re.sub(r"^\s*(\d+[.)]|[-•·*])\s*", "", kw).strip()  # 앞에 붙은 번호·점은 뗀다
+                if not kw:
+                    continue
+                if kw.replace(" ", "") in have:
+                    skip += 1
+                    continue
+                self.rows.append({"keyword": kw, "memo": memo.strip(), "status": "", "category": cat.get().strip()})
+                have.add(kw.replace(" ", ""))
+                n += 1
+            if n and self.save():
+                messagebox.showinfo("추가", f"{n}개를 넣었어요." + (f" (이미 있던 {skip}개는 건너뜀)" if skip else ""))
+            elif skip:
+                messagebox.showinfo("추가", f"모두 이미 목록에 있어요 ({skip}개).")
+            win.destroy()
+        ttk.Button(win, text="넣기", command=ok).pack(pady=(0, 10))
 
     def bulk_add(self):
         """링크 여러 개를 한 줄에 하나씩 붙여 넣어 한 번에 추가 (줄마다: 제휴링크 [정보링크])"""
@@ -493,6 +537,7 @@ def enable_clipboard(root: tk.Tk) -> None:
         e.widget.focus_set()
         menu.tk_popup(e.x_root, e.y_root)
 
+    root.bind_class("Text", "<Control-KeyPress>", on_ctrl, add="+")
     for cls in ("TEntry", "Entry", "TCombobox"):
         root.bind_class(cls, "<Control-KeyPress>", on_ctrl, add="+")
         root.bind_class(cls, "<Button-3>", on_right, add="+")

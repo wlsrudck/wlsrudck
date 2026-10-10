@@ -53,6 +53,43 @@ def pick_clip(arg: str = "") -> Path | None:
     return vids[int(ans) - 1] if ans.isdigit() and 1 <= int(ans) <= min(15, len(vids)) else None
 
 
+LIMIT = 300  # 클립 설명 칸 글자 수 한도 (해시태그도 이 안에 쓴다 — 따로 해시태그 칸이 없다)
+
+AI_SWITCH = r"""() => {
+    // 'AI 활용 설정' 글자 옆의 켜기/끄기 스위치를 찾아 표시한다. 이미 켜져 있으면 "on"
+    document.querySelectorAll("[data-cu-ai]").forEach(e => e.removeAttribute("data-cu-ai"));
+    const label = [...document.querySelectorAll("*")].find(e => e.children.length <= 3 &&
+        /^AI\s*활용\s*설정/.test((e.innerText || "").trim()));
+    if (!label) return "";
+    let box = label;
+    for (let i = 0; i < 5 && box; i++, box = box.parentElement) {
+        const sw = box.querySelector("[role=switch], input[type=checkbox], button[aria-pressed], button[aria-checked]");
+        if (sw) {
+            const on = sw.checked || sw.getAttribute("aria-checked") === "true" || sw.getAttribute("aria-pressed") === "true";
+            if (on) return "on";
+            sw.setAttribute("data-cu-ai", "1");
+            return "found";
+        }
+    }
+    return "";
+}"""
+
+
+def compose(body: str, tags: list[str], limit: int = LIMIT) -> str:
+    """설명 + 해시태그를 한도 안에서. 본문이 길면 문장 단위로 줄이고, 해시태그는 들어가는 만큼"""
+    tag_line = ""
+    for t in tags:
+        if len(tag_line) + len(t) + 2 > 80:
+            break
+        tag_line += ("" if not tag_line else " ") + "#" + t
+    room = limit - len(tag_line) - 2
+    if len(body) > room:
+        cut = body[:room]
+        end = max(cut.rfind(". "), cut.rfind("요."), cut.rfind("\n"))
+        body = (cut[:end + 2] if end > room // 2 else cut).rstrip()
+    return (body + ("\n\n" + tag_line if tag_line else "")).strip()[:limit]
+
+
 def read_caption(video: Path) -> tuple[str, list[str]]:
     """(설명, 해시태그 목록). 설명_해시태그.txt = 제목 / 빈 줄 / 설명 / 빈 줄 / #태그들"""
     f = video.with_name(video.stem + "_설명.txt")
@@ -68,7 +105,8 @@ def upload(video: Path) -> None:
     from playwright.sync_api import sync_playwright
     from login import STATE_PATH
     log: list[str] = [f"영상: {video.name}"]
-    desc, tags = read_caption(video)
+    body, tags = read_caption(video)
+    desc = compose(body, tags)
     cover = video.with_name(video.stem + "_표지.jpg")
 
     def save_log(page=None):
@@ -161,11 +199,15 @@ def upload(video: Path) -> None:
                             continue
                         b.click()
                         if b.evaluate("e => e.tagName") == "TEXTAREA":
-                            b.fill(desc[:2000])
+                            b.fill(desc)
+                            if not b.input_value().strip():  # 화면이 fill 을 못 받으면 키보드로
+                                page.keyboard.insert_text(desc)
+                            got = len(b.input_value())
                         else:
-                            page.keyboard.insert_text(desc[:2000])
-                        filled = True
-                        log.append(f"설명 넣음 (칸: {ph[:30] or '이름 없음'})")
+                            page.keyboard.insert_text(desc)
+                            got = len(b.inner_text())
+                        filled = got > 0
+                        log.append(f"설명 넣음 {got}자 / 한도 {LIMIT}자 (칸: {ph[:30] or '이름 없음'})")
                         break
                     except Exception:
                         continue
@@ -187,7 +229,23 @@ def upload(video: Path) -> None:
                     page.wait_for_timeout(300)
                     n_tag += 1
                 break
-        log.append(f"해시태그 {n_tag}/{len(tags)}개 넣음")
+        log.append(f"해시태그: 설명 끝에 함께 넣음" if not n_tag else f"해시태그 칸에 {n_tag}개 넣음")
+        # AI 활용 설정: 클립 그림·목소리를 AI로 만들었으므로 켠다 (네이버 안내에 맞게 투명하게)
+        ai = ""
+        for fr in page.frames:
+            try:
+                ai = fr.evaluate(AI_SWITCH)
+            except Exception:
+                ai = ""
+            if ai == "found":
+                try:
+                    fr.locator("[data-cu-ai]").first.click()
+                    ai = "켬"
+                except Exception as e:
+                    ai = f"켜기 실패 ({str(e).splitlines()[0][:40]})"
+            if ai:
+                break
+        log.append("AI 활용 설정: " + {"on": "이미 켜져 있음", "": "스위치를 못 찾음 — 직접 켜 주세요"}.get(ai, ai))
         if cover.exists():
             for fr in page.frames:
                 inp = fr.locator("input[type=file][accept*='image']")
@@ -204,7 +262,8 @@ def upload(video: Path) -> None:
 
         print("\n" + "\n".join("  " + x for x in log[1:]))
         print("\n이제 열린 화면에서 직접 확인해 주세요:")
-        print("  ① 영상이 다 올라갔는지  ② 설명·해시태그  ③ 카테고리(필수)  ④ 공개 설정")
+        print("  ① 영상이 다 올라갔는지  ② 설명(해시태그 포함)  ③ 카테고리 1차·2차(필수)")
+        print("  ④ AI 활용 설정이 켜졌는지  ⑤ 콘텐츠 링크 → [블로그]를 눌러 이 영상의 블로그 글 연결 (블로그로 사람이 넘어와요)")
         print("  확인했으면 화면의 [등록]을 누르세요. (프로그램은 등록을 누르지 않아요)")
         ans = input("\n등록을 마쳤으면 y + 엔터 (영상을 '올림' 폴더로 옮겨요) / 그냥 엔터 = 닫기: ").strip().lower()
         if ans == "y":

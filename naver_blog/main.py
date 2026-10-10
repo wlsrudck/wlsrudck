@@ -328,6 +328,12 @@ def load_rows():
     lines = [r for r in csv.reader(io.StringIO(text, newline="")) if r and r[0].strip()]
     if lines and lines[0][0].strip().lower() == "keyword":  # 칸 이름 줄: keyword,memo,status,category
         lines = lines[1:]
+    # 키워드 칸에 여러 줄을 한꺼번에 붙여 넣은 경우: 줄마다 따로 된 키워드로 나눈다
+    split = []
+    for r in lines:
+        kws = [k.strip() for k in r[0].splitlines() if k.strip()]
+        split += [[k, *r[1:]] for k in kws] if len(kws) > 1 else [r]
+    lines = split
     rows = [{"keyword": r[0].strip(), "memo": r[1] if len(r) > 1 else "", "status": r[2] if len(r) > 2 else "",
              "category": r[3].strip() if len(r) > 3 else "", "link": r[4].strip() if len(r) > 4 else "",
              "info_link": r[5].strip() if len(r) > 5 else "", "style": r[6].strip() if len(r) > 6 else ""} for r in lines]
@@ -527,6 +533,12 @@ def main():
     mine = my_posts(cfg["naver"]["blog_id"])  # 내 블로그 최근 글 (내부 링크용)
     if mine:
         print(f"내 블로그 최근 글 {len(mine)}개를 확인했어요 (관련 글을 글 끝에 연결)")
+    try:  # 같은 주제를 두 번 쓰지 않게: 블로그 글 전체 제목 (하루 한 번 읽어 둔다)
+        from trending_keywords import already_written, written_titles
+        all_mine = written_titles(cfg["naver"]["blog_id"])
+        print(f"내 블로그 글 전체 {len(all_mine)}개와 겹치는지 확인해요")
+    except Exception:
+        all_mine, already_written = [], (lambda *_: "")
     made = 0
     for row in pending:
         if made >= budget:
@@ -535,6 +547,13 @@ def main():
             sleep_minutes(pub["between_posts_minutes"], "다음 글까지 대기")
 
         keyword = row["keyword"]
+        dup = "" if (shop.get("enabled") or (OUTPUT / f"{dt.date.today()}_{slugify(keyword)}.json").exists()) \
+            else already_written(keyword, all_mine)
+        if dup:  # 이미 쓴 글과 같은 주제 → 쓰지 않고 표시만 (그래도 쓰려면 창에서 '다시 쓰게 하기')
+            print(f"[건너뜀] {keyword} → 이미 쓴 글: {dup[:40]}")
+            if not args.dry_run:
+                mark_done(keyword, f"skip 이미 씀 {dt.datetime.now():%Y-%m-%d}")
+            continue
         from trending_keywords import CONTROVERSY
         if CONTROVERSY.search(keyword):  # 직접 넣은 키워드는 쓰되, 사생활·범죄·정치 주제라는 걸 알려 준다
             print(f"  ⚠ '{keyword}' 는 사람 신상·연애사·범죄·정치 쪽 키워드예요. 신고·저품질 위험이 있으니 발행 전에 한 번 더 봐 주세요.")

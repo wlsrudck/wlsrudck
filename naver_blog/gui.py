@@ -268,6 +268,15 @@ class KeywordTab(ttk.Frame):
 
     def add(self):
         kw = self.kw.get().strip()
+        if "\n" in kw:  # 키워드 칸에 여러 줄을 붙여 넣으면 줄마다 하나씩 넣는다
+            have = {r["keyword"].replace(" ", "") for r in self.rows}
+            kws = [k.strip() for k in kw.splitlines() if k.strip() and k.strip().replace(" ", "") not in have]
+            for k in dict.fromkeys(kws):
+                self.rows.append({"keyword": k, "memo": "", "status": "", "category": self.cat.get().strip()})
+            if kws and self.save():
+                self.kw.set("")
+                messagebox.showinfo("추가", f"{len(set(kws))}개를 한 줄씩 넣었어요.")
+            return
         if not kw and self.shop and (self.info.get().strip() or self.link.get().strip()):
             kw = AUTO_KEYWORD
         if not kw:

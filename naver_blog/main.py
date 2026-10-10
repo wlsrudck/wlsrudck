@@ -533,12 +533,13 @@ def main():
     mine = my_posts(cfg["naver"]["blog_id"])  # 내 블로그 최근 글 (내부 링크용)
     if mine:
         print(f"내 블로그 최근 글 {len(mine)}개를 확인했어요 (관련 글을 글 끝에 연결)")
-    try:  # 같은 주제를 두 번 쓰지 않게: 블로그 글 전체 제목 (하루 한 번 읽어 둔다)
-        from trending_keywords import already_written, written_titles
+    try:  # 같은 주제를 두 번 쓰지 않게 + 함께 보면 좋은 글을 전체 글에서 고르게 (하루 한 번 읽어 둔다)
+        from trending_keywords import all_posts_cached, already_written, related_pool, written_titles
         all_mine = written_titles(cfg["naver"]["blog_id"])
-        print(f"내 블로그 글 전체 {len(all_mine)}개와 겹치는지 확인해요")
+        every = all_posts_cached(cfg["naver"]["blog_id"])
+        print(f"내 블로그 글 전체 {len(every)}개를 확인했어요 (겹치는 주제 건너뛰기 + 관련 글 고르기)")
     except Exception:
-        all_mine, already_written = [], (lambda *_: "")
+        all_mine, every, already_written, related_pool = [], [], (lambda *_: ""), None
     made = 0
     for row in pending:
         if made >= budget:
@@ -638,7 +639,8 @@ def main():
                 for attempt in range(3):
                     try:
                         post = generate_post(keyword, row.get("memo", ""), photos, cfg["writing"],
-                                             mine, later[0] if later else "")
+                                             (related_pool(keyword, every, mine) if (every and related_pool) else mine),
+                                             later[0] if later else "")
                         break
                     except Exception as e:  # Claude 서버 혼잡(529)이면 3분 쉬고 최대 두 번 더
                         if attempt == 2 or not (getattr(e, "status_code", None) in (529, 503)

@@ -397,28 +397,49 @@ def balanced(rows: list[dict], limit: int) -> list[dict]:
     return out
 
 
-def all_titles(blog_id: str) -> list[str]:
-    """내 블로그 글 전체 제목 (최근 50개보다 오래된 글까지). 하루 한 번만 읽고 output/my_titles.json 에 둔다"""
+def all_posts_cached(blog_id: str) -> list[tuple[str, str]]:
+    """내 블로그 글 전체 (제목, 주소) — 최근 50개보다 오래된 글까지. 하루 한 번만 읽고 output/my_posts.json 에 둔다"""
     import datetime as dt
     import json
-    cache = Path(__file__).parent / "output" / "my_titles.json"
+    cache = Path(__file__).parent / "output" / "my_posts.json"
     today = str(dt.date.today())
     try:
         d = json.loads(cache.read_text(encoding="utf-8"))
         if d.get("blog") == blog_id and d.get("date") == today:
-            return d["titles"]
+            return [tuple(p) for p in d["posts"]]
     except Exception:
         pass
     try:
         from my_posts_export import all_posts
-        titles = [p["title"] for p in all_posts(blog_id, quiet=True)]
+        posts = [(p["title"], p["url"]) for p in all_posts(blog_id, quiet=True)]
     except Exception:
-        titles = []
-    if titles:
+        posts = []
+    if posts:
         cache.parent.mkdir(exist_ok=True)
-        cache.write_text(json.dumps({"blog": blog_id, "date": today, "titles": titles}, ensure_ascii=False),
+        cache.write_text(json.dumps({"blog": blog_id, "date": today, "posts": posts}, ensure_ascii=False),
                          encoding="utf-8")
-    return titles
+    return posts
+
+
+def all_titles(blog_id: str) -> list[str]:
+    return [t for t, _ in all_posts_cached(blog_id)]
+
+
+def related_pool(keyword: str, posts: list[tuple[str, str]], recent: list[tuple[str, str]] = (),
+                 size: int = 40) -> list[tuple[str, str]]:
+    """'함께 보면 좋은 글' 후보: 전체 글 중 키워드와 낱말이 많이 겹치는 글 + 최근 글 몇 개 (Claude 가 이 중에서 고른다)"""
+    def bigrams(x: str) -> set[str]:
+        x = re.sub(r"[^0-9A-Za-z가-힣]", "", x).lower()
+        return {x[i:i + 2] for i in range(len(x) - 1)}
+    k = bigrams(keyword)
+    scored = sorted(((len(k & bigrams(t)), i, t, u) for i, (t, u) in enumerate(posts)), key=lambda x: (-x[0], x[1]))
+    pool = [(t, u) for sc, _, t, u in scored if sc > 0][:size - 10]
+    for t, u in list(recent)[:10] + posts[:10]:  # 최근 글도 조금 (아무것도 안 겹칠 때 대비)
+        if len(pool) >= size:
+            break
+        if (t, u) not in pool:
+            pool.append((t, u))
+    return pool
 
 
 def written_titles(blog_id: str) -> list[str]:

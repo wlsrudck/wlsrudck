@@ -180,7 +180,14 @@ _DUMP_BUTTONS = """() => [...document.querySelectorAll("button")].filter(e => e.
     .map(e => (e.className || "") + " | " + (e.innerText || "").trim().slice(0, 20)
          + (e.getAttribute("data-color") ? " | " + e.getAttribute("data-color") : "")).join("\\n")"""
 
-_PARAGRAPH_HTML = "([sel, text, first]) => { const a = [...document.querySelectorAll(sel)].filter(e => e.innerText.trim() === text); const p = first ? a[0] : a.pop(); return p ? p.innerHTML : ''; }"
+# 글자가 똑같은 문단 → 없으면 그 글자가 들어 있는 문단 (문단을 찾을 때와 같은 규칙. 편집기가 앞뒤에 글자를 붙이는 경우가 있다)
+_PARAGRAPH_HTML = """([sel, text, first]) => {
+    const all = [...document.querySelectorAll(sel)];
+    let a = all.filter(e => e.innerText.trim() === text);
+    if (!a.length) a = all.filter(e => e.innerText.includes(text));
+    const p = first ? a[0] : a.pop();
+    return p ? p.innerHTML : '';
+}"""
 
 
 def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | None, str, bool, bool]]:

@@ -9,6 +9,7 @@
 
 import datetime as dt
 import html
+import random
 import re
 import statistics
 import sys
@@ -21,10 +22,29 @@ ROOT = Path(__file__).parent
 OUT = ROOT / "output" / "shop_ideas.html"
 
 DEFAULT_SEEDS = {
-    "주방템": ["텀블러", "전기포트", "밀폐용기", "에어프라이어", "얼음틀", "도마"],
-    "청소·세탁템": ["청소포", "세탁세제", "섬유유연제", "욕실청소", "제습제", "빨래건조대"],
-    "수납·정리템": ["수납박스", "옷걸이", "냉장고정리", "서랍정리함", "압축팩", "신발정리"],
-    "자취 꿀템 모음": ["멀티탭", "암막커튼", "전기요", "가습기", "무드등", "구강청결제"],
+    "주방템": ["텀블러", "전기포트", "밀폐용기", "에어프라이어", "얼음틀", "도마", "냄비", "프라이팬", "수세미",
+            "식기건조대", "보온도시락", "커피머신", "믹서기", "칼갈이"],
+    "청소·세탁템": ["청소포", "세탁세제", "섬유유연제", "욕실청소", "제습제", "빨래건조대", "물걸레청소기", "무선청소기",
+               "곰팡이제거제", "세탁조클리너", "먼지떨이", "돌돌이", "배수구"],
+    "수납·정리템": ["수납박스", "옷걸이", "냉장고정리", "서랍정리함", "압축팩", "신발정리", "선반", "행거",
+               "틈새수납장", "이불정리", "리빙박스"],
+    "욕실·생활용품": ["샤워기", "욕실화", "칫솔살균기", "수건", "규조토발매트", "디퓨저", "탈취제", "휴지통",
+                "방향제", "구강세정기"],
+    "생활가전": ["가습기", "제습기", "공기청정기", "선풍기", "전기요", "서큘레이터", "온수매트", "전기히터",
+             "음식물처리기", "로봇청소기"],
+    "자취·1인가구": ["멀티탭", "암막커튼", "무드등", "구강청결제", "1인용소파", "접이식테이블", "전자레인지용기",
+                "미니냉장고", "간이옷장", "방음"],
+    "건강·홈케어": ["마사지기", "안마의자", "체중계", "족욕기", "목베개", "찜질팩", "혈압계", "폼롤러"],
+    "반려동물": ["고양이모래", "강아지패드", "자동급식기", "펫드라이룸", "스크래쳐", "강아지간식"],
+}
+# 달마다 잘 팔리는 계절 상품 (이번 달 + 다음 달 것을 같이 본다)
+SEASON_SEEDS = {
+    1: ["핫팩", "수면양말", "난방텐트", "가습기", "전기요"], 2: ["졸업선물", "신학기", "가습기", "핫팩"],
+    3: ["황사마스크", "공기청정기", "새학기", "봄이불"], 4: ["캠핑의자", "돗자리", "자외선차단", "피크닉"],
+    5: ["어버이날선물", "선풍기", "모기퇴치", "여름이불"], 6: ["제습기", "서큘레이터", "쿨매트", "모기장"],
+    7: ["휴가준비물", "아이스박스", "쿨토시", "휴대용선풍기"], 8: ["제습기", "수영복", "방수팩", "냉감패드"],
+    9: ["추석선물", "명절선물세트", "가을이불", "보온병"], 10: ["가습기", "전기요", "문풍지", "수면양말", "온수매트"],
+    11: ["김장", "핫팩", "난방텐트", "전기히터", "빼빼로"], 12: ["크리스마스선물", "연말선물", "패딩세탁", "결로방지"],
 }
 # 상품 키워드가 아닌 말 (정보·이슈·중고 등)
 NOT_PRODUCT = re.compile(r"뜻|방법|하는법|만들기|원리|역사|가사|중고|당근|렌탈|수리|고장|버리는|분리수거|AS|as센터|고객센터|매장|위치")
@@ -61,8 +81,11 @@ def _trend_notes(series: list[float] | None) -> tuple[float, float, str]:
 
 def find(seeds: dict[str, list[str]], keys: dict, per_seed: int = 4) -> list[dict]:
     cands: dict[str, dict] = {}
+    total, done = sum(len(v) for v in seeds.values()), 0
     for cat, items in seeds.items():
         for seed in items:
+            done += 1
+            print(f"  [{done}/{total}] {seed} 연관 상품 찾는 중...")
             try:
                 _, related = monthly_volumes([seed], keys)
             except Exception as e:
@@ -70,7 +93,8 @@ def find(seeds: dict[str, list[str]], keys: dict, per_seed: int = 4) -> list[dic
                 continue
             head, n = _head(seed), 0
             for name, vol, comp in related:
-                if head not in name or name == seed.replace(" ", "") or NOT_PRODUCT.search(name):
+                own = cat == "직접 고른 상품"  # 직접 쓴 상품은 그 이름 자체도 후보로
+                if head not in name or (name == seed.replace(" ", "") and not own) or NOT_PRODUCT.search(name):
                     continue
                 if not (VOL_MIN <= vol <= VOL_MAX) or name in cands:
                     continue
@@ -103,7 +127,7 @@ def find(seeds: dict[str, list[str]], keys: dict, per_seed: int = 4) -> list[dic
         if per.get(r["seed"], 0) < per_seed:
             out.append(r)
             per[r["seed"]] = per.get(r["seed"], 0) + 1
-    return out[:30]
+    return out[:50]
 
 
 def to_html(rows: list[dict]) -> str:
@@ -120,6 +144,39 @@ table{{border-collapse:collapse;width:100%}}th{{text-align:left;background:#f4f4
 <table><tr><th>#</th><th>카테고리</th><th>키워드</th><th>월 검색</th><th>경쟁</th><th>흐름</th></tr>{trs}</table>"""
 
 
+def season_seeds(today: dt.date | None = None) -> list[str]:
+    m = (today or dt.date.today()).month
+    return list(dict.fromkeys(SEASON_SEEDS[m] + SEASON_SEEDS[m % 12 + 1]))
+
+
+def choose_seeds(seeds: dict[str, list[str]]) -> dict[str, list[str]]:
+    """어떤 상품군에서 찾을지 고른다 (번호 여러 개 / 직접 입력 / 엔터 = 계절 + 전체에서 골고루)"""
+    cats = list(seeds)
+    print("\n어떤 상품에서 찾을까요?")
+    print(f"   0. 이번 달·다음 달 계절 상품 ({', '.join(season_seeds()[:6])} ...)")
+    for i, c in enumerate(cats, 1):
+        print(f"  {i:2}. {c} ({', '.join(seeds[c][:4])} ...)")
+    print("  또는 찾고 싶은 상품 이름을 직접 쓰세요 (예: 텀블러, 캠핑의자)")
+    ans = input("번호(여러 개는 1,3) / 상품 이름 / 그냥 엔터 = 계절 + 모든 상품군 골고루: ").strip()
+    if not ans:
+        rnd = random.Random(str(dt.date.today()))  # 날마다 다른 씨앗을 섞어서 매번 같은 결과만 나오지 않게
+        out = {"계절 상품": season_seeds()}
+        for c in cats:
+            out[c] = rnd.sample(seeds[c], min(4, len(seeds[c])))
+        return out
+    nums = [x for x in re.split(r"[,\s]+", ans) if x]
+    if all(x.isdigit() for x in nums):
+        out = {}
+        for x in nums:
+            k = int(x)
+            if k == 0:
+                out["계절 상품"] = season_seeds()
+            elif 1 <= k <= len(cats):
+                out[cats[k - 1]] = seeds[cats[k - 1]]
+        return out
+    return {"직접 고른 상품": [w.strip() for w in re.split(r"[,]+", ans) if w.strip()]}
+
+
 def main():
     from main import load_config
     cfg = load_config()
@@ -129,6 +186,9 @@ def main():
         print("naver_keys.txt 에 검색광고 API 키가 있어야 해요 (메인 블로그 폴더의 것을 같이 써요).")
         return
     per_seed = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 3
+    seeds = choose_seeds(seeds)
+    if not seeds:
+        return
     print("상품 키워드 찾기 (네이버 검색광고 + 데이터랩): " + ", ".join(s for ss in seeds.values() for s in ss))
     rows = find(seeds, keys, per_seed)
     if not rows:

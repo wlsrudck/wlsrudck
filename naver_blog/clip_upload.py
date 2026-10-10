@@ -136,7 +136,12 @@ def read_caption(video: Path) -> tuple[str, list[str]]:
 def upload(video: Path) -> None:
     from playwright.sync_api import sync_playwright
     from login import STATE_PATH
-    log: list[str] = [f"영상: {video.name}"]
+    class Log(list):  # 적을 때마다 검은 창에도 바로 보여 준다 (멈춘 것처럼 보이지 않게)
+        def append(self, x):
+            print(f"  · {x}", flush=True)
+            super().append(x)
+    log: list[str] = Log([f"영상: {video.name}"])
+    print("자동으로 채우는 중이에요. 끝났다고 나올 때까지 화면을 누르지 말고 기다려 주세요 (1~2분).", flush=True)
     body, tags = read_caption(video)
     desc = compose(body, tags)
     cover = video.with_name(video.stem + "_표지.jpg")
@@ -311,8 +316,7 @@ def upload(video: Path) -> None:
             log.append(f"설명 다시 확인 오류: {str(e).splitlines()[0][:60]}")
         save_log(page)
 
-        print("\n" + "\n".join("  " + x for x in log[1:]))
-        print("\n이제 열린 화면에서 직접 확인해 주세요:")
+        print("\n✅ 자동 채우기 끝! 이제 열린 화면에서 직접 확인해 주세요:")
         print("  ① 영상이 다 올라갔는지  ② 설명(해시태그 포함)  ③ 카테고리 1차·2차")
         print("  ④ AI 활용 설정이 켜졌는지  ⑤ 콘텐츠 링크에 블로그 글이 붙었는지 (안 붙었으면 [블로그]에서 직접 선택)")
         print("  확인했으면 화면의 [등록]을 누르세요. (프로그램은 등록을 누르지 않아요)")

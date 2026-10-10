@@ -75,6 +75,38 @@ AI_SWITCH = r"""() => {
 }"""
 
 
+CAT_FILE = ROOT / "output" / "clip_category.json"  # 이 블로그에서 고른 클립 카테고리 (다음부터 자동으로)
+
+# 드롭다운을 열기 전후로 보이는 글자를 비교해 '새로 나타난 선택지'를 찾는다
+SNAP = r"""() => { window.__cuSeen = new Set([...document.querySelectorAll("li, button, a, span, div, [role=option]")]
+    .filter(e => e.getClientRects().length && e.children.length === 0)); return true; }"""
+NEW_OPTIONS = r"""() => [...document.querySelectorAll("li, button, a, span, div, [role=option]")]
+    .filter(e => e.getClientRects().length && e.children.length === 0 && !(window.__cuSeen || new Set()).has(e))
+    .map(e => (e.innerText || "").trim()).filter(t => t && t.length <= 20)"""
+PICK_TEXT = r"""(t) => {
+    document.querySelectorAll("[data-cu-opt]").forEach(e => e.removeAttribute("data-cu-opt"));
+    const el = [...document.querySelectorAll("li, button, a, span, div, [role=option]")]
+        .find(e => e.getClientRects().length && e.children.length === 0 && (e.innerText || "").trim() === t
+                   && !(window.__cuSeen || new Set()).has(e));
+    if (!el) return false;
+    el.setAttribute("data-cu-opt", "1"); return true;
+}"""
+# 블로그 글 고르기 창: 제목이 맞는 카드의 [선택] 버튼
+PICK_POST = r"""(want) => {
+    document.querySelectorAll("[data-cu-post]").forEach(e => e.removeAttribute("data-cu-post"));
+    const norm = s => (s || "").replace(/[^0-9A-Za-z가-힣]/g, "");
+    const w = norm(want).slice(0, 14);
+    for (const b of [...document.querySelectorAll("button")].filter(b => (b.innerText || "").trim() === "선택"
+                                                                      && b.getClientRects().length)) {
+        let card = b;
+        for (let i = 0; i < 4 && card && !norm(card.innerText).includes(w); i++) card = card.parentElement;
+        if (card && norm(card.innerText).includes(w)) { b.setAttribute("data-cu-post", "1");
+            return (card.innerText || "").split("\n")[0].slice(0, 40); }
+    }
+    return "";
+}"""
+
+
 def compose(body: str, tags: list[str], limit: int = LIMIT) -> str:
     """설명 + 해시태그를 한도 안에서. 본문이 길면 문장 단위로 줄이고, 해시태그는 들어가는 만큼"""
     tag_line = ""
@@ -258,12 +290,26 @@ def upload(video: Path) -> None:
                     break
             else:
                 log.append("커버 칸을 못 찾음 (영상 첫 장면이 커버가 돼요)")
+        # 카테고리 (1차·2차): 이 블로그에서 전에 고른 것이 있으면 그대로, 처음이면 목록을 보여 주고 번호로 고르게
+        try:
+            pick_category(page, log, click)
+        except Exception as e:
+            log.append(f"카테고리 오류: {str(e).splitlines()[0][:60]}")
+        # 콘텐츠 링크 → 블로그: 이 영상을 만든 블로그 글을 찾아 연결 (클립을 본 사람이 글로 넘어오게)
+        title = post_title(video)
+        if title:
+            try:
+                link_blog(page, title, log, click)
+            except Exception as e:
+                log.append(f"블로그 연결 오류: {str(e).splitlines()[0][:60]}")
+        else:
+            log.append("블로그 연결: 글 제목을 몰라 건너뜀")
         save_log(page)
 
         print("\n" + "\n".join("  " + x for x in log[1:]))
         print("\n이제 열린 화면에서 직접 확인해 주세요:")
-        print("  ① 영상이 다 올라갔는지  ② 설명(해시태그 포함)  ③ 카테고리 1차·2차(필수)")
-        print("  ④ AI 활용 설정이 켜졌는지  ⑤ 콘텐츠 링크 → [블로그]를 눌러 이 영상의 블로그 글 연결 (블로그로 사람이 넘어와요)")
+        print("  ① 영상이 다 올라갔는지  ② 설명(해시태그 포함)  ③ 카테고리 1차·2차")
+        print("  ④ AI 활용 설정이 켜졌는지  ⑤ 콘텐츠 링크에 블로그 글이 붙었는지 (안 붙었으면 [블로그]에서 직접 선택)")
         print("  확인했으면 화면의 [등록]을 누르세요. (프로그램은 등록을 누르지 않아요)")
         ans = input("\n등록을 마쳤으면 y + 엔터 (영상을 '올림' 폴더로 옮겨요) / 그냥 엔터 = 닫기: ").strip().lower()
         if ans == "y":
@@ -274,6 +320,78 @@ def upload(video: Path) -> None:
                     f.replace(done / f.name)
             print("'올림' 폴더로 옮겼어요.")
         browser.close()
+
+
+def post_title(video: Path) -> str:
+    """영상 이름(날짜_키워드)과 같은 이름으로 저장된 글의 제목"""
+    import json
+    f = ROOT / "output" / f"{video.stem}.json"
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))["post"]["title"]
+    except Exception:
+        return ""
+
+
+def _choose(page, opener_words: list[str], want: str, what: str, log, click) -> str:
+    """드롭다운을 열고 want 를 고른다. want 가 없으면 선택지를 보여 주고 번호로 고르게 한다. 고른 이름"""
+    fr = page.main_frame
+    fr.evaluate(SNAP)
+    if not click(page, opener_words, f"{what} 열기", timeout=6):
+        return ""
+    page.wait_for_timeout(800)
+    opts = list(dict.fromkeys(fr.evaluate(NEW_OPTIONS)))
+    if not opts:
+        log.append(f"{what}: 선택지를 못 읽음")
+        return ""
+    if not want:
+        print(f"\n{what}를 골라 주세요 (한 번 고르면 다음부터 자동):")
+        for i, o in enumerate(opts, 1):
+            print(f"  {i:2}. {o}")
+        ans = input("번호 (엔터 = 건너뛰고 화면에서 직접): ").strip()
+        want = opts[int(ans) - 1] if ans.isdigit() and 1 <= int(ans) <= len(opts) else ""
+    if want and fr.evaluate(PICK_TEXT, want):
+        fr.locator("[data-cu-opt]").first.click()
+        log.append(f"{what}: {want}")
+        page.wait_for_timeout(700)
+        return want
+    page.keyboard.press("Escape")
+    log.append(f"{what}: 고르지 않음 (선택지: {', '.join(opts[:20])})")
+    return ""
+
+
+def pick_category(page, log, click) -> None:
+    import json
+    try:
+        saved = json.loads(CAT_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        saved = {}
+    c1 = _choose(page, ["1차 카테고리"], saved.get("1", ""), "1차 카테고리", log, click)
+    if not c1:
+        return
+    c2 = _choose(page, ["2차 카테고리"], saved.get("2", "") if saved.get("1") == c1 else "", "2차 카테고리", log, click)
+    if c1 and c2 and (saved.get("1"), saved.get("2")) != (c1, c2):
+        CAT_FILE.parent.mkdir(exist_ok=True)
+        CAT_FILE.write_text(json.dumps({"1": c1, "2": c2}, ensure_ascii=False), encoding="utf-8")
+        log.append("이 카테고리를 기억했어요 (다음부터 자동)")
+
+
+def link_blog(page, title: str, log, click) -> None:
+    if not click(page, ["블로그"], "콘텐츠 링크 [블로그]", timeout=6):
+        return
+    page.wait_for_timeout(1500)
+    fr = page.main_frame
+    box = fr.locator("input[placeholder*='블로그'], input[placeholder*='검색']")
+    if box.count():
+        box.first.fill(title[:20])
+        box.first.press("Enter")
+        page.wait_for_timeout(2000)
+    got = fr.evaluate(PICK_POST, title)
+    if got:
+        fr.locator("[data-cu-post]").first.click()
+        log.append(f"블로그 글 연결: {got}")
+    else:
+        page.keyboard.press("Escape")
+        log.append(f"블로그 글 연결: '{title[:20]}' 글을 목록에서 못 찾음 (아직 발행 전이면 발행 후 다시)")
 
 
 def main():

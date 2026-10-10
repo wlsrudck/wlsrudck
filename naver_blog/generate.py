@@ -1265,7 +1265,8 @@ def polish_saved(post: Post, memo: str, cfg: dict) -> Post:
             + "\n" + post.model_dump_json())}],
         output_format=Post,
     )
-    if res.stop_reason == "end_turn" and res.parsed_output is not None:
+    if res.stop_reason == "end_turn" and res.parsed_output is not None \
+            and len(res.parsed_output.body_text()) >= len(post.body_text()) * 0.7:  # 고쳐 쓰다 크게 줄면 원래 글
         old = post
         post = res.parsed_output
         post.links, post.updated = keep["links"], keep["updated"]
@@ -1401,7 +1402,11 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
             print(f"  (고쳐 쓰기 실패, 처음 글로 진행: {str(e).splitlines()[0][:60]})")
             fixed = None
         if fixed is not None and fixed.stop_reason == "end_turn" and fixed.parsed_output is not None:
-            post = fixed.parsed_output
+            before, after = len(post.body_text()), len(fixed.parsed_output.body_text())
+            if after >= before * 0.7 and len(fixed.parsed_output.sections) >= len(post.sections) - 1:
+                post = fixed.parsed_output
+            else:  # 고쳐 쓰다가 글이 크게 줄어들면(소제목·문단이 빠지면) 처음 글을 쓴다
+                print(f"  (고쳐 쓴 글이 너무 짧아져서({before}자 → {after}자) 처음 글로 진행해요)")
         left = banned_in(post) + ai_phrases_in(post)
         if left:
             print(f"  ⚠ 금지 표현·AI 말투가 남아 있어요({', '.join(left)}). 발행 전에 확인하세요.")

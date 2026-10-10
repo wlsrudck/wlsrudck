@@ -170,7 +170,11 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
                 ai_images.stamp(media[k])
     used_ids: set[int] = set()
     thumb_photo = None
-    if ai_left and not photos and cfg.get("thumbnail", True):
+    cs_mode = bool((writing or {}).get("cs"))
+    if ai_left and not photos and cfg.get("thumbnail", True) and cs_mode:  # 고객센터: 업종에 맞는 장면 (글자는 프로그램이 넣는다)
+        thumb_photo = ai_make(f"블로그 썸네일 배경 사진. {images.cs_scene(keyword or post.title)}. 가운데는 비교적 단순하게. "
+                              "사람 얼굴·회사 로고·간판·화면 글자 없이.", folder / "ai_thumb.png", with_character=False)
+    elif ai_left and not photos and cfg.get("thumbnail", True):
         thumb_photo = ai_make(f"블로그 글 '{post.title}'의 대표 이미지. 주제를 한눈에 보여 주는 장면"
                               + (f"(찍을 대상: {post.thumbnail_query})" if post.thumbnail_query.strip() else "")
                               + ". 사람·캐릭터 없이 물건·장소 중심.",
@@ -304,7 +308,16 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
     shutil.rmtree(cand_dir, ignore_errors=True)
     shutil.rmtree(folder / "_commons", ignore_errors=True)
 
-    if cfg.get("thumbnail", True):
+    if cfg.get("thumbnail", True) and cs_mode:
+        # 고객센터 썸네일: 회사 이름 + 공식 출처로 확인된 대표 번호를 가운데에 크게 (확인 못 했으면 번호 없이)
+        number = images.cs_number(post.metrics)
+        lines = [l for l in post.thumbnail_text[:2] if l.strip() and not images.PHONE.search(l)] or [post.title[:14]]
+        media["thumbnail"] = images.make_cs_thumbnail(lines, number, folder / "thumbnail.jpg", photo=thumb_photo,
+                                                      brand=brand, marker=random.Random(slug).choice(images.MARKERS))
+        print(f"  고객센터 썸네일: {' / '.join(lines)}" + (f" + 대표번호 {number}" if number else " (확인된 번호가 없어 번호 없이)"))
+        if thumb_photo and Path(thumb_photo).name.startswith("ai_") and media["thumbnail"]:
+            ai_images.stamp(media["thumbnail"])
+    elif cfg.get("thumbnail", True):
         media["thumbnail"] = images.make_thumbnail(post.title, folder / "thumbnail.jpg", slug, post.thumbnail_text,
                                                    photo=thumb_photo, brand=brand)
         if thumb_photo and Path(thumb_photo).name.startswith("ai_") and media["thumbnail"]:

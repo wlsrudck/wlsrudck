@@ -78,6 +78,78 @@ def make_thumbnail(title: str, out: Path, seed: str, phrase: list[str] | None = 
     return _thumb_magazine(lines, out, rng.choice(MARKERS), brand)
 
 
+PHONE = re.compile(r"(?<![\d-])(?:0\d{1,2}-\d{3,4}-\d{4}|1[5-9]\d{2}-\d{4}|\d{3,4}-\d{4}|1[0-3]\d{1,2})(?![\d-])")
+
+
+def cs_number(metrics: list) -> str:
+    """고객센터 글의 '확인된' 대표 번호 (지표 중 이름에 번호·전화·대표가 든 것, '확인 필요'가 아닌 것). 없으면 빈 문자열"""
+    for m in metrics or []:
+        label, value = getattr(m, "label", ""), getattr(m, "value", "")
+        if value.strip() == "확인 필요" or not re.search(r"번호|전화|대표|고객센터|콜센터", label):
+            continue
+        hit = PHONE.search(value.replace(" ", ""))
+        if hit:
+            return hit.group(0)
+    return ""
+
+
+def make_cs_thumbnail(lines: list[str], number: str, out: Path, photo: Path | None = None, brand: str = "",
+                      marker: str = "#ffd43b") -> Path:
+    """고객센터 썸네일: 가운데에 회사 이름(+찾는 것) 크게, 그 아래 확인된 대표 번호를 형광 상자에.
+    홈판·카톡 미리보기에서 위아래가 잘려도 보이게 글자를 가운데에 모은다"""
+    W = 1080
+    if photo:
+        with Image.open(photo) as src:
+            im = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGB"), (W, W), Image.LANCZOS)
+        im = Image.blend(im, Image.new("RGB", (W, W), "black"), 0.55)
+        ink = "white"
+    else:
+        im, ink = Image.new("RGB", (W, W), "#f6f4ef"), "#16181b"
+    d = ImageDraw.Draw(im)
+    lines = [l for l in lines if l.strip()][:2]
+    size = _fit_size(d, lines, 920, 130)
+    font, line_h = _font(size), int(size * 1.25)
+    num_size = _fit_size(d, [number], 820, 150, 70) if number else 0
+    block = line_h * len(lines) + (num_size + 90 if number else 0)
+    y = (W - block) // 2
+    for line in lines:
+        d.text((W / 2, y), line, font=font, fill=ink, anchor="ma",
+               stroke_width=3 if photo else 0, stroke_fill="#000000")
+        y += line_h
+    if number:
+        y += 30
+        nf = _font(num_size)
+        tw = d.textlength(number, font=nf)
+        d.rounded_rectangle([W / 2 - tw / 2 - 40, y - 14, W / 2 + tw / 2 + 40, y + num_size * 1.12 + 14], 26, fill=marker)
+        d.text((W / 2, y), number, font=nf, fill="#16181b", anchor="ma")
+    if brand:
+        d.text((W / 2, 1000), brand, font=_font(32), fill=ink if photo else "#6b6f76", anchor="mm")
+    im.save(out, quality=92)
+    return out
+
+
+# 고객센터 글 썸네일 배경: 회사 업종에 맞는 장면 (사람 얼굴·로고·글자 없이)
+CS_SCENES = [
+    (r"배달|배민|쿠팡이츠|요기요|땡겨요", "배달 음식 봉투와 주문 화면이 켜진 휴대폰이 놓인 식탁"),
+    (r"카드|은행|뱅크|금고|신협|수협|농협|증권|저축|금융|페이", "신용카드와 지갑, 휴대폰이 놓인 깔끔한 책상"),
+    (r"보험|화재|생명|손해", "보험 서류와 휴대폰, 펜이 놓인 책상"),
+    (r"SKT|KT|유플러스|LG U|통신|브로드밴드|알뜰폰|헬로|스카이라이프|인터넷", "휴대폰과 와이파이 공유기가 놓인 거실 선반"),
+    (r"택배|배송|로젠|한진|대한통운|우체국|편의점택배|화물", "현관 앞에 쌓인 택배 상자"),
+    (r"서비스센터|AS|가전|전자|청소기|에어컨|냉장고|세탁기|정수기|밥솥", "깔끔한 주방의 가전제품과 작은 공구 상자"),
+    (r"항공|여행|투어|관광", "여권과 항공권, 작은 캐리어"),
+    (r"자동차|기아|현대|차량|타이어|탁송", "정비소에 세워진 승용차 앞부분"),
+    (r"쿠팡|마켓|쇼핑|몰|이케아|알리|테무|11번가", "택배 상자와 쇼핑 앱이 켜진 휴대폰"),
+    (r"공단|청|국세|병무|정부|주민센터|연금|건강보험|고용", "민원 서류와 휴대폰이 놓인 관공서 대기석"),
+]
+
+
+def cs_scene(keyword: str) -> str:
+    for pat, scene in CS_SCENES:
+        if re.search(pat, keyword, re.I):
+            return scene
+    return "책상 위 휴대폰으로 상담 전화를 거는 손 (얼굴 없이)"
+
+
 def make_collage(photos: list[Path], out: Path, gap: int = 8) -> Path | None:
     """사진 2~4장을 1080×1080 한 장으로 (모아보기 썸네일용: 여러 글이 들어 있다는 게 한눈에 보이게)"""
     ims = []

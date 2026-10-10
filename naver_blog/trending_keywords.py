@@ -397,11 +397,35 @@ def balanced(rows: list[dict], limit: int) -> list[dict]:
     return out
 
 
+def all_titles(blog_id: str) -> list[str]:
+    """내 블로그 글 전체 제목 (최근 50개보다 오래된 글까지). 하루 한 번만 읽고 output/my_titles.json 에 둔다"""
+    import datetime as dt
+    import json
+    cache = Path(__file__).parent / "output" / "my_titles.json"
+    today = str(dt.date.today())
+    try:
+        d = json.loads(cache.read_text(encoding="utf-8"))
+        if d.get("blog") == blog_id and d.get("date") == today:
+            return d["titles"]
+    except Exception:
+        pass
+    try:
+        from my_posts_export import all_posts
+        titles = [p["title"] for p in all_posts(blog_id, quiet=True)]
+    except Exception:
+        titles = []
+    if titles:
+        cache.parent.mkdir(exist_ok=True)
+        cache.write_text(json.dumps({"blog": blog_id, "date": today, "titles": titles}, ensure_ascii=False),
+                         encoding="utf-8")
+    return titles
+
+
 def written_titles(blog_id: str) -> list[str]:
     """이미 쓴 글 제목: 내 블로그 최근 글(RSS) + 이 프로그램이 만든 글(output/*.json)"""
     import json
     from generate import my_posts
-    titles = [t for t, _ in my_posts(blog_id, limit=200)]
+    titles = [t for t, _ in my_posts(blog_id, limit=200)] + all_titles(blog_id)
     for f in (Path(__file__).parent / "output").glob("*.json"):
         try:
             d = json.loads(f.read_text(encoding="utf-8"))

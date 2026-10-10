@@ -74,10 +74,13 @@ def _stream_with_retry(client: anthropic.Anthropic, **kwargs):
             time.sleep(30)
 
 
-def find_candidates(topic: str, cfg: dict, blog: str) -> list[Candidate]:
+def find_candidates(topic: str, cfg: dict, blog: str, mine: list[str] | None = None) -> list[Candidate]:
     client = anthropic.Anthropic(api_key=_api_key(), max_retries=4)
     prompt = FIND_PROMPT.format(blog=blog or "정보 블로그", topic=topic, today=dt.date.today().isoformat(),
                                 banned=", ".join(BANNED_WORDS))
+    if mine:  # 이미 쓴 글과 같은 주제는 후보로 내지 않게
+        prompt += ("\n\n[이 블로그에 이미 쓴 글 제목] 아래와 같은 주제·같은 질문의 키워드는 후보로 내지 않습니다. "
+                   "같은 큰 주제라도 아직 다루지 않은 다른 질문만 고릅니다.\n" + "\n".join(f"- {t}" for t in mine[:150]))
     tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": cfg.get("max_searches", 5),
               "user_location": {"type": "approximate", "country": "KR", "timezone": "Asia/Seoul"}}]
     messages = [{"role": "user", "content": prompt}]
@@ -338,10 +341,17 @@ def main():
         topic = input("큰 주제를 입력하세요 (예: 청년 지원금, 캠핑, 국내주식 / 엔터 = 이번 달 시즌 키워드): ").strip()
         season = not topic or topic == "시즌"
     blog = cfg.get("naver", {}).get("blog_name", "")
+    print("내 블로그에 이미 쓴 글을 확인하는 중...")
+    try:
+        from trending_keywords import already_written, written_titles
+        mine = written_titles(cfg.get("naver", {}).get("blog_id", ""))
+    except Exception:
+        mine, already_written = [], (lambda *_: "")
+    print(f"      이미 쓴 글 {len(mine)}개 → 같은 주제는 빼고 찾아요")
     if season:
         topic, seeds, ask = season_topic(dt.date.today())
         print(f"[1/3] {topic}: 올해 일정 확인하고 후보 뽑는 중... (1~2분)")
-        cands = find_candidates(ask, cfg["writing"], blog)
+        cands = find_candidates(ask, cfg["writing"], blog, mine)
         have = {c.keyword.replace(" ", "") for c in cands}
         for k in seeds:  # 매년 반복되는 기본 후보도 함께 (이미 있으면 건너뜀)
             if k.replace(" ", "") not in have:
@@ -349,7 +359,7 @@ def main():
                 have.add(k.replace(" ", ""))
     else:
         print(f"[1/3] '{topic}' 최근 소식 확인하고 후보 뽑는 중... (1~2분)")
-        cands = find_candidates(topic, cfg["writing"], blog)
+        cands = find_candidates(topic, cfg["writing"], blog, mine)
     print(f"      후보 {len(cands)}개")
 
     keys = load_keys()
@@ -394,8 +404,9 @@ def main():
         if season and g in ("B", "C", "?") and (comp != "높음"):
             g = "시즌"
         rows.append({"keyword": c.keyword, "kind": c.kind, "reason": c.reason, "title": c.title,
-                     "volume": vol, "docs": docs.get(c.keyword), "comp": comp, "grade": g})
-    rows.sort(key=lambda r: (order[r["grade"]], -(r["volume"] or 0)))
+                     "volume": vol, "docs": docs.get(c.keyword), "comp": comp, "grade": g,
+                     "written": already_written(c.keyword, mine)})
+    rows.sort(key=lambda r: (bool(r["written"]), order[r["grade"]], -(r["volume"] or 0)))  # 이미 쓴 것은 맨 아래로
 
     OUTPUT.mkdir(exist_ok=True)
     safe = "".join(ch if ch.isalnum() else "_" for ch in topic)[:30]
@@ -407,10 +418,12 @@ def main():
         nums += "" if r["docs"] is None else f" / 문서 {r['docs']:,}"
         nums += f" / 경쟁 {r['comp']}" if r["comp"] and r["docs"] is None else ""
         print(f"  {i:2d}. [{r['grade']}] {r['keyword']}{nums}")
+        if r["written"]:
+            print(f"        └ 이미 쓴 글: {r['written'][:40]}")
 
     # 엔터 = S·A 등급 + (시즌 모드면) 지금도 검색이 조금은 있는(월 100회 이상) 시즌 키워드
-    default = [r["keyword"] for r in rows if r["grade"] in ("S", "A")
-               or (season and r["grade"] == "시즌" and (r["volume"] is None or r["volume"] >= 100))]
+    default = [r["keyword"] for r in rows if not r["written"] and (r["grade"] in ("S", "A")
+               or (season and r["grade"] == "시즌" and (r["volume"] is None or r["volume"] >= 100)))]
     label = "S·A·시즌" if season else "S·A"
     hint = f"엔터 = {label} 추천 {len(default)}개" if default else "엔터 = 추가 안 함"
     answer = input(f"\nkeywords.csv에 추가할 번호 (예: 1,3,5 / {hint} / 0 = 추가 안 함): ").strip()

@@ -25,6 +25,7 @@ BUTTONS = [
         ("미리보기만 (저장 안 함)", "3_test_write_only.bat", "블로그에 올리지 않고 output 폴더에 미리보기만 만들어요"),
         ("클립 영상 만들기", "8_make_clip.bat", "오늘 쓴 글로 네이버 클립용 세로 영상을 만들어요"),
         ("클립 올릴 폴더 열기", "@clip_folder", "네이버 클립에 올릴 세로 영상·설명·표지를 모아 둔 폴더를 열어요"),
+        ("클립 카톡으로 보내기", "@clip_kakao", "영상·설명을 복사해 카톡 '나와의 채팅'에 붙여 넣게 도와줘요 (휴대폰에서 바로 클립 올리기)"),
         ("글 캡처하기", "17_capture.bat", "글 주소를 넣으면(그냥 엔터는 최근 글) 휴대폰 화면 그대로 길게 찍어요"),
     ]),
     ("키워드 찾기", [
@@ -101,6 +102,93 @@ def save_pexels_key() -> None:
         return
     (ROOT / "pexels_key.txt").write_text(key, encoding="utf-8")
     messagebox.showinfo("저장", "저장했어요. 다음 글부터 Pixabay와 Pexels 두 곳에서 사진을 찾아요.")
+
+
+def copy_file_to_clipboard(path: Path) -> bool:
+    """파일 자체를 클립보드에 복사 (탐색기에서 Ctrl+C 한 것처럼) → 카톡 입력 칸에 Ctrl+V 하면 파일이 보내진다"""
+    if os.name != "nt":
+        return False
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", "Set-Clipboard -LiteralPath $env:CLIP_FILE"],
+                           env={**os.environ, "CLIP_FILE": str(path)}, capture_output=True, timeout=20,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def open_kakao() -> bool:
+    """PC 카카오톡 열기 (설치된 곳을 찾아서)"""
+    if os.name != "nt":
+        return False
+    cands = [Path(os.environ.get(v, "")) / "Kakao" / "KakaoTalk" / "KakaoTalk.exe"
+             for v in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA") if os.environ.get(v)]
+    for exe in cands:
+        if exe.exists():
+            subprocess.Popen([str(exe)])
+            return True
+    return False
+
+
+def clip_to_kakao() -> None:
+    """최근 클립을 골라 ① 영상 복사 ② 설명 복사 → 카톡 '나와의 채팅'에 Ctrl+V. 휴대폰 카톡에서 저장해 클립에 올린다"""
+    folder = ROOT / "클립_올리기"
+    vids = sorted(folder.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True) if folder.exists() else []
+    if not vids:
+        messagebox.showinfo("클립", "아직 만든 클립 영상이 없어요. 글을 쓰면 '클립_올리기' 폴더에 영상이 생겨요.")
+        return
+    win = tk.Toplevel()
+    win.title("클립 카톡으로 보내기")
+    ttk.Label(win, text="① 영상을 고르고 [영상 복사] → 카톡 '나와의 채팅' 입력 칸에 Ctrl+V → 전송\n"
+                        "② [설명 복사] → 같은 곳에 Ctrl+V → 전송\n"
+                        "③ 휴대폰 카톡 '나와의 채팅'에서 영상 저장 → 네이버 블로그 앱 클립 만들기 → 설명 붙여 넣기",
+              justify="left").pack(anchor="w", padx=12, pady=8)
+    lb = tk.Listbox(win, width=60, height=min(10, len(vids)))
+    for v in vids[:20]:
+        lb.insert("end", v.stem)
+    lb.selection_set(0)
+    lb.pack(padx=12)
+    note = ttk.Label(win, text="", foreground="#1971c2")
+    note.pack(anchor="w", padx=12, pady=(6, 0))
+
+    def chosen() -> Path:
+        i = (lb.curselection() or (0,))[0]
+        return vids[i]
+
+    def copy_video():
+        if copy_file_to_clipboard(chosen()):
+            note.config(text="영상을 복사했어요. 카톡 '나와의 채팅' 입력 칸을 누르고 Ctrl+V → 전송하세요.")
+        else:
+            note.config(text="복사가 안 됐어요. [폴더 열기]에서 영상을 카톡 창으로 끌어다 놓아도 돼요.")
+
+    def copy_desc():
+        v = chosen()
+        txt = v.with_name(v.stem + "_설명.txt")
+        if not txt.exists():
+            note.config(text="설명 파일이 없어요.")
+            return
+        win.clipboard_clear()
+        win.clipboard_append(txt.read_text(encoding="utf-8"))
+        note.config(text="설명을 복사했어요. 카톡에 Ctrl+V → 전송하세요.")
+
+    def kakao():
+        if not open_kakao():
+            note.config(text="카톡을 못 찾았어요. 작업표시줄의 카톡을 직접 열어 주세요.")
+
+    def done():  # 올린 영상은 '올림' 폴더로 (목록이 헷갈리지 않게)
+        v = chosen()
+        dst = folder / "올림"
+        dst.mkdir(exist_ok=True)
+        for f in (v, v.with_name(v.stem + "_설명.txt"), v.with_name(v.stem + "_표지.jpg")):
+            if f.is_file():
+                f.replace(dst / f.name)
+        win.destroy()
+
+    row = ttk.Frame(win)
+    row.pack(pady=10)
+    for label, cmd in (("카톡 열기", kakao), ("① 영상 복사", copy_video), ("② 설명 복사", copy_desc),
+                       ("폴더 열기", open_clip_folder), ("올렸어요 → '올림'으로", done)):
+        ttk.Button(row, text=label, command=cmd).pack(side="left", padx=3)
 
 
 def open_clip_folder() -> None:
@@ -637,7 +725,8 @@ def main():
         lf.grid(row=0, column=col, sticky="nsew", padx=6)
         run.columnconfigure(col, weight=1)
         for label, bat, tip in items:
-            cmd = {"@google_key": save_google_key, "@pexels_key": save_pexels_key, "@clip_folder": open_clip_folder}.get(bat) or (lambda b=bat: run_bat(b))
+            cmd = {"@google_key": save_google_key, "@pexels_key": save_pexels_key, "@clip_folder": open_clip_folder,
+                   "@clip_kakao": clip_to_kakao}.get(bat) or (lambda b=bat: run_bat(b))
             ttk.Button(lf, text=label, command=cmd).pack(fill="x", pady=(6, 0))
             ttk.Label(lf, text=tip, foreground="#777", wraplength=250).pack(fill="x")
     bottom = ttk.Frame(run)

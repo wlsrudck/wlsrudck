@@ -107,8 +107,10 @@ PICK_POST = r"""(want) => {
 }"""
 
 
-def compose(body: str, tags: list[str], limit: int = LIMIT) -> str:
-    """설명 + 해시태그를 한도 안에서. 본문이 길면 문장 단위로 줄이고, 해시태그는 들어가는 만큼"""
+def compose(body: str, tags: list[str], limit: int = LIMIT, tail: str = "") -> str:
+    """설명 + (tail) + 해시태그를 한도 안에서. 본문이 길면 문장 단위로 줄이고(tail 은 꼭 남긴다), 해시태그는 들어가는 만큼"""
+    if tail:
+        limit -= len(tail) + 1
     tag_line = ""
     for t in tags:
         if len(tag_line) + len(t) + 2 > 80:
@@ -119,7 +121,7 @@ def compose(body: str, tags: list[str], limit: int = LIMIT) -> str:
         cut = body[:room]
         end = max(cut.rfind(". "), cut.rfind("요."), cut.rfind("\n"))
         body = (cut[:end + 2] if end > room // 2 else cut).rstrip()
-    return (body + ("\n\n" + tag_line if tag_line else "")).strip()[:limit]
+    return (body + ("\n" + tail if tail else "") + ("\n\n" + tag_line if tag_line else "")).strip()[:limit + (len(tail) + 1 if tail else 0)]
 
 
 def read_caption(video: Path) -> tuple[str, list[str]]:
@@ -143,9 +145,11 @@ def upload(video: Path) -> None:
     log: list[str] = Log([f"영상: {video.name}"])
     print("자동으로 채우는 중이에요. 끝났다고 나올 때까지 화면을 누르지 말고 기다려 주세요 (1~2분).", flush=True)
     body, tags = read_caption(video)
-    if shop_info(video):  # 쇼핑커넥트 상품을 붙이는 영상은 설명 첫 줄에 광고 표시
-        body = "[광고] 쇼핑커넥트 활동으로 판매 시 수수료를 받을 수 있어요.\n" + body
-    desc = compose(body, tags)
+    tail = ""
+    if shop_info(video):  # 쇼핑커넥트 영상: 맨 앞에 짧게 [광고] (목록에 보이는 첫 줄은 내용이 보이게), 자세한 안내는 끝에
+        body = "[광고] " + body
+        tail = "※ 쇼핑커넥트 활동으로 판매 시 수수료를 받을 수 있어요."
+    desc = compose(body, tags, tail=tail)
     cover = video.with_name(video.stem + "_표지.jpg")
 
     def save_log(page=None):

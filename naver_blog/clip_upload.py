@@ -55,11 +55,11 @@ def pick_clip(arg: str = "") -> Path | None:
 
 LIMIT = 300  # 클립 설명 칸 글자 수 한도 (해시태그도 이 안에 쓴다 — 따로 해시태그 칸이 없다)
 
-AI_SWITCH = r"""() => {
-    // 'AI 활용 설정' 글자 옆의 켜기/끄기 스위치를 찾아 표시한다. 이미 켜져 있으면 "on"
+SWITCH = r"""(pat) => {
+    // 글자(pat) 옆의 켜기/끄기 스위치를 찾아 표시한다. 이미 켜져 있으면 "on"
     document.querySelectorAll("[data-cu-ai]").forEach(e => e.removeAttribute("data-cu-ai"));
     const label = [...document.querySelectorAll("*")].find(e => e.children.length <= 3 &&
-        /^AI\s*활용\s*설정/.test((e.innerText || "").trim()));
+        new RegExp(pat).test((e.innerText || "").trim()));
     if (!label) return "";
     let box = label;
     for (let i = 0; i < 5 && box; i++, box = box.parentElement) {
@@ -143,6 +143,8 @@ def upload(video: Path) -> None:
     log: list[str] = Log([f"영상: {video.name}"])
     print("자동으로 채우는 중이에요. 끝났다고 나올 때까지 화면을 누르지 말고 기다려 주세요 (1~2분).", flush=True)
     body, tags = read_caption(video)
+    if shop_info(video):  # 쇼핑커넥트 상품을 붙이는 영상은 설명 첫 줄에 광고 표시
+        body = "[광고] 쇼핑커넥트 활동으로 판매 시 수수료를 받을 수 있어요.\n" + body
     desc = compose(body, tags)
     cover = video.with_name(video.stem + "_표지.jpg")
 
@@ -268,21 +270,14 @@ def upload(video: Path) -> None:
                 break
         log.append(f"해시태그: 설명 끝에 함께 넣음" if not n_tag else f"해시태그 칸에 {n_tag}개 넣음")
         # AI 활용 설정: 클립 그림·목소리를 AI로 만들었으므로 켠다 (네이버 안내에 맞게 투명하게)
-        ai = ""
-        for fr in page.frames:
+        log.append("AI 활용 설정: " + turn_on(page, r"^AI\s*활용\s*설정"))
+        shop = shop_info(video)
+        if shop:  # 쇼핑 블로그: 광고 표시를 켜고, 쇼핑커넥트 상품을 정보 태그로 붙인다 (수수료를 받는 영상이므로)
+            log.append("광고·협찬 설정: " + turn_on(page, r"^광고\s*[·ㆍ.]?\s*협찬\s*설정"))
             try:
-                ai = fr.evaluate(AI_SWITCH)
-            except Exception:
-                ai = ""
-            if ai == "found":
-                try:
-                    fr.locator("[data-cu-ai]").first.click()
-                    ai = "켬"
-                except Exception as e:
-                    ai = f"켜기 실패 ({str(e).splitlines()[0][:40]})"
-            if ai:
-                break
-        log.append("AI 활용 설정: " + {"on": "이미 켜져 있음", "": "스위치를 못 찾음 — 직접 켜 주세요"}.get(ai, ai))
+                tag_shop(page, shop, log, click)
+            except Exception as e:
+                log.append(f"쇼핑커넥트 태그 오류: {str(e).splitlines()[0][:60]}")
         if cover.exists():
             for fr in page.frames:
                 inp = fr.locator("input[type=file][accept*='image']")
@@ -354,6 +349,65 @@ def ensure_desc(page, desc: str, log: list) -> None:
             log.append(f"설명 다시 넣음 (직접 입력): {len(b.input_value())}자")
             return
     log.append("설명 칸을 못 찾음 — 직접 붙여 넣어 주세요")
+
+
+def turn_on(page, pat: str) -> str:
+    """글자(pat) 옆 스위치를 켠다. 결과 한마디"""
+    for fr in page.frames:
+        try:
+            got = fr.evaluate(SWITCH, pat)
+        except Exception:
+            got = ""
+        if got == "on":
+            return "이미 켜져 있음"
+        if got == "found":
+            try:
+                fr.locator("[data-cu-ai]").first.click()
+                return "켬"
+            except Exception as e:
+                return f"켜기 실패 ({str(e).splitlines()[0][:40]})"
+    return "스위치를 못 찾음 — 직접 켜 주세요"
+
+
+def shop_info(video: Path) -> dict:
+    """쇼핑 글이면 {name, link}. 아니면 빈 dict"""
+    import json
+    try:
+        post = json.loads((ROOT / "output" / f"{video.stem}.json").read_text(encoding="utf-8"))["post"]
+    except Exception:
+        return {}
+    links = [u for u in post.get("shop_links") or [] if u.startswith("http")]
+    return {"name": post.get("shop_name", ""), "link": links[0]} if links else {}
+
+
+def tag_shop(page, shop: dict, log, click) -> None:
+    """정보 태그 → [쇼핑커넥트]: 창을 열어 상품 링크(없으면 상품명)를 넣어 찾는다. 고르기는 사람이 (창 모양을 기록)"""
+    if not click(page, ["쇼핑커넥트"], "정보 태그 [쇼핑커넥트]", timeout=6):
+        return
+    page.wait_for_timeout(1500)
+    fr = page.main_frame
+    box = fr.locator("input[type=text], input[type=search], input:not([type])")
+    put = ""
+    for k in range(box.count()):
+        b = box.nth(k)
+        try:
+            if not b.is_visible():
+                continue
+            ph = (b.get_attribute("placeholder") or "")
+            value = shop["link"] if re.search(r"링크|URL|url|주소", ph) else (shop["name"] or shop["link"])
+            b.fill(value)
+            b.press("Enter")
+            put = f"'{ph[:20]}' 칸에 {'링크' if value == shop['link'] else '상품명'} 넣음"
+            break
+        except Exception:
+            continue
+    page.wait_for_timeout(2000)
+    try:
+        dump = fr.evaluate(DUMP)
+    except Exception:
+        dump = ""
+    log.append("쇼핑커넥트 태그: " + (put or "입력 칸을 못 찾음") + " — 상품이 맞는지 보고 직접 선택해 주세요")
+    list.append(log, "[쇼핑커넥트 창 모양]\n" + dump[:1500])  # 기록 파일에만 (검은 창에는 길어서 안 보여 줌)
 
 
 def post_title(video: Path) -> str:

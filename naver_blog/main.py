@@ -739,7 +739,10 @@ def main():
         if in_post and reused and made_clip and (made_clip.name == "clip_blog.mp4" or not cfg.get("clip", {}).get("blog_wide", True)):
             media["video"] = made_clip  # 오늘 써 둔 글을 다시 넣을 때: 그때 만든 영상을 그대로
             print("  짧은 영상: 아까 만든 영상을 그대로 써요")
-        elif cfg.get("clip", {}).get("auto", False) or in_post:
+        elif (reused and made_clip and not in_post):
+            pass  # 오늘 이미 만든 클립이 있다 (쇼핑: 글 안에는 넣지 않으므로 다시 만들지 않는다)
+        elif cfg.get("clip", {}).get("auto", False) or in_post or \
+                (shop.get("enabled") and cfg.get("clip", {}).get("shop_clip", True)):  # 쇼핑: 글 안에는 안 넣고 클립용만
             try:
                 from clip_maker import load_saved, make_clip
                 clip = make_clip(load_saved(OUTPUT / f"{dt.date.today()}_{slug}.json"), cfg,

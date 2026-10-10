@@ -380,34 +380,47 @@ def shop_info(video: Path) -> dict:
     return {"name": post.get("shop_name", ""), "link": links[0]} if links else {}
 
 
+def visible(loc):
+    """locator 중 화면에 보이는 첫 번째 (없으면 None) — 숨은 창의 같은 칸을 잘못 고르지 않게"""
+    for k in range(loc.count()):
+        try:
+            if loc.nth(k).is_visible():
+                return loc.nth(k)
+        except Exception:
+            continue
+    return None
+
+
 def tag_shop(page, shop: dict, log, click) -> None:
-    """정보 태그 → [쇼핑커넥트]: 창을 열어 상품 링크(없으면 상품명)를 넣어 찾는다. 고르기는 사람이 (창 모양을 기록)"""
-    if not click(page, ["쇼핑커넥트"], "정보 태그 [쇼핑커넥트]", timeout=6):
+    """정보 태그 → [쇼핑커넥트]: '쇼핑 상품 검색'에 상품명을 넣고, 이름이 맞는 상품의 [선택]을 누른다.
+    못 찾으면 '최근 링크 발급한 상품' 목록에서 한 번 더 찾고, 그래도 없으면 사람이 고르게 둔다"""
+    if not click(page, ["쇼핑커넥트", "쇼핑 커넥트"], "정보 태그 [쇼핑커넥트]", timeout=6):
         return
     page.wait_for_timeout(1500)
     fr = page.main_frame
-    box = fr.locator("input[type=text], input[type=search], input:not([type])")
-    put = ""
-    for k in range(box.count()):
-        b = box.nth(k)
-        try:
-            if not b.is_visible():
-                continue
-            ph = (b.get_attribute("placeholder") or "")
-            value = shop["link"] if re.search(r"링크|URL|url|주소", ph) else (shop["name"] or shop["link"])
-            b.fill(value)
-            b.press("Enter")
-            put = f"'{ph[:20]}' 칸에 {'링크' if value == shop['link'] else '상품명'} 넣음"
+    name = (shop.get("name") or "").strip()
+    if not name:
+        log.append("쇼핑커넥트 태그: 상품명을 몰라 직접 선택해 주세요")
+        return
+    box = visible(fr.locator("input[placeholder*='상품'], input[placeholder*='검색']"))
+    got = ""
+    for q in ([name[:30], ""] if box else [""]):  # 검색 → 안 되면 검색어를 지우고 최근 발급 목록에서
+        if box:
+            box.fill(q)
+            box.press("Enter")
+            page.wait_for_timeout(2000)
+        got = fr.evaluate(PICK_POST, name)
+        if got:
             break
+    if got:
+        fr.locator("[data-cu-post]").first.click()
+        log.append(f"쇼핑커넥트 상품 연결: {got}")
+    else:
+        log.append(f"쇼핑커넥트 상품: '{name[:20]}' 을(를) 목록에서 못 찾음 — 직접 선택해 주세요 (링크 발급한 상품만 나와요)")
+        try:
+            list.append(log, "[쇼핑커넥트 창 모양]\n" + fr.evaluate(DUMP)[:1500])
         except Exception:
-            continue
-    page.wait_for_timeout(2000)
-    try:
-        dump = fr.evaluate(DUMP)
-    except Exception:
-        dump = ""
-    log.append("쇼핑커넥트 태그: " + (put or "입력 칸을 못 찾음") + " — 상품이 맞는지 보고 직접 선택해 주세요")
-    list.append(log, "[쇼핑커넥트 창 모양]\n" + dump[:1500])  # 기록 파일에만 (검은 창에는 길어서 안 보여 줌)
+            pass
 
 
 def post_title(video: Path) -> str:
@@ -468,10 +481,10 @@ def link_blog(page, title: str, log, click) -> None:
         return
     page.wait_for_timeout(1500)
     fr = page.main_frame
-    box = fr.locator("input[placeholder*='블로그'], input[placeholder*='검색']")
-    if box.count():
-        box.first.fill(title[:20])
-        box.first.press("Enter")
+    box = visible(fr.locator("input[placeholder*='블로그'], input[placeholder*='검색']"))
+    if box:
+        box.fill(title[:20])
+        box.press("Enter")
         page.wait_for_timeout(2000)
     got = fr.evaluate(PICK_POST, title)
     if got:

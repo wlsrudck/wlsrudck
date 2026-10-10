@@ -304,6 +304,11 @@ def upload(video: Path) -> None:
                 log.append(f"블로그 연결 오류: {str(e).splitlines()[0][:60]}")
         else:
             log.append("블로그 연결: 글 제목을 몰라 건너뜀")
+        # 마지막으로 설명이 정말 들어 있는지 다시 본다 (영상이 다 올라가면서 화면이 새로 그려져 지워지는 경우가 있다)
+        try:
+            ensure_desc(page, desc, log)
+        except Exception as e:
+            log.append(f"설명 다시 확인 오류: {str(e).splitlines()[0][:60]}")
         save_log(page)
 
         print("\n" + "\n".join("  " + x for x in log[1:]))
@@ -320,6 +325,31 @@ def upload(video: Path) -> None:
                     f.replace(done / f.name)
             print("'올림' 폴더로 옮겼어요.")
         browser.close()
+
+
+def ensure_desc(page, desc: str, log: list) -> None:
+    """설명 칸이 비어 있으면 한 글자씩 직접 쳐서 넣는다 (화면이 붙여 넣기를 못 알아듣는 경우 대비)"""
+    if not desc.strip():
+        log.append("설명: 넣을 글이 없음 (_설명.txt 확인)")
+        return
+    for fr in page.frames:
+        box = fr.locator("textarea[placeholder*='경험'], textarea")
+        for k in range(box.count()):
+            b = box.nth(k)
+            if not b.is_visible():
+                continue
+            if len(b.input_value().strip()) >= 10:
+                log.append(f"설명 확인: {len(b.input_value())}자 들어 있음")
+                return
+            b.scroll_into_view_if_needed()
+            b.click()
+            page.keyboard.press("Control+A")
+            page.keyboard.press("Backspace")
+            page.keyboard.type(desc, delay=8)
+            page.wait_for_timeout(500)
+            log.append(f"설명 다시 넣음 (직접 입력): {len(b.input_value())}자")
+            return
+    log.append("설명 칸을 못 찾음 — 직접 붙여 넣어 주세요")
 
 
 def post_title(video: Path) -> str:

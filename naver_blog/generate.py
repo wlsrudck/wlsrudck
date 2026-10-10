@@ -66,7 +66,7 @@ RECAP_DOTS = "🟢🔵🟣🟠🔴🟡"
 
 
 def is_recap(text: str) -> bool:
-    return text[:1] in RECAP_DOTS and "\n“" in text
+    return text[:1] in RECAP_DOTS and "“" in text
 
 
 # 글 성격별 꾸밈 테마: Claude 가 글마다 하나를 고르면 소제목·인용구·형광펜·행동 한 줄 색과 인용구 모양이 바뀐다.
@@ -362,7 +362,8 @@ class Post(BaseModel):
                 out.append(("heading", self.recap_title.strip()))
             for dot, r in zip(RECAP_DOTS, self.recap):
                 says = r.says.strip().strip('"“”')
-                lines = [f"{dot} {r.name.strip()}", f"“{says}”", *[f"→ {p.strip()}" for p in r.points[:3]]]
+                head = [f"{dot} {r.name.strip()}", f"“{says}”"] if r.name.strip() else [f"{dot} “{says}”"]  # 이름이 비면 동그라미만 덩그러니 남지 않게
+                lines = [*head, *[f"→ {p.strip()}" for p in r.points[:3]]]
                 out.append(("text", "\n".join(lines)))
         if self.qa:
             out.append(("heading", "자주 묻는 질문"))

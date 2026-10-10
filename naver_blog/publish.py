@@ -79,13 +79,24 @@ def _close_notices(editor):
         pass
 
 
-def _type_lines(page: Page, text: str):
+def _type_lines(page: Page, text: str, editor=None, last_enter: bool = False):
+    """줄마다 친다. 주소(http…) 줄 다음에는 네이버가 링크 카드를 다 만들 때까지 기다린다 —
+    카드는 '만들어진 순간 커서가 있는 곳'에 들어가서, 기다리지 않고 계속 치면 카드가 엉뚱한 문장 사이에 끼어든다"""
     lines = text.split("\n")
     for i, line in enumerate(lines):
+        is_url = line.strip().startswith("http")
+        before = editor.locator(".se-component.se-oglink").count() if (editor and is_url) else 0
         if line:
             page.keyboard.insert_text(line)
-        if i < len(lines) - 1:
+        if i < len(lines) - 1 or (is_url and last_enter):
             page.keyboard.press("Enter")
+        if editor and is_url:
+            for _ in range(20):  # 최대 약 8초
+                page.wait_for_timeout(400)
+                if editor.locator(".se-component.se-oglink").count() > before:
+                    page.wait_for_timeout(500)
+                    break
+            page.keyboard.press("Control+End")  # 커서를 다시 글 맨 끝으로
         _pause(0.05, 0.25)
 
 
@@ -220,9 +231,12 @@ def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | N
     # 한눈에 다시 보기: '🟢 이름' 은 소제목 색 굵게, '“한마디”' 는 굵게 (→ 줄은 그대로)
     for kind, value in blocks:
         if kind == "text" and is_recap(value):
-            name, says, *_ = value.split("\n")
-            out.append((name.strip(), None, st["heading_color"], True, False))
-            out.append((says.strip(), None, "#222222", True, False))
+            name, says, *_ = value.split("\n") + [""]
+            if says.strip().startswith("“"):
+                out.append((name.strip(), None, st["heading_color"], True, False))
+                out.append((says.strip(), None, "#222222", True, False))
+            else:  # 이름 없이 '🟢 “한마디”' 한 줄인 경우
+                out.append((name.strip(), None, "#222222", True, False))
     # 행동 한 줄(✔ …): 굵게 + 행동 색 (서체 4역할 중 '행동형')
     for kind, value in blocks:
         if kind == "text" and value.startswith("✔ "):
@@ -1216,10 +1230,16 @@ def _write_blocks(page: Page, editor, blocks, style: dict | None = None, screens
             page.keyboard.insert_text(value)
             page.keyboard.press("Control+B")
         else:
-            _type_lines(page, value)
+            _type_lines(page, value, editor)
         if i < len(texts) - 1:
             page.keyboard.press("Enter")
             page.keyboard.press("Enter")
+            if value.split("\n")[-1].strip().startswith("http"):  # 마지막 줄이 주소면 카드가 생길 때까지
+                for _ in range(20):
+                    page.wait_for_timeout(400)
+                    if editor.evaluate("() => !!document.querySelector('.se-component.se-oglink')"):
+                        break
+                page.keyboard.press("Control+End")
         _pause(0.2, 0.6)
 
     typed = editor.evaluate("sel => [...document.querySelectorAll(sel)].map(e => e.innerText).join('').length",

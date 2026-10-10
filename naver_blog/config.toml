@@ -71,5 +71,7 @@ music_volume = 0.12
 in_post = true
 # 글 안에는 블로그 화면에 맞는 가로 영상을 따로 만들어 넣는다 (세로 클립은 클립 업로드용으로 그대로)
 blog_wide = true
+# 세로 클립 모양: "shorts" = 검은 바탕 + 위에 고정 제목 두 줄 + 가운데 그림 + 아래 자막 / "card" = 예전 흐린 배경 모양
+style = "shorts"
 # 배경음악: "auto" = music 폴더의 음악, 비어 있으면 프로그램이 만든 잔잔한 소리 / "none" = 음악 없이
 music = "auto"

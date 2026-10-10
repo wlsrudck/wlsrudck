@@ -47,6 +47,8 @@ class ClipScript(BaseModel):
     title: str = Field(description="클립 제목. 30자 이내, 핵심 숫자나 궁금증 포함, 과장 없이")
     scenes: list[Scene] = Field(description="5~6개 장면. 첫 장면은 멈춰 보게 만드는 질문이나 숫자, 마지막은 블로그 안내")
     description: str = Field(description="클립 설명 2~3줄. 블로그에 자세한 내용이 있다는 안내 포함, 링크 없음")
+    hook: list[str] = Field(default=[], description="영상 위쪽에 처음부터 끝까지 고정할 제목 2줄. 각 줄 9자 이내. "
+                                                    "첫 줄은 대상·상황, 둘째 줄은 핵심(숫자·결론). 예: ['주담대 규제', '서울 25개구 확대']")
     hashtags: list[str] = Field(description="해시태그 3~6개, # 없이")
 
 
@@ -54,6 +56,8 @@ CLIP_PROMPT = """아래 네이버 블로그 글로 네이버 클립(세로 짧�
 - 장면 5~6개. 첫 장면은 1초 안에 "나한테 필요한 정보"로 보이게: 첫 줄에 핵심 숫자·날짜·금액을 넣고
   한 줄 10자 안팎, 2줄 이내. 예: "11월 5일\n연말정산 미리보기"
 - 마지막 장면은 "자세한 조건은 블로그에 정리해 뒀어요"처럼 블로그로 안내.
+- hook: 영상 위쪽에 끝까지 떠 있을 제목 2줄 (각 9자 이내). 중간부터 본 사람도 무슨 영상인지 바로 알게.
+  첫 줄은 대상, 둘째 줄은 핵심 숫자나 결론. 낚시·과장 없이.
 - 글에 있는 사실만 씁니다. 경험·대화·후기를 새로 지어내지 않습니다. 숫자는 글과 똑같이.
 - 광고처럼 보이는 단어({banned})는 쓰지 않습니다.
 - 자막은 짧게, 내레이션은 말하듯 자연스럽게 (~예요, ~해요). 내레이션은 음성 합성으로 읽으니
@@ -86,9 +90,14 @@ BRIGHT = "#fbf7ee"
 VERTICAL, LANDSCAPE = (W, H), (1280, 720)
 
 
-def _layout(size: tuple[int, int], with_image: bool) -> tuple[tuple, tuple]:
+SHORTS_IMG, SHORTS_TEXT = (40, 560, 1040, 1380), (70, 1420, 1010, 1760)  # 쇼츠형: 위 고정 제목 / 가운데 그림 / 아래 자막
+
+
+def _layout(size: tuple[int, int], with_image: bool, shorts: bool = False) -> tuple[tuple, tuple]:
     """(그림 자리, 자막 자리) 각각 (x0, y0, x1, y1). 그림이 없으면 그림 자리는 ()"""
     w, h = size
+    if shorts and h > w:
+        return (SHORTS_IMG if with_image else ()), SHORTS_TEXT
     if w > h:  # 가로: 왼쪽 그림, 오른쪽 자막
         return ((40, 50, 690, h - 50), (730, 110, w - 50, h - 110)) if with_image else ((), (140, 110, w - 140, h - 110))
     return ((60, 250, w - 60, 1130), (70, 1190, w - 70, 1700)) if with_image else ((), (70, 300, w - 70, 1620))
@@ -100,6 +109,48 @@ def _cover(photo: Path, size: tuple[int, int], blur: int = 14, dark: float = 0.5
         im = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGB"), size, Image.LANCZOS)
     im = im.filter(ImageFilter.GaussianBlur(blur))
     return Image.blend(im, Image.new("RGB", size, "black"), dark)
+
+
+def make_shorts_background(photo: Path | None, out: Path) -> Path:
+    """쇼츠형 배경: 검은 바탕 가운데에 글 그림 (글자가 잘리지 않게 통째로 넣는다)"""
+    base = Image.new("RGB", VERTICAL, "#0b0b0d")
+    if photo:
+        x0, y0, x1, y1 = SHORTS_IMG
+        with Image.open(photo) as src:
+            im = ImageOps.exif_transpose(src).convert("RGB")
+        im = ImageOps.contain(im, (x1 - x0, y1 - y0), Image.LANCZOS)
+        base.paste(im, (x0 + (x1 - x0 - im.width) // 2, y0 + (y1 - y0 - im.height) // 2))
+    base.save(out, quality=93)
+    return out
+
+
+def make_title_layer(lines: list[str], out: Path, marker: str, brand: str) -> Path:
+    """쇼츠형 위쪽 고정 제목 (영상 내내 그대로): 첫 줄 흰색, 둘째 줄 형광색. 블로그 이름은 작게 위에"""
+    im = Image.new("RGBA", VERTICAL, (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    lines = [l.strip() for l in lines if l.strip()][:2]
+    if brand:
+        d.text((W / 2, 150), brand, font=_font(38), fill=(220, 220, 220), anchor="mm")
+    size = next((sz for sz in range(124, 60, -4) if all(d.textlength(l, font=_font(sz)) <= 980 for l in lines)), 60)
+    y = 230 + (2 - len(lines)) * size // 2
+    for k, line in enumerate(lines):
+        d.text((W / 2, y), line, font=_font(size), fill="white" if k == 0 else marker, anchor="ma",
+               stroke_width=4, stroke_fill="#000000")
+        y += int(size * 1.28)
+    im.save(out)
+    return out
+
+
+def hook_lines(script, title: str) -> list[str]:
+    """고정 제목 두 줄: 대본이 준 것, 없으면 제목을 반으로 나눈다"""
+    lines = [l.strip() for l in (getattr(script, "hook", None) or []) if l.strip()][:2]
+    if lines:
+        return lines
+    t = re.sub(r"\s+", " ", title).strip()[:24]
+    if " " in t and len(t) > 10:
+        mid = min((i for i, ch in enumerate(t) if ch == " "), key=lambda i: abs(i - len(t) / 2))
+        return [t[:mid], t[mid + 1:]]
+    return [t]
 
 
 def make_background(photo: Path | None, out: Path, size: tuple[int, int] = VERTICAL, sharp: bool = False) -> Path:
@@ -129,7 +180,7 @@ def make_background(photo: Path | None, out: Path, size: tuple[int, int] = VERTI
 
 
 def make_overlay(caption: str, out: Path, marker: str, brand: str, idx: int, total: int, first: bool,
-                 dark: bool, size: tuple[int, int] = VERTICAL, box: tuple = ()) -> tuple[Path, Path]:
+                 dark: bool, size: tuple[int, int] = VERTICAL, box: tuple = (), show_brand: bool = True) -> tuple[Path, Path]:
     """자막을 투명 PNG 두 장으로: (블로그 이름·진행 점·윗줄들, 형광펜 칠한 마지막 줄)
     마지막 줄은 영상에서 조금 늦게 나타난다. dark=True면 어두운 배경 위 흰 글씨"""
     w, h = size
@@ -161,11 +212,11 @@ def make_overlay(caption: str, out: Path, marker: str, brand: str, idx: int, tot
                    stroke_fill="#000000")
         y += lh
     landscape = w > h
-    if brand:
+    if brand and show_brand:
         bx, by, bs = (cx, 62, 30) if landscape else (w / 2, 150, 44)
         d.text((bx, by), brand, font=_font(bs), fill=ink, anchor="mm", stroke_width=2 if dark else 0,
                stroke_fill="#000000")
-    gap, rad, dy = (24, 5, h - 52) if landscape else (34, 8, h - 182)
+    gap, rad, dy = (24, 5, h - 52) if landscape else ((34, 8, 1820) if not show_brand else (34, 8, h - 182))
     for k in range(total):  # 진행 표시 점
         px = cx + (k - (total - 1) / 2) * gap
         d.ellipse([px - rad, dy - rad, px + rad, dy + rad], fill=marker if k == idx else (ink if dark else "#c9c5bc"))
@@ -287,7 +338,12 @@ def build_video(scenes: list[dict], wavs: list[Path] | None, durations: list[flo
     for i, sc in enumerate(scenes):
         seg = out.parent / f"seg_{out.stem}_{i + 1:02d}.mp4"
         dur = durations[i]
-        if sc["kind"] == "video":
+        if sc["kind"] == "video" and sc.get("shorts"):  # 쇼츠형: 영상을 가운데 칸에만, 나머지는 검은 바탕
+            x0, y0, x1, y1 = SHORTS_IMG
+            bg_in = ["-stream_loop", "-1", "-i", str(sc["bg"])]
+            bg_f = (f"[0:v]scale={x1 - x0}:{y1 - y0}:force_original_aspect_ratio=increase,crop={x1 - x0}:{y1 - y0},"
+                    f"setsar=1,fps=30,pad={w}:{h}:{x0}:{y0}:0x0b0b0d[bg]")
+        elif sc["kind"] == "video":
             bg_in = ["-stream_loop", "-1", "-i", str(sc["bg"])]
             bg_f = f"[0:v]{_video_bg(size)}[bg]"
         else:
@@ -302,11 +358,14 @@ def build_video(scenes: list[dict], wavs: list[Path] | None, durations: list[flo
             pop = (f"[1:v]format=rgba,scale=w='trunc({w}*min(1,0.92+0.08*t/0.25)/2)*2':h=-2:eval=frame,"
                    "fade=t=in:st=0.1:d=0.25:alpha=1[ov]")
             pop2 = "[2:v]format=rgba,fade=t=in:st=0.55:d=0.3:alpha=1[ov2]"
+        fixed = sc.get("fixed")  # 영상 내내 움직이지 않는 층 (쇼츠형 위쪽 제목)
         filt = (f"{bg_f};{pop};{pop2};[bg][ov]overlay=x='(W-w)/2':y='(H-h)/2':eval=frame[t1];"
-                "[t1][ov2]overlay=0:0,format=yuv420p[v]")
+                + ("[t1][ov2]overlay=0:0[t2];[t2][3:v]overlay=0:0,format=yuv420p[v]" if fixed
+                   else "[t1][ov2]overlay=0:0,format=yuv420p[v]"))
+        fixed_in = ["-loop", "1", "-framerate", "30", "-i", str(fixed)] if fixed else []
         subprocess.run([ff, "-y", "-loglevel", "error", *bg_in, "-loop", "1", "-framerate", "30", "-i", str(main_ov),
-                        "-loop", "1", "-framerate", "30", "-i", str(last_ov), *audio, "-filter_complex", filt,
-                        "-map", "[v]", "-map", "3:a", "-t", f"{dur:.2f}", "-r", "30", "-c:v", "libx264",
+                        "-loop", "1", "-framerate", "30", "-i", str(last_ov), *fixed_in, *audio, "-filter_complex", filt,
+                        "-map", "[v]", "-map", f"{4 if fixed else 3}:a", "-t", f"{dur:.2f}", "-r", "30", "-c:v", "libx264",
                         "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-af", "apad", "-c:a", "aac",
                         "-ar", "44100", "-ac", "1", "-b:a", "128k", str(seg)], check=True)
         segs.append(seg)
@@ -540,26 +599,33 @@ def make_clip(saved: dict, cfg: dict, blog: bool = False) -> Path:
     vol = float(ccfg.get("music_volume", 0.12)) * (2.2 if music == PAD else 1)  # 만든 소리는 원래 작아서 키운다
     print("[4/4] 영상 합치는 중..." + (f" (배경음악: {music.name})" if music else " (배경음악 없음)"))
 
+    shorts_style = str(ccfg.get("style", "shorts")).lower() == "shorts"
+
     def render(size: tuple[int, int], name: str, previews: bool) -> Path:
         tag = "v" if size == VERTICAL else "h"
+        shorts = shorts_style and size == VERTICAL  # 세로 클립만 쇼츠형 (블로그용 가로 영상은 그대로)
+        title_layer = make_title_layer(hook_lines(script, post.title), folder / "layer_title.png", marker, brand) \
+            if shorts else None
         scenes = []
         for i, (sc, p) in enumerate(zip(script.scenes, plan)):
-            box = _layout(size, bool(p["img"]))[1]
-            dark = i > 0 and bool(p["img"] or p["video"])
+            img = p["img"] or (thumb if shorts and i == 0 and thumb.exists() else None)
+            box = _layout(size, bool(img), shorts)[1]
+            dark = shorts or (i > 0 and bool(img or p["video"]))
             ovs = make_overlay(sc.caption, folder / f"layer_{tag}{i + 1:02d}.png", marker, brand, i, n,
-                               first=(i == 0), dark=dark, size=size, box=box)
+                               first=(i == 0 and not shorts), dark=dark, size=size, box=box, show_brand=not shorts)
             if p["video"]:
-                scenes.append({"kind": "video", "bg": p["video"], "overlay": ovs})
+                scenes.append({"kind": "video", "bg": p["video"], "overlay": ovs, "shorts": shorts, "fixed": title_layer})
                 bg_img = _video_frame(p["video"], folder / f"bg_{tag}{i + 1:02d}.jpg", size) if previews else None
             else:
-                bg_img = make_background(p["img"], folder / f"bg_{tag}{i + 1:02d}.jpg", size, sharp=True)
-                scenes.append({"kind": "image", "bg": bg_img, "overlay": ovs})
+                bg_img = (make_shorts_background(img, folder / f"bg_{tag}{i + 1:02d}.jpg") if shorts
+                          else make_background(img, folder / f"bg_{tag}{i + 1:02d}.jpg", size, sharp=True))
+                scenes.append({"kind": "image", "bg": bg_img, "overlay": ovs, "fixed": title_layer})
             if previews:
-                preview_jpg(bg_img, ovs, folder / f"scene_{i + 1:02d}.jpg", size)
+                preview_jpg(bg_img, ovs + ((title_layer,) if title_layer else ()), folder / f"scene_{i + 1:02d}.jpg", size)
         try:
             return build_video(scenes, wavs, durations, folder / name, music, vol, size)
         finally:
-            for f in list(folder.glob(f"layer_{tag}*.png")) + list(folder.glob(f"bg_{tag}*.jpg")):
+            for f in list(folder.glob(f"layer_{tag}*.png")) + list(folder.glob(f"bg_{tag}*.jpg")) + [folder / "layer_title.png"]:
                 f.unlink(missing_ok=True)
 
     video = render(VERTICAL, "clip.mp4", True)

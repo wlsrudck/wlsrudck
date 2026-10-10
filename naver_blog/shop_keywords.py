@@ -32,10 +32,10 @@ DEFAULT_SEEDS = {
                 "방향제", "구강세정기"],
     "생활가전": ["가습기", "제습기", "공기청정기", "선풍기", "전기요", "서큘레이터", "온수매트", "전기히터",
              "음식물처리기", "로봇청소기"],
-    "자취·1인가구": ["멀티탭", "암막커튼", "무드등", "구강청결제", "1인용소파", "접이식테이블", "전자레인지용기",
+    "자취 꿀템 모음": ["멀티탭", "암막커튼", "무드등", "구강청결제", "1인용소파", "접이식테이블", "전자레인지용기",
                 "미니냉장고", "간이옷장", "방음"],
     "건강·홈케어": ["마사지기", "안마의자", "체중계", "족욕기", "목베개", "찜질팩", "혈압계", "폼롤러"],
-    "반려동물": ["고양이모래", "강아지패드", "자동급식기", "펫드라이룸", "스크래쳐", "강아지간식"],
+    "반려동물템": ["고양이모래", "강아지패드", "자동급식기", "펫드라이룸", "스크래쳐", "강아지간식"],
 }
 # 달마다 잘 팔리는 계절 상품 (이번 달 + 다음 달 것을 같이 본다)
 SEASON_SEEDS = {
@@ -160,7 +160,7 @@ def choose_seeds(seeds: dict[str, list[str]]) -> dict[str, list[str]]:
     ans = input("번호(여러 개는 1,3) / 상품 이름 / 그냥 엔터 = 계절 + 모든 상품군 골고루: ").strip()
     if not ans:
         rnd = random.Random(str(dt.date.today()))  # 날마다 다른 씨앗을 섞어서 매번 같은 결과만 나오지 않게
-        out = {"계절 상품": season_seeds()}
+        out = {"계절템": season_seeds()}
         for c in cats:
             out[c] = rnd.sample(seeds[c], min(4, len(seeds[c])))
         return out
@@ -170,11 +170,40 @@ def choose_seeds(seeds: dict[str, list[str]]) -> dict[str, list[str]]:
         for x in nums:
             k = int(x)
             if k == 0:
-                out["계절 상품"] = season_seeds()
+                out["계절템"] = season_seeds()
             elif 1 <= k <= len(cats):
                 out[cats[k - 1]] = seeds[cats[k - 1]]
         return out
     return {"직접 고른 상품": [w.strip() for w in re.split(r"[,]+", ans) if w.strip()]}
+
+
+def add_to_keywords(rows: list[dict]) -> None:
+    """고른 키워드를 keywords.csv 에 상품군 이름(= 블로그 카테고리)과 함께 넣는다. 상품 링크는 창에서 따로 넣는다"""
+    import json
+    from main import load_rows, save_rows
+    from shop_categories import SHOP_CATEGORIES
+    ans = input("\nkeywords.csv에 넣을 번호 (예: 1,4,7 / 엔터 = 넣지 않음): ").strip()
+    picked = [rows[int(x) - 1] for x in re.split(r"[,\s]+", ans) if x.isdigit() and 1 <= int(x) <= len(rows)]
+    if not picked:
+        return
+    have = {r["keyword"].replace(" ", "") for r in load_rows()}
+    new = [{"keyword": r["keyword"], "memo": "", "status": "",
+            "category": r["category"] if r["category"] in SHOP_CATEGORIES else ""}
+           for r in picked if r["keyword"].replace(" ", "") not in have]
+    if not new:
+        print("모두 이미 목록에 있어요.")
+        return
+    save_rows(load_rows() + new)
+    print(f"{len(new)}개를 keywords.csv에 넣었어요 (카테고리 자동). 키워드 목록 탭에서 상품 링크를 넣어 주세요.")
+    try:  # 블로그에 아직 없는 카테고리면 만들어 달라고 알려 준다
+        from publish import _norm_cat
+        mine = {_norm_cat(n) for n in json.loads((ROOT / "categories.json").read_text(encoding="utf-8"))}
+        missing = sorted({r["category"] for r in new if r["category"] and _norm_cat(r["category"]) not in mine})
+        if missing:
+            print("⚠ 네이버 블로그에 아직 없는 카테고리: " + ", ".join(missing))
+            print("  블로그 관리 → 메뉴·글·동영상 관리 → 블로그 → [카테고리 추가]로 같은 이름을 만들어 주세요.")
+    except Exception:
+        pass
 
 
 def main():
@@ -199,6 +228,7 @@ def main():
     print(f"\n좋은 순 {len(rows)}개:")
     for i, r in enumerate(rows, 1):
         print(f"  {i:2}. [{r['category']}] {r['keyword']}  (월 {r['volume']:,} / 경쟁 {r['comp'] or '?'} / {r['why']})")
+    add_to_keywords(rows)
     print("\n이 키워드로 브랜드커넥트에서 리뷰 많은 상품을 골라 링크를 발급하고, 쇼핑 창 [링크 여러 개 한 번에]로 넣으세요.")
     print(f"표로 보기: {OUT}")
     try:

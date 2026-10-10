@@ -119,7 +119,7 @@ def open_path(p: Path) -> None:
 # ── 키워드 목록 ──────────────────────────────────────────────────
 
 AUTO_KEYWORD = "(상품명 자동)"
-SHOP_CATEGORIES = ["주방템", "청소·세탁템", "수납·정리템", "자취 꿀템 모음"]
+from shop_categories import SHOP_CATEGORIES  # noqa: E402
 SHOP_HIDDEN = {"11_trending_keywords.bat", "21_news_keywords.bat", "12_evergreen_keywords.bat", "7_season_keywords.bat", "13_autofill_keywords.bat",
                "@google_key", "@pexels_key", "16_ai_image_test.bat"}
 

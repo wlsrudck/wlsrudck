@@ -433,7 +433,7 @@ def related_pool(keyword: str, posts: list[tuple[str, str]], recent: list[tuple[
         return {x[i:i + 2] for i in range(len(x) - 1)}
     k = bigrams(keyword)
     scored = sorted(((len(k & bigrams(t)), i, t, u) for i, (t, u) in enumerate(posts)), key=lambda x: (-x[0], x[1]))
-    pool = [(t, u) for sc, _, t, u in scored if sc > 0][:size - 10]
+    pool = [(t, u) for sc, _, t, u in scored if sc > 0][:max(size - 10, size // 2)]
     for t, u in list(recent)[:10] + posts[:10]:  # 최근 글도 조금 (아무것도 안 겹칠 때 대비)
         if len(pool) >= size:
             break

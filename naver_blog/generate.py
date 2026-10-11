@@ -975,6 +975,10 @@ def dedupe_intro(post: "Post") -> None:
 
 STYLE_RULES = """
 
+[제목 숫자 = 본문 개수]
+- 제목에 '5가지', '3단계', '7곳'처럼 개수를 쓰면 본문에도 정확히 그만큼(소제목 수 또는 번호 매긴 항목 수) 담습니다.
+  소제목이 3~4개라면 제목도 '3가지'·'4가지'로 맞추거나 개수를 빼고 씁니다. 약속한 개수와 다르면 신뢰가 떨어집니다.
+
 [문장 다듬기 — 좋은 작가들의 공통 규칙]
 - 꾸밈말을 뺍니다: "매우·정말·너무·굉장히·엄청·무척·상당히"는 없어도 뜻이 같으면 지웁니다 (마크 트웨인).
   "정말 편리해요" 대신 무엇이 어떻게 편한지 숫자·장면으로: "앱에서 3분이면 끝나요" (보여 주기, 체호프).
@@ -1072,6 +1076,26 @@ def long_sentences(post: "Post", limit: int = 60) -> list[str]:
     return out
 
 
+TITLE_COUNT = re.compile(r"(\d{1,2})\s*(가지|단계|곳|개(?!월|월분|년))")
+
+
+def title_count_ok(post: "Post") -> tuple[bool, str]:
+    """제목의 'N가지/N단계/N곳/N개'가 본문 개수(소제목 수, 또는 한 소제목 안 번호 매긴 항목 수)와 맞는지"""
+    m = TITLE_COUNT.search(post.title)
+    if not m:
+        return True, "제목에 개수 없음"
+    n = int(m.group(1))
+    heads = len([s for s in post.sections if s.heading.strip()])
+    if n == heads:
+        return True, f"{m.group(0)} = 소제목 {heads}개"
+    for sec in post.sections:  # 한 소제목 안에 ①②③ / 1. 2. 3. 으로 n 개를 나열했는지
+        text = "\n".join(sec.paragraphs)
+        marks = re.findall(r"(?m)^\s*(?:[①-⑳]|\d{1,2}[.)])", text)
+        if len(marks) == n:
+            return True, f"{m.group(0)} = '{sec.heading[:12]}' 안 항목 {n}개"
+    return False, f"제목은 {m.group(0)}인데 소제목 {heads}개 — 제목 숫자나 본문을 맞춰 주세요"
+
+
 def long_paragraphs(post: "Post", limit: int = 3) -> list[str]:
     """4문장 이상인 문단"""
     return [p for sec in post.sections for p in sec.paragraphs
@@ -1123,6 +1147,7 @@ def checklist(post: "Post", memo: str, cfg: dict) -> list[tuple[str, bool, str]]
         ("태그 한 줄", 3 <= len(post.tags) <= 15, f"{len(post.tags)}개"),
         ("금지어", not banned, "없음" if not banned else ", ".join(banned)),
         ("AI 말투", not ai, "없음" if not ai else ", ".join(ai)),
+        ("제목 숫자", *title_count_ok(post)),
         ("경험 빈칸", not post.spots, "없음" if not post.spots else f"{len(post.spots)}곳 — 빨간 ✍️ 줄을 직접 겪은 일로 바꾸거나 지우고 발행"),
         ("AI 답변 흔적", not left, "없음" if not left else "지워 주세요: " + ", ".join(left)),
         ("긴 문장(60자 넘음)", len(long_sentences(post)) <= 2,

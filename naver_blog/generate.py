@@ -148,6 +148,14 @@ class SectionDecor(BaseModel):
 
 
 
+class Example(BaseModel):
+    model_config = STRICT
+    who: str = Field(description="독자 상황 한 줄(25자 이내). 예: '30대 1인 가구, 월급 250만 원'")
+    calc: str = Field(description="계산식을 숫자와 + - * / ( ) 만으로. 단위·쉼표 없이 원 단위. 예: '200000*12'")
+    result: float = Field(description="calc 를 계산한 값 그대로. 예: 2400000")
+    text: str = Field(description="독자가 읽을 계산 한 줄. 예: '월 20만 원 × 12개월 = 연 240만 원'")
+
+
 class Decor(BaseModel):
     model_config = STRICT
     recap_title: str = Field( description="글 끝 '한눈에 다시 보기' 제목. 독자 질문처럼. 예: '결국 네 가지가 어떻게 다를까?'. "
@@ -160,6 +168,10 @@ class Decor(BaseModel):
     theme: str = Field( description="이 글 성격에 맞는 꾸밈 테마 이름 하나(글자 그대로): "
                        + " / ".join(f"{k}({v[0]})" for k, v in THEMES.items()))
     sections: list[SectionDecor] = Field(description="소제목마다 하나씩 (소제목이 있는 것만)")
+    examples: list[Example] = Field(description="'내 경우로 계산해 보면' 사례 0~3개. 금액·횟수·기간 계산이 되는 글만, 아니면 빈 목록")
+    verdict_go: list[str] = Field(description="'이런 분은 바로' 2~3개(각 30자 이내). 판단할 거리가 없는 글이면 빈 목록")
+    verdict_skip: list[str] = Field(description="'이런 분은 패스·다른 방법' 1~2개(각 30자 이내). 없으면 빈 목록")
+    verdict_first: str = Field(description="'헷갈리면 여기부터' 한 줄(35자 이내): 가장 먼저 할 확인·행동. 없으면 빈 문자열")
 
 
 DECOR_RULES = """아래 블로그 글에 붙일 꾸미기 정보를 주세요. 글 내용(조사로 확인된 사실)만 쓰고 새 사실을 지어내지 않습니다.
@@ -180,12 +192,49 @@ DECOR_RULES = """아래 블로그 글에 붙일 꾸미기 정보를 주세요. �
 - 숫자·조건·이유·순서처럼 '3가지로 정리되는' 소제목 1~2개에 card_type='info' 와 card_lines 3줄을 씁니다.
   카드는 한눈에 보는 요약이고 자세한 설명은 본문에서 합니다. 같은 문장을 카드와 본문에 두 번 쓰지 않습니다.
 
+[내 경우로 계산해 보면 — 사례]
+- 지원금·요금·환급·이자·할인처럼 금액을 계산할 수 있는 글이면, 흔한 독자 상황 2~3개로 실제 숫자를 넣어 계산해 보여 줍니다.
+  계산에 쓰는 기준 숫자(금액·비율·횟수·기간)는 반드시 글 본문에 있는 숫자만 씁니다. 새 숫자를 지어내지 않습니다.
+- calc 는 숫자와 + - * / ( ) 만으로 쓰고, result 는 그 값과 똑같아야 합니다(프로그램이 다시 계산해서 다르면 지웁니다).
+- 조건이 복잡해 정확한 계산이 어렵거나 계산할 거리가 없는 글(사용법·전화번호·작품 정보 등)은 빈 목록.
+
+[그래서 나는? — 판단 상자]
+- 정보 나열로 끝내지 않고 결론을 내려 줍니다: verdict_go(이런 분은 바로 하세요/이게 맞아요),
+  verdict_skip(이런 분은 패스하거나 다른 방법이 나아요), verdict_first(헷갈리면 가장 먼저 확인할 것 하나).
+- 글 본문에 근거가 있는 조건만으로 나눕니다. 대상 조건·기한·비용·대안 같은 기준을 씁니다. 판단할 거리가 없으면 비워 둡니다.
+
 [소제목 그림 글자]
 - 소제목마다 card_title(번호 없이 10자 이내)과 card_points(8자 이내 단어 3개)를 씁니다. card_points 는 문장이 아니라
   꼬리표 같은 단어입니다(예: '3.2조 계약', '10월 허가', '임상 1상'). 본문 문장을 그대로 옮기면 같은 말을 두 번 읽게 됩니다. 그림 속에 그대로 그려지므로
   짧고 맞춤법이 정확한 말, 조사 자료로 확인된 사실만 씁니다. 금액·날짜처럼 틀리면 안 되는 숫자는 넣지 않습니다.
 
 """
+
+
+def _calc_ok(expr: str, result: float) -> bool:
+    """계산 예시가 맞는지 프로그램이 직접 다시 계산해 본다 (숫자와 + - * / ( ) 만 허용)"""
+    import ast
+    import operator as op
+    ops = {ast.Add: op.add, ast.Sub: op.sub, ast.Mult: op.mul, ast.Div: op.truediv, ast.USub: op.neg}
+
+    def ev(n):
+        if isinstance(n, ast.Expression):
+            return ev(n.body)
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)):
+            return n.value
+        if isinstance(n, ast.BinOp) and type(n.op) in ops:
+            return ops[type(n.op)](ev(n.left), ev(n.right))
+        if isinstance(n, ast.UnaryOp) and type(n.op) in ops:
+            return ops[type(n.op)](ev(n.operand))
+        raise ValueError("허용하지 않는 식")
+    try:
+        expr = expr.replace(",", "").replace("×", "*").replace("÷", "/").strip()
+        if not re.fullmatch(r"[\d\s+\-*/().]+", expr):
+            return False
+        v = ev(ast.parse(expr, mode="eval"))
+        return abs(v - float(result)) <= max(1.0, abs(v) * 0.005)
+    except Exception:
+        return False
 
 
 def decorate(post: "Post", cfg: dict) -> None:
@@ -208,6 +257,13 @@ def decorate(post: "Post", cfg: dict) -> None:
         return
     post.theme, post.image_style = d.theme, d.image_style
     post.recap_title, post.recap = d.recap_title, d.recap
+    post.examples = [{"who": e.who.strip(), "text": e.text.strip()} for e in d.examples if _calc_ok(e.calc, e.result)][:3]
+    dropped = len(d.examples) - len(post.examples)
+    if dropped:
+        print(f"  (계산 예시 {dropped}개는 계산이 맞지 않아 뺐어요)")
+    post.verdict_go = [v.strip() for v in d.verdict_go if v.strip()][:3]
+    post.verdict_skip = [v.strip() for v in d.verdict_skip if v.strip()][:2]
+    post.verdict_first = d.verdict_first.strip()
     for sd in d.sections:
         if 1 <= sd.number <= len(post.sections):
             sec = post.sections[sd.number - 1]
@@ -248,6 +304,10 @@ class Post(BaseModel):
     links: SkipJsonSchema[list[str]] = []
     recap_title: SkipJsonSchema[str] = ""  # ↓ 꾸미기 정보 (decorate 가 채운다)
     recap: SkipJsonSchema[list[RecapItem]] = []
+    examples: SkipJsonSchema[list[dict]] = []  # 내 경우로 계산해 보면 [{who, text}] (계산이 맞는 것만)
+    verdict_go: SkipJsonSchema[list[str]] = []  # 그래서 나는? — 이런 분은 바로
+    verdict_skip: SkipJsonSchema[list[str]] = []  # 이런 분은 패스
+    verdict_first: SkipJsonSchema[str] = ""  # 헷갈리면 여기부터
     image_style: SkipJsonSchema[str] = ""
     theme: SkipJsonSchema[str] = ""
     suggest: SkipJsonSchema[list[str]] = []  # 네이버 검색창 자동완성 연관 키워드 (점검표용)
@@ -358,6 +418,13 @@ class Post(BaseModel):
             if mid_link and i == mid_at:
                 title, _, url = mid_link.partition("|")
                 out.append(("text", f"📌 같이 보면 좋은 글\n▶ {title.strip()}\n{url.strip()}"))
+        if self.examples:  # 내 경우로 계산해 보면: 독자가 자기 숫자를 바로 대입해 보게
+            circ = "①②③"
+            lines = ["🧮 내 경우로 계산해 보면"]
+            for k, e in enumerate(self.examples[:3]):
+                lines += [f"{circ[k]} {e.get('who', '')}", f"→ {e.get('text', '')}"]
+            lines.append("(글에 나온 기준으로 계산한 예시예요. 실제 금액은 공식 조회로 확인하세요)")
+            out.append(("text", "\n".join(lines)))
         if self.recap:  # 한눈에 다시 보기: 🟢 이름 / "한마디" / → 정리 두 줄
             if self.recap_title.strip():
                 out.append(("heading", self.recap_title.strip()))
@@ -377,6 +444,13 @@ class Post(BaseModel):
             out.append(("photo", media["summary_card"]))
         if self.shop_links:
             out.append(("text", f"👉 {self.shop_name or '제품'} 자세히 보기\n" + "\n".join(self.shop_links)))
+        if self.verdict_go or self.verdict_skip or self.verdict_first.strip():  # 그래서 나는? — 결론 상자
+            lines = ["🤔 그래서 나는?"]
+            lines += [f"✅ {v}" for v in self.verdict_go]
+            lines += [f"⏸ {v}" for v in self.verdict_skip]
+            if self.verdict_first.strip():
+                lines.append(f"👉 헷갈리면: {self.verdict_first.strip()}")
+            out.append(("text", "\n".join(lines)))
         if self.action_line.strip():
             out.append(("text", "✔ " + self.action_line.strip()))
         if self.notice.strip():
@@ -1322,6 +1396,8 @@ def polish_saved(post: Post, memo: str, cfg: dict) -> Post:
         post.links, post.updated = keep["links"], keep["updated"]
         # 꾸미기 정보는 고쳐 쓰기 형식에 없으니 원래 글에서 그대로 옮긴다
         post.theme, post.image_style, post.recap_title, post.recap = old.theme, old.image_style, old.recap_title, old.recap
+        post.examples, post.verdict_go, post.verdict_skip, post.verdict_first = \
+            old.examples, old.verdict_go, old.verdict_skip, old.verdict_first
         for a, b in zip(post.sections, old.sections):
             a.card_type, a.card_lines, a.card_title, a.card_points = b.card_type, b.card_lines, b.card_title, b.card_points
         dedupe_intro(post)

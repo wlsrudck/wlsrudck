@@ -237,6 +237,12 @@ def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | N
                 out.append((says.strip(), None, "#222222", True, False))
             else:  # 이름 없이 '🟢 “한마디”' 한 줄인 경우
                 out.append((name.strip(), None, "#222222", True, False))
+    # 계산 예시·판단 상자: 첫 줄(🧮 / 🤔)은 소제목 색 굵게, ✅ 줄은 굵게
+    for kind, value in blocks:
+        if kind == "text" and value[:1] in ("🧮", "🤔"):
+            first, *rest = value.split("\n")
+            out.append((first.strip(), None, st["heading_color"], True, False))
+            out += [(ln.strip(), None, "#222222", True, False) for ln in rest if ln.startswith("✅")]
     # 행동 한 줄(✔ …): 굵게 + 행동 색 (서체 4역할 중 '행동형')
     for kind, value in blocks:
         if kind == "text" and value.startswith("✔ "):

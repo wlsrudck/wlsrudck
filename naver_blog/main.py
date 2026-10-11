@@ -43,6 +43,10 @@ def make_photo_folders(rows) -> None:
         (PHOTOS / slugify(r["keyword"])).mkdir(parents=True, exist_ok=True)
 
 
+# 쓰지 않는 주제 (검색 누락 확인에서 거의 다 빠졌다): 범죄·사건, 연예인 연애·결별, 논란·폭로
+# (프로필·작품 정보 같은 연예 글은 검색에 잘 나와서 여기 넣지 않는다 — 그건 경고만)
+SKIP_TOPIC = re.compile(r"살해|살인|흉기|폭행|성범죄|성폭행|성추행|피의자|용의자|숨진|숨져|사망\s*사건|극단(적)?\s*선택|자살|"
+                        r"사형|친딸|친모|친부|학대|열애|결별|파경|불륜|외도|열애설|이혼설|재혼설|사생활|논란|폭로|루머|저격|갑질")
 INVEST = re.compile(r"주가|주식|종목|관련주|테마주|ETF|공모주|상장|코인|비트코인|리플|XRP|목표주가|배당|증시|코스피|코스닥|나스닥")
 PEOPLE_TOPIC = re.compile(r"프로필|본명|열애|결별|결혼|이혼|근황|출연진|나이|누구|배우|가수|아이돌|감독|선수|기자|"
                           r"유튜버|대표|회장|의원|장관|대통령")
@@ -579,6 +583,13 @@ def main():
                 mark_done(keyword, f"skip 이미 씀 {dt.datetime.now():%Y-%m-%d}")
             continue
         from trending_keywords import CONTROVERSY
+        if SKIP_TOPIC.search(keyword) and not cfg["writing"].get("allow_sensitive"):
+            # 범죄·사건, 연예인 연애·결별, 논란 글은 네이버 검색에서 거의 다 빠진다 (검색 누락 확인 결과) → 쓰지 않는다
+            print(f"[건너뜀] {keyword} → 범죄·연애사·논란 주제는 검색에서 빠지기 쉬워 쓰지 않아요 "
+                  "(꼭 쓰려면 config [writing] allow_sensitive = true)")
+            if not args.dry_run:
+                mark_done(keyword, f"skip 민감주제 {dt.datetime.now():%Y-%m-%d}")
+            continue
         if CONTROVERSY.search(keyword):  # 직접 넣은 키워드는 쓰되, 사생활·범죄·정치 주제라는 걸 알려 준다
             print(f"  ⚠ '{keyword}' 는 사람 신상·연애사·범죄·정치 쪽 키워드예요. 신고·저품질 위험이 있으니 발행 전에 한 번 더 봐 주세요.")
         memo_rest, videos = split_videos(row.get("memo", ""))

@@ -37,6 +37,20 @@ class Change(BaseModel):
     before: str = Field(description="글에 적혀 있는 옛 내용 그대로")
     after: str = Field(description="지금 확인된 내용")
     source: str = Field(description="지금 내용을 확인한 출처 URL (조사 자료에 있는 것만)")
+    image: int = Field(description="옛 내용이 [그림 n] 에 적힌 것이면 그 번호 n, 본문 글자면 0")
+
+
+class Row(BaseModel):
+    model_config = STRICT
+    key: str = Field(description="굵게 보일 핵심 (14자 이내). 예: '월 최대 25만 원'")
+    desc: str = Field(description="짧은 설명 한 줄 (30자 이내). 예: '2026년 기준, 최대 12개월'")
+
+
+class ImageFix(BaseModel):
+    model_config = STRICT
+    image: int = Field(description="바꿔야 하는 그림 번호 n ([그림 n])")
+    title: str = Field(description="새 그림 제목 (18자 이내). 옛 그림의 제목·주제를 따른다")
+    rows: list[Row] = Field(description="옛 그림 내용을 지금 정보로 고친 것 1~3줄. 확인된 내용만")
 
 
 class Update(BaseModel):
@@ -47,6 +61,18 @@ class Update(BaseModel):
     update_note: str = Field(description="바뀐 게 있을 때 글 맨 위에 붙일 업데이트 문단 2~4문장. "
                                          "'📢 YYYY.MM.DD 업데이트' 로 시작, 무엇이 바뀌었는지 쉬운 말로. 바뀐 게 없으면 빈 문자열")
     new_title: str = Field(description="제목 속 연도·회차가 지나서 바꿔야 하면 새 제목, 아니면 빈 문자열")
+    image_fixes: list[ImageFix] = Field(description="그림 속 숫자가 바뀐 그림마다 하나 (바꿔 넣을 새 그림 내용). 없으면 빈 목록")
+
+
+class ImageText(BaseModel):
+    model_config = STRICT
+    image: int = Field(description="그림 번호 (보낸 순서, 1부터)")
+    text: str = Field(description="그림에 적힌 글자 중 숫자·금액·날짜·번호·조건이 들어간 줄을 그대로. 없으면 빈 문자열")
+
+
+class ImageTexts(BaseModel):
+    model_config = STRICT
+    items: list[ImageText]
 
 
 def _facts(post: dict) -> str:
@@ -63,6 +89,8 @@ def _facts(post: dict) -> str:
     for q in post.get("qa", []):
         if NUM.search(q.get("answer", "")):
             lines.append(f"- Q. {q.get('question', '')} A. {q.get('answer', '')}")
+    for n, t in post.get("image_texts", []):  # 그림 속 글자 (뉴스형·슬라이드형 그림)
+        lines.append(f"- [그림 {n}] {t}")
     return "\n".join(dict.fromkeys(lines))[:3500]
 
 
@@ -79,8 +107,8 @@ def _list_date(s: str) -> dt.date | None:
     return dt.date.today() if s and "전" in s else None
 
 
-def fetch_body(url: str) -> list[str]:
-    """발행된 내 글의 본문 문단들 (모바일 글 화면에서 글자만). 못 읽으면 빈 목록"""
+def fetch_body(url: str) -> tuple[list[str], list[str]]:
+    """발행된 내 글의 (본문 문단들, 본문 그림 주소들) — 모바일 글 화면에서. 못 읽으면 빈 목록"""
     import html
     import urllib.request
     m = re.search(r"blog\.naver\.com/([\w-]+)/(\d+)", url)
@@ -103,9 +131,17 @@ def fetch_body(url: str) -> list[str]:
             paras = re.split(r"<br\s*/?>|</p>|</div>", area.group(1)) if area else []
         lines = [re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", x))).strip() for x in paras]
         lines = [x for x in lines if x and x != "\u200b"]
-        if lines:
-            return lines
-    return []
+        imgs = []
+        for tag in re.findall(r"<img\b[^>]*>", raw):
+            src = (re.search(r'data-lazy-src="([^"]+)"', tag) or re.search(r'\bsrc="([^"]+)"', tag))
+            src = html.unescape(src.group(1)) if src else ""
+            if re.search(r"(postfiles|blogfiles|blogpfthumb-phinf)\.pstatic\.net", src) and "storep" not in src:
+                src = re.sub(r"\?type=\w+", "", src) + "?type=w966"
+                if src not in imgs:
+                    imgs.append(src)
+        if lines or imgs:
+            return lines, imgs
+    return [], []
 
 
 def _local(limit: int, min_days: int, seen: dict) -> list[dict]:
@@ -185,17 +221,73 @@ def candidates(limit: int = 5, min_days: int = 30, bid: str = "") -> list[dict]:
         post = local.get(re.sub(r"\W+", "", p["title"]))
         if not post:
             read += 1
-            body = fetch_body(p["url"])
+            body, imgs = fetch_body(p["url"])
             time.sleep(0.7)  # 천천히 (네이버에 부담 주지 않게)
-            if not body:
+            if not body and not imgs:
                 continue
-            post = {"title": p["title"], "sections": [{"paragraphs": body}], "qa": [], "metrics": []}
-        if len(NUM.findall(_facts(post))) < 2:
+            post = {"title": p["title"], "sections": [{"paragraphs": body}], "qa": [], "metrics": [], "images": imgs}
+        # 그림이 많은 글(뉴스형·슬라이드형)은 숫자가 그림 속에만 있을 수 있다 → 제목이 정보성이면 후보로
+        picture_post = len(post.get("images", [])) >= 2 and HINT.search(p["title"])
+        if len(NUM.findall(_facts(post))) < 2 and not picture_post:
             seen[key] = f"{today} 숫자없음"  # 바뀔 숫자가 없는 글은 1년 동안 다시 안 본다
             continue
         out.append({"key": key, "date": str(made), "post": post, "url": p["url"]})
     SEEN.write_text(json.dumps(seen, ensure_ascii=False), encoding="utf-8")
     return out
+
+
+def _img_block(url: str, referer: str) -> dict | None:
+    import base64
+    import io
+    import urllib.request
+
+    from PIL import Image
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Referer": referer})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            im = Image.open(io.BytesIO(r.read())).convert("RGB")
+    except Exception:
+        return None
+    if im.width < 200 or im.height < 150:
+        return None  # 아이콘·스티커
+    im.thumbnail((1000, 1400))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=85)
+    return {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                         "data": base64.b64encode(buf.getvalue()).decode()}}
+
+
+def read_images(client, cfg: dict, post: dict, url: str, most: int = 12) -> list[tuple[int, str]]:
+    """본문 그림 속 글자 중 숫자가 든 줄을 읽는다 → [(그림 번호, 글자)]. 그림 번호는 글 안 순서(1부터)"""
+    content, order = [], []
+    for n, src in enumerate(post.get("images", [])[:most], 1):
+        b = _img_block(src, url or "https://blog.naver.com/")
+        if b:
+            content += [{"type": "text", "text": f"[그림 {n}]"}, b]
+            order.append(n)
+    if not order:
+        return []
+    content.append({"type": "text", "text": "위 블로그 그림들에 적힌 글자 중 숫자·금액·날짜·전화번호·조건이 들어간 줄만 그대로 옮겨 주세요. "
+                                            "그림 번호는 [그림 n] 표시의 n 을 씁니다. 글자가 없거나 숫자가 없는 그림은 빈 문자열."})
+    res = client.beta.messages.parse(model=cfg["model"], max_tokens=3000, betas=["server-side-fallback-2026-07-01"],
+                                     fallbacks="default", output_format=ImageTexts,
+                                     messages=[{"role": "user", "content": content}])
+    got = res.parsed_output.items if res.parsed_output else []
+    return [(it.image, re.sub(r"\s+", " ", it.text).strip()[:300]) for it in got
+            if it.image in order and NUM.search(it.text or "")]
+
+
+def make_fix_card(fix: ImageFix, out: Path, cfg: dict) -> Path | None:
+    """바꿔 넣을 새 그림: 프로그램의 정보 카드 모양 (제목 + 번호 붙은 줄). 아래에 '○○ 기준' 표시"""
+    import images
+    rows = [(r.key.strip(), r.desc.strip()) for r in fix.rows if r.key.strip()][:3]
+    if not rows:
+        return None
+    color = cfg.get("images", {}).get("ai_color") or "#1c3d6e"
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", str(color)):
+        color = "#1c3d6e"
+    brand = f"{cfg['naver'].get('blog_name', '')} · {dt.date.today():%Y.%m} 기준".strip(" ·")
+    return images.make_info_card(fix.title or "최신 정보", rows, out, color, brand)
 
 
 PROMPT = """아래는 {made}에 쓴 블로그 글에서 숫자·날짜·번호가 들어간 문장들입니다. 오늘은 {today}입니다.
@@ -207,8 +299,15 @@ PROMPT = """아래는 {made}에 쓴 블로그 글에서 숫자·날짜·번호�
 {facts}"""
 
 
-def check_one(client, cfg: dict, saved: dict) -> tuple[Update | None, str]:
+def check_one(client, cfg: dict, saved: dict, url: str = "") -> tuple[Update | None, str]:
     post = saved["post"]
+    if post.get("images") and not post.get("image_texts"):
+        try:
+            post["image_texts"] = read_images(client, cfg, post, url)
+            if post["image_texts"]:
+                print(f"   그림 {len(post['images'])}장 중 {len(post['image_texts'])}장에서 숫자를 읽었어요", flush=True)
+        except Exception as e:
+            print(f"   (그림 속 글자 읽기 실패: {str(e).splitlines()[0][:60]})")
     msg = [{"role": "user", "content": PROMPT.format(made=saved.get("date", ""), today=dt.date.today(),
                                                      n=cfg.get("max_searches", 5), facts=_facts(post))}]
     tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": cfg.get("max_searches", 5),
@@ -233,11 +332,14 @@ def check_one(client, cfg: dict, saved: dict) -> tuple[Update | None, str]:
         output_format=Update,
         messages=[{"role": "user", "content": f"오늘 날짜: {dt.date.today():%Y.%m.%d}\n옛 글 제목: {post.get('title', '')}\n\n"
                    f"[옛 글 내용]\n{_facts(post)}\n\n[오늘 다시 확인한 결과]\n{notes[:6000]}\n\n"
-                   "확인 결과를 정리해 주세요. 확인 결과에 근거가 있는 변경만 changes 에 넣습니다."}])
+                   "확인 결과를 정리해 주세요. 확인 결과에 근거가 있는 변경만 changes 에 넣습니다. "
+                   "옛 내용이 [그림 n] 줄에 있던 것이면 image 에 n 을 적고, 그 그림마다 image_fixes 에 바꿔 넣을 새 그림 내용을 씁니다."}])
     up = res.parsed_output
     if up:  # 조사에서 나오지 않은 출처를 단 변경은 믿지 않는다
         up.changes = [c for c in up.changes if c.source.strip() and c.before.strip() != c.after.strip()
                       and any(c.source.rstrip(".,/") in u or u in c.source for u in urls if u)]
+        fixed = {c.image for c in up.changes if c.image}
+        up.image_fixes = [f for f in up.image_fixes if f.image in fixed]
         if not up.changes:
             up.update_note = ""
     return up, notes
@@ -271,7 +373,7 @@ def main():
         title = item["post"].get("title", "")
         print(f"{i}. {title[:45]}  ({item['date']} 작성)", flush=True)
         try:
-            up, notes = check_one(client, cfg["writing"], saved)
+            up, notes = check_one(client, cfg["writing"], saved, item["url"])
         except Exception as e:
             print(f"   ⚠ 확인 실패: {str(e).splitlines()[0][:80]}\n")
             continue
@@ -289,8 +391,20 @@ def main():
         lines = [f"글 제목: {title}", f"글 주소: {url or '(목록에서 못 찾음 — 제목으로 찾아 주세요)'}",
                  f"처음 쓴 날: {saved.get('date', '')}   확인한 날: {dt.date.today()}", "", "■ 바뀐 것"]
         for c in up.changes:
-            lines += [f"· {c.item}", f"   전: {c.before}", f"   지금: {c.after}", f"   출처: {c.source}"]
+            where = f" (본문 {c.image}번째 그림 속)" if c.image else ""
+            lines += [f"· {c.item}{where}", f"   전: {c.before}", f"   지금: {c.after}", f"   출처: {c.source}"]
             print(f"   🔄 {c.item}: {c.before[:25]} → {c.after[:25]}")
+        safe = re.sub(r'[\\/:*?"<>|]', "", title)[:30]
+        if up.image_fixes:
+            lines += ["", "■ 바꿔야 할 그림 (새 그림을 같은 폴더에 만들어 뒀어요)"]
+            for fx in up.image_fixes:
+                try:
+                    card = make_fix_card(fx, DIR / f"{dt.date.today()}_{safe}_그림{fx.image}.jpg", cfg)
+                except Exception as e:
+                    card = None
+                    print(f"   (새 그림 만들기 실패: {str(e).splitlines()[0][:60]})")
+                lines.append(f"· 본문 {fx.image}번째 그림 → " + (f"새 그림: {card.name}" if card else "새 그림을 못 만들었어요. 그림을 지우고 글로 고쳐 주세요"))
+                print(f"   🖼 {fx.image}번째 그림 바꾸기" + (f" → {card.name}" if card else ""))
         if up.new_title.strip():
             lines += ["", "■ 제목도 바꾸면 좋아요", up.new_title.strip()]
             print(f"   🔄 제목: {up.new_title.strip()[:40]}")
@@ -300,9 +414,9 @@ def main():
             lines += ["", "■ 확인 못 한 것 (직접 한 번 보세요)", *[f"· {u}" for u in up.unsure]]
         lines += ["", "■ 고치는 방법",
                   "1) 글 주소를 열고 [수정] → 위 '바뀐 것'의 전 내용을 지금 내용으로 고치기",
-                  "2) 업데이트 문단을 글 맨 위에 붙여 넣기 → [발행] (같은 주소 그대로라 검색 순위가 이어져요)",
-                  "3) 글을 지우고 새로 올리지 마세요 (유사 문서로 더 나빠질 수 있어요)"]
-        safe = re.sub(r'[\\/:*?"<>|]', "", title)[:30]
+                  "2) 바꿔야 할 그림이 있으면: 옛 그림 클릭 → 삭제 → 그 자리에 새 그림(_그림n.jpg) 올리기",
+                  "3) 업데이트 문단을 글 맨 위에 붙여 넣기 → [발행] (같은 주소 그대로라 검색 순위가 이어져요)",
+                  "4) 글을 지우고 새로 올리지 마세요 (유사 문서로 더 나빠질 수 있어요)"]
         out = DIR / f"{dt.date.today()}_{safe}.txt"
         out.write_text("\n".join(lines), encoding="utf-8")
         print(f"   → 저장: 지난글_업데이트\\{out.name}\n")

@@ -394,7 +394,9 @@ class Post(BaseModel):
             out.append(("quote", self.pull_quote.strip()))  # 네이버 인용구(포스트잇)로 들어간다
         if self.shop_links:  # 판매 글: 도입 바로 뒤에 구매 링크 한 번
             out.append(("text", f"👉 {self.shop_name or '제품'} 자세히 보기\n" + "\n".join(self.shop_links)))
-        if self.toc() and not self.simple:
+        if media.get("toc_card") and not self.simple:  # 목차를 글 색에 맞춘 카드 그림으로
+            out.append(("photo", media["toc_card"]))
+        elif self.toc() and not self.simple:
             out.append(("text", self.toc()))
         if media.get("metrics_card"):
             out.append(("photo", media["metrics_card"]))

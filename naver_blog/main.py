@@ -145,6 +145,17 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
                        style=ai_images.illust_style(color, False), aspect="4:3")
         return ai_images.stamp(path) if path else None
 
+    if cfg.get("toc_card", True) and post.toc() and not post.simple:  # 목차: 글자만 덩그러니 대신 카드 그림
+        try:
+            items = post.toc().split("\n")[1:]
+            items = [re.sub(r"^[①-⑮]\s*", "", t) for t in items]
+            card = images.make_toc_card(items, folder / "toc.jpg",
+                                        THEMES.get(cfg.get("_theme", ""), THEMES["기본 청록"])[1]["heading_color"], brand)
+            if card:
+                media["toc_card"] = card
+        except Exception as e:
+            print(f"  (목차 카드 실패 — 글자 목차로 넣어요: {str(e).splitlines()[0][:60]})")
+
     if getattr(post, "table_rows", None):
         try:
             t = images.make_table_card(post.table_title, post.table_rows, folder / "table.jpg", slug, brand)

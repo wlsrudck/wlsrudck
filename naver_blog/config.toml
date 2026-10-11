@@ -16,6 +16,7 @@ headless = false             # 처음엔 false로 동작을 눈으로 확인하�
 [images]
 thumbnail = true        # 글 맨 위에 제목 썸네일 카드 자동 생성
 summary_card = true     # 글 끝에 "한눈에 정리" 카드 자동 생성
+toc_card = true        # 목차를 글자 대신 글 색에 맞춘 카드 그림으로 (false 면 예전처럼 글자 목차)
 evidence = true        # 글에 쓴 번호·금액이 적힌 공식 홈페이지 화면을 찍어 형광펜 표시해서 넣기 (정부·공공기관, 고객센터 블로그는 회사 공식 홈페이지)
 stock_photos = true     # 직접 찍은 사진이 없는 소제목에 Pixabay 무료 사진 넣기 (pixabay_key.txt 필요)
 max_stock_photos = 3    # 글 하나에 넣을 무료 사진 최대 개수

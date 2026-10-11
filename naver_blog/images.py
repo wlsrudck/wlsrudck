@@ -722,6 +722,37 @@ def make_info_card(title: str, rows: list[tuple[str, str]], out: Path, color: st
     return out
 
 
+def make_toc_card(items: list[str], out: Path, color: str = "#1c3d6e", brand: str = "", title: str = "이 글의 순서") -> Path | None:
+    """목차 카드: 글 성격 색의 번호 동그라미 + 소제목 한 줄씩. 글자만 덩그러니 있는 목차 대신"""
+    items = [re.sub(r"^\d+[.)]\s*", "", t).strip() for t in items if t.strip()][:10]
+    if len(items) < 2:
+        return None
+    W, pad, row_h = 1080, 70, 118
+    probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    tw = W - pad * 2 - 150
+    size = min(_fit_size(probe, [t], tw, 44, 30) for t in items)
+    H = 60 + 70 + 40 + len(items) * row_h + 50
+    im = Image.new("RGB", (W, H), _tint(color, 0.93))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle([pad - 30, 40, W - pad + 30, H - 30], radius=36, fill="white", outline=_tint(color, 0.6), width=3)
+    d.text((pad + 10, 78), title, font=_font(48), fill=color)
+    d.rounded_rectangle([pad + 10, 148, pad + 130, 156], radius=4, fill=color)
+    y = 190
+    for n, t in enumerate(items, 1):
+        cx, cy = pad + 50, y + row_h // 2 - 10
+        d.ellipse([cx - 34, cy - 34, cx + 34, cy + 34], fill=color)
+        d.text((cx, cy), str(n), font=_font(36), fill="white", anchor="mm")
+        line = _wrap(d, t, _font(size), tw)[0]
+        d.text((pad + 120, cy), line, font=_font(size), fill="#1f2328", anchor="lm")
+        if n < len(items):
+            d.line([pad + 120, y + row_h - 10, W - pad, y + row_h - 10], fill=_tint(color, 0.85), width=2)
+        y += row_h
+    if brand:
+        d.text((W - pad, H - 52), brand, font=_font(24), fill="#9a9da3", anchor="rm")
+    im.save(out, quality=92)
+    return out
+
+
 def make_table_card(title: str, rows: list[list[str]], out: Path, seed: str, brand: str = "") -> Path | None:
     """비교표 카드: 머리글 줄은 진한 색 띠, 칸마다 짧은 글자. 글자는 프로그램이 정확히 그린다"""
     rows = [[str(c).strip() for c in r] for r in rows if r and any(str(c).strip() for c in r)]

@@ -428,7 +428,16 @@ def load_saved(path: Path) -> dict:
 
 def saved_posts() -> list[Path]:
     """main.py가 글마다 저장해 두는 output/날짜_키워드.json (새것부터)"""
-    return sorted(OUTPUT.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True) if OUTPUT.exists() else []
+    if not OUTPUT.exists():
+        return []
+    out = []
+    for f in OUTPUT.glob("20??-??-??_*.json"):  # 글 파일만 (설정·기록용 .json 은 건너뛴다)
+        try:
+            if '"post"' in f.read_text(encoding="utf-8")[:4000] or "post" in json.loads(f.read_text(encoding="utf-8")):
+                out.append(f)
+        except Exception:
+            continue
+    return sorted(out, key=lambda p: p.stat().st_mtime, reverse=True)
 
 
 MUSIC = ROOT / "music"

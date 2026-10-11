@@ -157,6 +157,21 @@ def _get_json(url: str, headers: dict) -> dict:
         return json.load(r)
 
 
+def blog_search(query: str, keys: dict, display: int = 30) -> dict:
+    """네이버 블로그 검색 API 결과 그대로 ({total, items:[{title, link, bloggerlink, postdate}]}). HUB → 예전 주소 순서"""
+    q = urllib.parse.urlencode({"query": query, "display": display, "sort": "sim"})
+    try:
+        return _get_json("https://naverapihub.apigw.ntruss.com/search/v1/blog?" + q,
+                         {"X-NCP-APIGW-API-KEY-ID": keys["search_client_id"],
+                          "X-NCP-APIGW-API-KEY": keys["search_client_secret"]})
+    except urllib.error.HTTPError as e:
+        if e.code not in (401, 403):
+            raise
+        return _get_json("https://openapi.naver.com/v1/search/blog.json?" + q,
+                         {"X-Naver-Client-Id": keys["search_client_id"],
+                          "X-Naver-Client-Secret": keys["search_client_secret"]})
+
+
 def blog_doc_count(keyword: str, keys: dict) -> int:
     """네이버 블로그 검색 결과 총 문서 수.
     2026년 7월 31일부터 검색 API는 네이버클라우드 NAVER API HUB로 옮겨 갔다. HUB 주소를 먼저 쓰고,

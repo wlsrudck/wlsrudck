@@ -740,6 +740,13 @@ def main():
             post.notice = ("이 글은 공개된 공시·기사·증권사 자료를 정리한 참고용이에요. 특정 종목의 매수·매도 추천이 아니니, "
                            "투자 판단과 책임은 본인 기준으로 해 주세요.")
         post.videos = []
+        try:  # 구글용 전체 글 목록 글 주소 ([구글용 글 목록 만들기]에서 저장) → 글 끝에 한 줄
+            from google_index import saved_index_url
+            iu = saved_index_url()
+            if iu:
+                post.index_link = f"{cfg['naver'].get('blog_name') or '내 블로그'}|{iu}"
+        except Exception:
+            pass
         for v in videos:  # 퍼가기가 허용된 영상만 (비공개·퍼가기 금지면 빼고 알려 준다)
             info = video_info(v)
             if info:

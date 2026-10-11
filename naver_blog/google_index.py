@@ -21,6 +21,29 @@ ROOT = Path(__file__).parent
 OUT = ROOT / "output" / "구글용_글목록.html"
 
 
+INDEX_URL = ROOT / "output" / "목록글_주소.txt"  # 발행한 목록 글 주소 — 새 글 끝에 자동으로 링크한다
+
+
+def saved_index_url() -> str:
+    try:
+        return INDEX_URL.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
+def save_index_url(url: str, bid: str) -> str:
+    """발행한 목록 글 주소를 모바일 주소로 바꿔 저장 (구글이 쓰는 주소)"""
+    m = re.search(r"blog\.naver\.com/([\w-]+)/(\d{9,})", url) or re.search(r"logNo=(\d{9,})", url)
+    if not m:
+        return ""
+    no = m.group(m.lastindex)
+    who = m.group(1) if m.lastindex == 2 else bid
+    u = f"https://m.blog.naver.com/{who}/{no}"
+    INDEX_URL.parent.mkdir(exist_ok=True)
+    INDEX_URL.write_text(u, encoding="utf-8")
+    return u
+
+
 def mobile_url(url: str, bid: str) -> str:
     m = re.search(r"/(\d{9,})", url) or re.search(r"logNo=(\d+)", url)
     return f"https://m.blog.naver.com/{bid}/{m.group(1)}" if m else url
@@ -109,7 +132,17 @@ def main():
     print("브라우저에서 [제목 복사] → [본문 전체 복사] 순서로 네이버 글쓰기에 붙여넣고 발행하세요.")
     print("발행 후: 그 글 주소를 다른 글 하나에 링크로 걸어 주세요. 2~4주 뒤 구글에서 site:m.blog.naver.com/" + bid + " 로 다시 세어 보세요.")
     open_file(OUT)
+    now = saved_index_url()
+    print(f"\n지금 저장된 목록 글 주소: {now or '없음'}")
+    ans = input("발행한 목록 글 주소를 붙여넣으면 앞으로 새 글 끝에 자동으로 링크해요 (엔터 = 그대로): ").strip()
+    if ans:
+        u = save_index_url(ans, bid)
+        print(f"저장했어요: {u} → 다음 글부터 끝에 '📚 전체 글 목록 보기'가 들어가요" if u else "주소 모양이 아니에요. blog.naver.com/아이디/글번호 주소를 넣어 주세요.")
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) > 1 and "naver.com" in sys.argv[1]:  # python google_index.py <목록 글 주소> : 주소만 저장
+        print(save_index_url(sys.argv[1], "") or "주소 모양이 아니에요")
+    else:
+        main()

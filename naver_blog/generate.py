@@ -326,6 +326,7 @@ class Post(BaseModel):
     verdict_go: SkipJsonSchema[list[str]] = []  # 그래서 나는? — 이런 분은 바로
     verdict_skip: SkipJsonSchema[list[str]] = []  # 이런 분은 패스
     verdict_first: SkipJsonSchema[str] = ""  # 헷갈리면 여기부터
+    index_link: SkipJsonSchema[str] = ""  # 구글용 '전체 글 목록' 글 (이름|주소) — 글 끝에 붙여 구글이 목록 글을 찾게
     spots: SkipJsonSchema[list[dict]] = []  # 경험 빈칸 [{section, hint}] — 발행 전에 글쓴이가 채우거나 지운다
     image_style: SkipJsonSchema[str] = ""
     theme: SkipJsonSchema[str] = ""
@@ -502,6 +503,9 @@ class Post(BaseModel):
                 title, _, url = item.partition("|")
                 lines += [f"▶ {title.strip()}", url.strip()]
             out.append(("text", "\n".join(lines)))
+        if self.index_link and not self.simple:  # 구글용 전체 글 목록 (글마다 끝에 한 줄)
+            name, _, url = self.index_link.partition("|")
+            out.append(("text", f"📚 {name.strip()} 전체 글 목록 보기\n{url.strip()}"))
         if self.sources:
             has_links = any("http" in s for s in self.sources)
             out.append(("text", ("참고 자료\n" if has_links else "") + "\n".join(self.sources)))

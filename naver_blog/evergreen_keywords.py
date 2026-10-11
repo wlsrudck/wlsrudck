@@ -184,14 +184,46 @@ def find_evergreen(cfg: dict, keys: dict, plan: list[tuple[str, str]]) -> list[d
     kind_order = {"평생": 0, "시즌": 1, "평생?": 2, "?": 3}
     grade_order = {"S": 0, "A": 1, "B": 2, "?": 3, "C": 4}
     rows = [r for r in rows if r["grade"] != "C"]
-    rows.sort(key=lambda r: (grade_order.get(r["grade"], 5), kind_order.get(r["kind"], 5), -r["volume"]))
+    if is_cs(cfg):  # 고객센터: 같은 등급 안에서 '상황 + 회사' 키워드를 먼저, '회사+고객센터' 틀은 뒤로
+        rows.sort(key=lambda r: (grade_order.get(r["grade"], 5), cs_rank(r), kind_order.get(r["kind"], 5), -r["volume"]))
+    else:
+        rows.sort(key=lambda r: (grade_order.get(r["grade"], 5), kind_order.get(r["kind"], 5), -r["volume"]))
     return rows[:40]
 
 
 
+# 고객센터 블로그: '큰 회사 + 고객센터' 틀만 쓰면 비슷한 글이 몰려 검색 누락이 나므로,
+# 구체적인 상황(해지·환불·상담원 연결 …)과 중간 규모 서비스(렌탈·구독·알뜰폰 …) 씨앗을 함께 쓴다
+CS_EXTRA_SEEDS = {
+    "신청방법": ["해지 위약금", "환불 규정", "상담원 연결", "명의변경 방법", "분실신고", "재발급 방법", "자동이체 변경",
+               "구독 해지", "회원 탈퇴 방법", "예약 취소 수수료"],
+    "고객센터": ["정수기 렌탈 해지", "알뜰폰 고객센터", "OTT 해지", "인터넷 해지 위약금", "렌탈 고객센터", "주말 고객센터",
+              "택배 반품 접수", "보험 해지 환급금"],
+}
+# 상황이 드러나는 말 (이게 있으면 먼저 고른다)
+CS_SITUATION = re.compile(r"해지|위약금|환불|반품|교환|취소|상담원|연결|주말|휴일|야간|운영시간|분실|재발급|명의|변경|이전|탈퇴|"
+                          r"납부|연체|조회|예약|접수|수수료|환급|정지|복구|등록|발급|방법|채팅|카톡")
+# 회사 이름 + 고객센터(전화번호)만 있는 틀 (이미 넘쳐 나는 글)
+CS_TEMPLATE = re.compile(r"^\S+\s?(고객센터|서비스센터|콜센터)(\s?(전화번호|번호|연락처))?$|^\S+\s?(전화번호|대표번호)$")
+
+
+def is_cs(cfg: dict) -> bool:
+    return bool(cfg.get("cs", {}).get("enabled") or cfg.get("writing", {}).get("cs"))
+
+
+def cs_rank(r: dict) -> int:
+    """고객센터 블로그 순서: 상황이 드러나는 것 0, 보통 1, '회사+고객센터' 틀 2"""
+    k = r["keyword"]
+    return 2 if CS_TEMPLATE.search(k.strip()) else 0 if CS_SITUATION.search(k) else 1
+
+
 def seeds_from(cfg: dict) -> dict[str, list[str]]:
     seeds = cfg.get("evergreen", {}).get("seeds")
-    return seeds if isinstance(seeds, dict) and seeds else DEFAULT_SEEDS
+    seeds = seeds if isinstance(seeds, dict) and seeds else DEFAULT_SEEDS
+    if is_cs(cfg):
+        seeds = {c: list(dict.fromkeys(list(seeds.get(c, [])) + CS_EXTRA_SEEDS.get(c, [])))
+                 for c in list(seeds) + [c for c in CS_EXTRA_SEEDS if c not in seeds]}
+    return seeds
 
 
 def random_plan(seeds: dict[str, list[str]], per_cat: int = 2) -> list[tuple[str, str]]:

@@ -521,7 +521,7 @@ def main():
     cs = cfg.get("cs", {})
     if cs.get("enabled"):
         cfg["writing"]["cs"] = True
-        cfg.setdefault("autofill", {})["mix"] = cs.get("mix", "evergreen")  # 고객센터·배송조회는 이슈가 아니라 평생 키워드
+        cfg.setdefault("autofill", {})["mix"] = cs.get("mix", "evergreen,evergreen,season")  # 고객센터·배송조회는 이슈가 아니라 평생 키워드
         cfg["writing"]["style"] = cs.get("style", "search")  # 급하게 검색해서 들어오는 글: 검색용 제목·구조
         cfg["writing"]["min_chars"] = cs.get("min_chars", 1300)
         cfg["writing"]["max_chars"] = cs.get("max_chars", 2200)

@@ -1,6 +1,7 @@
 """키워드 자동 채우기: keywords.csv 에 쓸 키워드가 떨어지면 프로그램이 알아서 골라 넣는다.
 
 - 평생 키워드(꾸준히 검색되는 것)와 지금 뜨는 키워드를 반반 섞는다 (설정: [autofill] mix)
+  mix 에 season 을 넣으면 이번 달·다음 달 시즌 키워드도 섞는다 (고객센터 블로그 기본: 평생 2 + 시즌 1)
   mix 에 news 를 넣으면 네이버 뉴스 많이 본·댓글 많은 기사에서 고른 생활·돈 글감도 섞는다
 - S·A 등급, 이미 쓴 글과 겹치지 않는 것, 가사·쇼핑·이슈성 말이 없는 것만
 - 지금 뜨는 키워드는 연예 쪽보다 생활·경제·IT 쪽을 먼저 고른다
@@ -28,8 +29,56 @@ def evergreen_candidates(cfg: dict, keys: dict) -> list[dict]:
             return []
         good = [r for r in rows if _ok(r) and r["kind"] in ("평생", "평생?")]
         if good:
+            from evergreen_keywords import cs_rank, is_cs
+            if is_cs(cfg):  # 고객센터: '회사+고객센터' 틀은 빼고(이미 넘침), 업종이 번갈아 나오게
+                good = spread([r for r in good if cs_rank(r) < 2]) or good
             return good
     return []
+
+
+def season_candidates(cfg: dict, keys: dict) -> list[dict]:
+    """이번 달·다음 달에 검색이 몰리는 시즌 키워드 (고객센터 블로그는 문의·신청 위주). 지금 검색이 조금은 있는 것만"""
+    import datetime as dt
+
+    from evergreen_keywords import is_cs
+    from keyword_finder import blog_doc_count, grade, monthly_volumes, season_seeds
+    from trending_keywords import already_written, written_titles
+    seeds = season_seeds(dt.date.today(), is_cs(cfg))
+    try:
+        vols, _ = monthly_volumes(seeds, keys)
+    except Exception as e:
+        print(f"  (시즌 키워드 검색량 확인 실패: {str(e).splitlines()[0][:60]})")
+        return []
+    titles = written_titles(cfg["naver"]["blog_id"])
+    out = []
+    for k in seeds:
+        vol, comp = vols.get(k) or (None, "")
+        if vol is None or vol < 100 or comp == "높음":
+            continue
+        docs = None
+        if keys.get("search_client_id"):
+            try:
+                docs = blog_doc_count(k, keys)
+            except Exception:
+                docs = None
+        g = grade(vol, docs, comp)
+        g = g if g in ("S", "A") else "시즌"  # 시즌 전에는 검색량이 낮게 나오므로 B·C 도 '시즌'으로 받는다
+        if not already_written(k, titles) and not (docs and docs > vol * 30):  # 글이 너무 많은 것은 뺀다
+            out.append({"keyword": k, "volume": vol, "comp": comp, "grade": g, "kind": "시즌", "category": "", "seed": k})
+    return out
+
+
+def spread(rows: list[dict]) -> list[dict]:
+    """같은 씨앗(업종)끼리 연달아 오지 않게 번갈아 세운다 (은행 → 택배 → 렌탈 → 은행 …)"""
+    groups: dict[str, list[dict]] = {}
+    for r in rows:
+        groups.setdefault(r.get("seed") or r.get("category") or "", []).append(r)
+    out = []
+    while any(groups.values()):
+        for g in list(groups):
+            if groups[g]:
+                out.append(groups[g].pop(0))
+    return out
 
 
 def trending_candidates(cfg: dict) -> list[dict]:
@@ -71,7 +120,9 @@ def fill(cfg: dict, need: int) -> list[str]:
     """need 개를 골라 keywords.csv 에 넣고, 넣은 키워드 목록을 돌려준다"""
     from main import load_rows, save_rows
     acfg = cfg.get("autofill", {})
-    mix = [m.strip() for m in str(acfg.get("mix", "evergreen,trending")).split(",") if m.strip()]
+    from evergreen_keywords import is_cs
+    raw = cfg.get("cs", {}).get("mix", "evergreen,evergreen,season") if is_cs(cfg) else acfg.get("mix", "evergreen,trending")
+    mix = [m.strip() for m in str(raw).split(",") if m.strip()]
     keys = load_keys()
     if not (keys.get("ad_access_license") and keys.get("ad_secret_key") and keys.get("ad_customer_id")):
         print("  키워드 자동 채우기: naver_keys.txt 에 검색광고 API 키가 없어서 건너뛰어요.")
@@ -81,7 +132,7 @@ def fill(cfg: dict, need: int) -> list[str]:
     pools = {}
     for m in dict.fromkeys(mix):  # "trending,trending,evergreen" 처럼 같은 걸 두 번 적으면 그 비율(2:1)로 섞는다
         pools[m] = (evergreen_candidates(cfg, keys) if m == "evergreen" else news_candidates(cfg) if m == "news"
-                    else trending_candidates(cfg))
+                    else season_candidates(cfg, keys) if m == "season" else trending_candidates(cfg))
     picked: list[dict] = []
     taken: set = set()
     while len(picked) < need and any(pools.values()):

@@ -530,6 +530,15 @@ def main():
     if not pub.get("allow_over_5") and int(pub.get("max_posts_per_day", 2)) > DAILY_SAFE_MAX:
         print(f"하루 글 수를 {pub['max_posts_per_day']}개 → {DAILY_SAFE_MAX}개로 줄여서 써요 (저품질 예방)")
         pub["max_posts_per_day"] = DAILY_SAFE_MAX
+    # 검색 누락 확인에서 누락이 많았으면(30% 이상) 7일 동안 하루 2개로 줄인다 (몰아 쓰기를 멈춰야 회복이 빠르다)
+    try:
+        health = json.loads((OUTPUT / "검색상태.json").read_text(encoding="utf-8"))
+        days = (dt.date.today() - dt.date.fromisoformat(health["date"])).days
+        if health.get("miss_rate", 0) >= 0.3 and days < 7 and pub["max_posts_per_day"] > 2:
+            print(f"검색 누락이 {health['miss_rate']:.0%}라서 {7 - days}일 더 하루 2개로 줄여 써요 (회복 기간)")
+            pub["max_posts_per_day"] = 2
+    except Exception:
+        pass
     budget = min(pub["max_posts_per_run"], pub["max_posts_per_day"] - posted_today())
     if not args.dry_run and budget <= 0:
         print(f"오늘 한도({pub['max_posts_per_day']}개)를 채웠습니다. 내일 이어서 써요 "

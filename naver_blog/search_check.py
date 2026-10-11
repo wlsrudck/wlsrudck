@@ -83,6 +83,11 @@ def main():
             w.writerow([r["state"], r["rank"] or "", r["date"], r["title"], r["url"]])
     ok = sum(r["state"] == "검색됨" for r in rows)
     miss = [r for r in rows if r["state"] == "누락 의심"]
+    judged = ok + len(miss)
+    if judged:  # 글쓰기가 읽어 간다: 누락이 많으면 7일 동안 하루 2개로
+        import json
+        (ROOT / "output" / "검색상태.json").write_text(json.dumps(
+            {"date": str(dt.date.today()), "miss_rate": round(len(miss) / judged, 2), "checked": judged}), encoding="utf-8")
     print(f"\n검색됨 {ok}개 / 누락 의심 {len(miss)}개 / 새 글·확인 실패 {len(rows) - ok - len(miss)}개")
     if miss:
         rate = len(miss) / max(1, len(rows) - sum(r['state'].startswith('새 글') for r in rows))
@@ -90,7 +95,7 @@ def main():
         print("  · 지우고 다시 올리지 마세요 (같은 글을 다시 올리면 '유사 문서'로 더 나빠질 수 있어요)")
         print("  · 하루 5개 이하로 꾸준히 새 글을 올리면 보통 1~2주 안에 돌아와요")
         if rate >= 0.3:
-            print(f"  ⚠ 누락이 {rate:.0%}로 많아요. 며칠 동안 하루 1~2개로 줄이고, 몰아 올리기를 멈추세요.")
+            print(f"  ⚠ 누락이 {rate:.0%}로 많아요. 앞으로 7일 동안 이 블로그는 하루 2개까지만 쓰게 자동으로 줄여요.")
         print("  · 2주가 지나도 그대로면 네이버 고객센터 '검색 반영' 문의를 해 보세요")
     print(f"\n표로 보기: {OUT}")
     try:

@@ -504,7 +504,7 @@ def post_images(slug: str) -> list[Path]:
     if not d.exists():
         return []
     pats = ["info_*.jpg", "ai_[0-9]*.png", "metrics.jpg", "table.jpg", "commons_*", "korea_*", "pexels_*",
-            "pixabay_*.jpg", "section_*.jpg"]
+            "pixabay_*.jpg", "section_*.jpg", "post_*.jpg"]
     out: list[Path] = []
     for pat in pats:
         out += [p for p in sorted(d.glob(pat)) if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
@@ -541,6 +541,73 @@ def export_for_upload(folder: Path, slug: str, cfg: dict) -> Path | None:
     from shortcut import ensure_clip_shortcut
     ensure_clip_shortcut(cfg.get("naver", {}).get("blog_name", ""))
     return out
+
+
+def _page_title(url: str) -> str:
+    import html
+    import urllib.request
+    m = re.search(r"blog\.naver\.com/([\w-]+)/(\d{9,})", url) or re.search(r"blogId=([\w-]+).*?logNo=(\d{9,})", url)
+    if not m:
+        return ""
+    try:
+        req = urllib.request.Request(f"https://m.blog.naver.com/PostView.naver?blogId={m.group(1)}&logNo={m.group(2)}",
+                                     headers={"User-Agent": "Mozilla/5.0 (Linux; Android 14) Mobile"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            raw = r.read().decode("utf-8", "replace")
+        t = re.search(r'<meta property="og:title" content="([^"]+)"', raw)
+        return html.unescape(t.group(1)).strip() if t else ""
+    except Exception:
+        return ""
+
+
+def from_url(url: str, cfg: dict) -> dict:
+    """다른 프로그램(아백 등)이나 손으로 쓴 글: 발행된 글 주소에서 본문·사진을 읽어 클립 재료로 만든다"""
+    import io
+    import urllib.request
+
+    from PIL import Image
+
+    from generate import Section
+    from update_check import fetch_body
+    m = re.search(r"(\d{9,})", url)
+    if not m:
+        raise RuntimeError("블로그 글 주소가 아니에요 (blog.naver.com/아이디/글번호)")
+    lines, imgs = fetch_body(url)
+    if not lines:
+        raise RuntimeError("글 본문을 읽지 못했어요. 전체 공개 글인지 확인해 주세요.")
+    title = _page_title(url) or lines[0][:40]
+    slug = f"글{m.group(1)}"
+    pic_dir = OUTPUT / f"{slug}_images"
+    pic_dir.mkdir(parents=True, exist_ok=True)
+    got = 0
+    for src in imgs[:10]:
+        try:
+            req = urllib.request.Request(src, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://blog.naver.com/"})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                im = Image.open(io.BytesIO(r.read())).convert("RGB")
+        except Exception:
+            continue
+        if im.width < 300 or im.height < 200:
+            continue  # 아이콘·스티커
+        im.thumbnail((1200, 1600))
+        got += 1
+        im.save(pic_dir / f"post_{got:02d}.jpg", quality=90)
+        if got == 1:
+            im.save(pic_dir / "thumbnail.jpg", quality=90)
+        if got >= 8:
+            break
+    print(f"  글 주소에서 읽음: {title[:40]} (문단 {len(lines)}개, 사진 {got}장)")
+    body = [ln for ln in lines if len(ln) > 1][:120]
+    sec = Section.model_construct(heading="", paragraphs=body[3:] or body, photo=None, stock_query="", alt_queries=[],
+                                  caption="", key_line="", card_type="", card_lines=[], card_title="", card_points=[])
+    post = Post.model_construct(title=title, intro=body[:3], sections=[sec], thumbnail_text=[], summary=[],
+                                qa=[], recap=[], tags=[], pull_quote="")
+    today = str(dt.date.today())
+    # 클립 올리기(블로그 글 연결)가 제목을 찾을 수 있게 같은 이름으로 짧게 저장
+    (OUTPUT / f"{today}_{slug}.json").write_text(json.dumps(
+        {"keyword": title, "slug": slug, "date": today, "post": {"title": title}, "from_url": url},
+        ensure_ascii=False), encoding="utf-8")
+    return {"post": post, "slug": slug, "photos": [], "date": today}
 
 
 def make_clip(saved: dict, cfg: dict, blog: bool = False) -> Path:
@@ -753,7 +820,12 @@ def main():
     if not files:
         print("클립으로 만들 글이 없어요. 업데이트 이후에 쓴 글부터 클립을 만들 수 있어요 (output 폴더의 .json).")
         return
-    items = [load_saved(f) for f in files]
+    items = []
+    for f in files:
+        try:
+            items.append(load_saved(f))
+        except Exception:
+            continue  # 주소로 만든 클립 기록 등 (글 전체가 저장된 파일이 아님)
     if "--latest" in sys.argv:
         make_clip(items[0], cfg)
         return
@@ -774,7 +846,11 @@ def main():
         print(f"  {i:2d}. [{tag}] {it['post'].title}")
     if not rank:
         print("  (조회수 순위를 찾지 못해 최신 글 순서로 보여 줘요)")
-    ans = input("\n클립으로 만들 번호 (엔터 = 1번, 여러 개는 1,3): ").strip() or "1"
+    ans = input("\n클립으로 만들 번호 (엔터 = 1번, 여러 개는 1,3)\n"
+                "  ※ 목록에 없는 글(아백 등으로 쓴 글)은 글 주소를 붙여 넣으세요: ").strip() or "1"
+    if "naver.com" in ans:
+        make_clip(from_url(ans, cfg), cfg)
+        return
     for n in [int(x) for x in ans.replace(" ", "").split(",") if x.isdigit() and 1 <= int(x) <= len(items)]:
         make_clip(items[n - 1], cfg)
 

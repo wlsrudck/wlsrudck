@@ -21,6 +21,7 @@ BUTTONS = [
     ("글쓰기", [
         ("글 1개 써서 임시저장", "4_run_save_draft.bat", "keywords.csv 에서 상태가 빈 키워드 하나로 글을 써서 임시저장해요"),
         ("검색 누락 확인", "25_search_check.bat", "최근 글 40개가 네이버 검색에 나오는지 확인해요 (누락 의심 글을 알려 줘요)"),
+        ("잘 된 글 알려 주기", "@hit_title", "홈판·검색으로 많이 들어온 글 제목을 알려 주면, 새 글 제목을 그 모양을 참고해서 지어요"),
         ("지난 글 업데이트 확인", "26_update_check.bat", "블로그 전체 글 중 30일 넘은 글을 5개씩 차례로: 본문·그림 속 금액·날짜·번호가 지금도 맞는지 확인하고, 업데이트 문단과 바꿔 넣을 새 그림을 만들어 줘요"),
         ("내 글 목록 뽑기", "23_export_posts.bat", "내 블로그 글 전체 목록을 파일로 저장해요 (Claude 채팅에 올려 분석받기)"),
         ("모아보기 글 만들기", "22_curation_post.bat", "예전에 쓴 내 글 4~6개를 한 주제로 묶어 임시저장해요 (조회수·체류시간↑)"),
@@ -198,6 +199,26 @@ def open_clip_folder() -> None:
     folder = ROOT / "클립_올리기"
     folder.mkdir(exist_ok=True)
     open_path(folder)
+
+
+def save_hit_title() -> None:
+    """잘 된 글 제목 기억하기: 통계 > 조회수 순위에서 제목을 복사해 붙여 넣는다 (잘린 제목이면 전체 제목을 찾아 준다)"""
+    from tkinter import simpledialog
+    import hits
+    typed = simpledialog.askstring("잘 된 글 알려 주기", "많이 들어온 글 제목을 붙여 넣어 주세요\n(통계의 조회수 순위에서 잘린 제목 그대로도 괜찮아요)")
+    if not typed or not typed.strip():
+        return
+    try:
+        import tomllib
+        bid = tomllib.loads(CONFIG.read_text(encoding="utf-8-sig")).get("naver", {}).get("blog_id", "")
+    except Exception:
+        bid = ""
+    title = hits.full_title(typed, bid)
+    home = messagebox.askyesnocancel("어디서 들어왔나요?", f"{title}\n\n홈판(네이버 메인)으로 많이 들어왔나요?\n예 = 홈판 / 아니요 = 검색")
+    if home is None:
+        return
+    n = hits.add(title, "홈판" if home else "검색")
+    messagebox.showinfo("기억했어요", f"'{title}'\n\n이제 새 글 제목을 지을 때 이 제목 모양을 참고해요. (지금까지 {n}개)")
 
 
 def open_path(p: Path) -> None:
@@ -729,7 +750,7 @@ def main():
         run.columnconfigure(col, weight=1)
         for label, bat, tip in items:
             cmd = {"@google_key": save_google_key, "@pexels_key": save_pexels_key, "@clip_folder": open_clip_folder,
-                   "@clip_kakao": clip_to_kakao}.get(bat) or (lambda b=bat: run_bat(b))
+                   "@clip_kakao": clip_to_kakao, "@hit_title": save_hit_title}.get(bat) or (lambda b=bat: run_bat(b))
             ttk.Button(lf, text=label, command=cmd).pack(fill="x", pady=(6, 0))
             ttk.Label(lf, text=tip, foreground="#777", wraplength=250).pack(fill="x")
     bottom = ttk.Frame(run)

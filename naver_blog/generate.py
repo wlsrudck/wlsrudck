@@ -1338,6 +1338,11 @@ def _system(cfg: dict, memo: str = "") -> str:
             shop += "\n- 글 스타일: " + SHOP_STYLES[style]
     if cfg.get("cs"):
         shop += CS_GUIDE
+    try:  # 이 블로그에서 홈판·검색으로 잘 된 제목 모양 (창의 [잘 된 글 알려 주기]로 모은 것)
+        import hits
+        shop += hits.prompt_block()
+    except Exception:
+        pass
     return SYSTEM + (HOMEFEED if cfg.get("style", "homefeed") == "homefeed" else SEARCH) + (SHORT_VOICE if short else "") + STYLE_RULES + shop
 
 

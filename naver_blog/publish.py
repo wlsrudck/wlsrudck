@@ -105,7 +105,10 @@ _CARET_TO_END_OF = """([sel, text, first]) => {
     const ps = [...document.querySelectorAll(sel)];
     // 같은 글자의 문단이 여럿이면 기본은 뒤쪽(목차 줄보다 본문 소제목), first면 앞쪽(도입·목차)
     const pick = a => first ? a[0] : a.pop();
-    const p = pick(ps.filter(e => e.innerText.trim() === text)) || pick(ps.filter(e => e.innerText.includes(text)));
+    // 편집기가 이모지를 그림으로 바꾸면 글자 비교가 어긋난다 → 마지막엔 글자·숫자만 비교
+    const nz = t => (t || '').replace(/[^\\p{L}\\p{N}]/gu, '');
+    const p = pick(ps.filter(e => e.innerText.trim() === text)) || pick(ps.filter(e => e.innerText.includes(text)))
+              || (nz(text) && pick(ps.filter(e => nz(e.innerText) === nz(text))));
     if (!p) return false;
     p.scrollIntoView({block: "center"});
     const range = document.createRange();
@@ -120,7 +123,9 @@ _CARET_TO_END_OF = """([sel, text, first]) => {
 
 # 문단 하나를 통째로 선택한다. 같은 글자의 문단이 여럿이면(목차 줄 등) 뒤쪽(본문)을 고른다
 _SELECT_PARAGRAPH = """([sel, text]) => {
-    const p = [...document.querySelectorAll(sel)].filter(e => e.innerText.trim() === text).pop();
+    const nz = t => (t || '').replace(/[^\\p{L}\\p{N}]/gu, '');
+    const all = [...document.querySelectorAll(sel)];
+    const p = all.filter(e => e.innerText.trim() === text).pop() || (nz(text) && all.filter(e => nz(e.innerText) === nz(text)).pop());
     if (!p) return false;
     p.scrollIntoView({block: "center"});
     const range = document.createRange();
@@ -196,6 +201,8 @@ _PARAGRAPH_HTML = """([sel, text, first]) => {
     const all = [...document.querySelectorAll(sel)];
     let a = all.filter(e => e.innerText.trim() === text);
     if (!a.length) a = all.filter(e => e.innerText.includes(text));
+    const nz = t => (t || '').replace(/[^\\p{L}\\p{N}]/gu, '');
+    if (!a.length && nz(text)) a = all.filter(e => nz(e.innerText) === nz(text));
     const p = first ? a[0] : a.pop();
     return p ? p.innerHTML : '';
 }"""
@@ -370,6 +377,8 @@ _PARAGRAPH_END_POS = """([sel, text, first]) => {
     let i = -1;
     ps.forEach((p, k) => { if (p.innerText.trim() === text && !(first && i >= 0)) i = k; });
     if (i < 0) ps.forEach((p, k) => { if (p.innerText.includes(text) && !(first && i >= 0)) i = k; });
+    const nz = t => (t || '').replace(/[^\\p{L}\\p{N}]/gu, '');
+    if (i < 0 && nz(text)) ps.forEach((p, k) => { if (nz(p.innerText) === nz(text) && !(first && i >= 0)) i = k; });
     if (i < 0) return null;
     const p = ps[i];
     const r = document.createRange();

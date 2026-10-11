@@ -296,7 +296,7 @@ def upload(video: Path) -> None:
                 log.append("커버 칸을 못 찾음 (영상 첫 장면이 커버가 돼요)")
         # 카테고리 (1차·2차): 이 블로그에서 전에 고른 것이 있으면 그대로, 처음이면 목록을 보여 주고 번호로 고르게
         try:
-            pick_category(page, log, click)
+            pick_category(page, log, click, post_title(video) + " " + video.stem)
         except Exception as e:
             log.append(f"카테고리 오류: {str(e).splitlines()[0][:60]}")
         # 콘텐츠 링크 → 블로그: 이 영상을 만든 블로그 글을 찾아 연결 (클립을 본 사람이 글로 넘어오게)
@@ -437,8 +437,9 @@ def post_title(video: Path) -> str:
         return ""
 
 
-def _choose(page, opener_words: list[str], want: str, what: str, log, click) -> str:
-    """드롭다운을 열고 want 를 고른다. want 가 없으면 선택지를 보여 주고 번호로 고르게 한다. 고른 이름"""
+def _choose(page, opener_words: list[str], want: str, what: str, log, click, words=(), fallback: str = "") -> str:
+    """드롭다운을 열고 want 를 고른다. want 가 없으면 words(글 주제 말)가 든 선택지 → fallback(전에 고른 것)
+    → 그래도 없으면 선택지를 보여 주고 번호로 고르게 한다. 고른 이름"""
     fr = page.main_frame
     fr.evaluate(SNAP)
     if not click(page, opener_words, f"{what} 열기", timeout=6):
@@ -448,6 +449,10 @@ def _choose(page, opener_words: list[str], want: str, what: str, log, click) -> 
     if not opts:
         log.append(f"{what}: 선택지를 못 읽음")
         return ""
+    if not want and words:
+        want = _first_match(opts, list(words))
+    if not want and fallback in opts:
+        want = fallback
     if not want:
         print(f"\n{what}를 골라 주세요 (한 번 고르면 다음부터 자동):")
         for i, o in enumerate(opts, 1):
@@ -464,20 +469,64 @@ def _choose(page, opener_words: list[str], want: str, what: str, log, click) -> 
     return ""
 
 
-def pick_category(page, log, click) -> None:
+# 글 주제 → 클립 카테고리에서 찾을 말 (1차, 2차). 위에서부터 먼저 맞는 것. 화면의 선택지 이름에 이 말이 들어 있으면 고른다
+TOPIC_CATS = [
+    ("명절·연휴", r"추석|설날|설 연휴|명절|연휴", ["이슈"], ["이슈"]),
+    ("건강", r"병원|검진|예방접종|독감|백신|건강|약국|의료|효능|증상", ["건강", "의학"], ["생활건강", "건강"]),
+    ("금융·세금", r"은행|카드|보험|증권|세금|홈택스|위택스|연금|대출|적금|예금|환급|연말정산|종부세|재산세|자동차세|부가세|"
+                r"소득세|주담대|금리|지원금|장려금|수당|급여",
+     ["경제", "금융", "재테크"], ["금융", "재테크", "경제", "세금"]),
+    ("IT·통신", r"통신|인터넷|휴대폰|핸드폰|스마트폰|아이폰|갤럭시|앱|알뜰폰|OTT|넷플릭스|유튜브|KT|SKT|LG유플러스|카카오|"
+              r"네이버|챗GPT|AI|구독",
+     ["IT", "테크", "과학"], ["IT", "모바일", "인터넷", "앱", "테크"]),
+    ("생활", r"택배|배송|렌탈|정수기|보일러|에어컨|AS|반품|교환|이사|전입|여권|면허|민원|고객센터|서비스센터",
+     ["생활", "라이프", "노하우", "정보"], ["생활", "정보", "노하우", "팁"]),
+]
+
+
+def topic_group(text: str) -> tuple[str, list[str], list[str]]:
+    for name, pat, w1, w2 in TOPIC_CATS:
+        if re.search(pat, text or "", re.I):
+            return name, w1, w2
+    return "", [], []
+
+
+def _first_match(opts: list[str], words: list[str]) -> str:
+    for w in words:  # 말 순서가 우선
+        for o in opts:
+            if w.lower() in o.lower():
+                return o
+    return ""
+
+
+def pick_category(page, log, click, topic: str = "") -> None:
+    """1차·2차 카테고리. 글 주제에 맞는 것을 화면 선택지에서 찾아 고르고(주제별로 기억),
+    못 찾으면 이 블로그에서 전에 고른 것 → 그래도 없으면 번호로 고르게"""
     import json
     try:
         saved = json.loads(CAT_FILE.read_text(encoding="utf-8"))
     except Exception:
         saved = {}
-    c1 = _choose(page, ["1차 카테고리"], saved.get("1", ""), "1차 카테고리", log, click)
+    group, w1, w2 = topic_group(topic)
+    mem = saved.get("groups", {}).get(group, {}) if group else {}
+
+    def choose(opener, want, words, what, fallback=""):
+        return _choose(page, opener, want, what, log, click, words, fallback)
+
+    c1 = choose(["1차 카테고리"], mem.get("1", ""), w1, "1차 카테고리", saved.get("1", ""))
     if not c1:
         return
-    c2 = _choose(page, ["2차 카테고리"], saved.get("2", "") if saved.get("1") == c1 else "", "2차 카테고리", log, click)
-    if c1 and c2 and (saved.get("1"), saved.get("2")) != (c1, c2):
+    want2 = mem.get("2", "") if mem.get("1") == c1 else (saved.get("2", "") if saved.get("1") == c1 and not w2 else "")
+    c2 = choose(["2차 카테고리"], want2, w2, "2차 카테고리", saved.get("2", "") if saved.get("1") == c1 else "")
+    if group:
+        log.append(f"카테고리: 글 주제 '{group}' → {c1}" + (f" > {c2}" if c2 else ""))
+    if c1 and c2:
+        if group:  # 주제별로 따로 기억 (주제 없는 글이 고른 기본값을 덮어쓰지 않게)
+            saved.setdefault("groups", {})[group] = {"1": c1, "2": c2}
+        else:
+            saved["1"], saved["2"] = c1, c2
         CAT_FILE.parent.mkdir(exist_ok=True)
-        CAT_FILE.write_text(json.dumps({"1": c1, "2": c2}, ensure_ascii=False), encoding="utf-8")
-        log.append("이 카테고리를 기억했어요 (다음부터 자동)")
+        CAT_FILE.write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
 
 
 def link_blog(page, title: str, log, click) -> None:

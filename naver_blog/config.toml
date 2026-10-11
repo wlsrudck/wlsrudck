@@ -62,6 +62,7 @@ quote_color = "#00756a"        # 인용구 안 글자 색 (비우면 소제목 �
 [clip]
 # true면 글을 쓸 때마다 네이버 클립용 세로 영상(mp4)도 같이 만든다. 따로 만들려면 8_make_clip.bat
 auto = false
+gif = true      # 글 중간에 움짤(GIF) 하나: 매인·고객센터는 클립 영상 3초, 쇼핑은 상품 사진이 넘어가는 움짤 (스크롤만 해도 움직임)
 # 목소리: ko-KR-SunHiNeural(여자) 또는 ko-KR-InJoonNeural(남자)
 voice = "ko-KR-SunHiNeural"
 # 빠르기: "+0%"가 보통, "+15%"는 조금 빠르게, "+30%"는 빠르게

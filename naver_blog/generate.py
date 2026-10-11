@@ -448,6 +448,10 @@ class Post(BaseModel):
             if i == 0 and self.videos:  # 공식 영상 (주소 한 줄 = 편집기가 영상으로 바꿔 보여 준다)
                 out.append(("text", "▶ 공식 영상으로 보기"))
                 out.extend(("text", v) for v in self.videos)
+            # 움짤: 쇼핑 글은 첫 소제목 뒤(상품이 먼저 보이게), 다른 글은 가운데쯤 (영상은 첫 소제목 뒤라 겹치지 않게)
+            gif_at = 0 if self.simple or len(self.sections) < 2 else max(1, len(self.sections) // 2)
+            if media.get("gif") and i == gif_at and not (gif_at == 0 and media.get("video")):
+                out.append(("photo", media["gif"]))
             if mid_link and i == mid_at:
                 title, _, url = mid_link.partition("|")
                 out.append(("text", f"📌 같이 보면 좋은 글\n▶ {title.strip()}\n{url.strip()}"))

@@ -806,6 +806,25 @@ def main():
                     media["video"] = Path(clip)
             except Exception as e:
                 print(f"  짧은 영상은 건너뜀: {str(e).splitlines()[0][:100]}")
+        # 움짤(GIF): 스크롤만 해도 저절로 움직인다 (영상은 눌러야 재생). 매인·고객센터 = 클립 3초, 쇼핑 = 상품 사진 넘기기
+        if cfg.get("clip", {}).get("gif", True):
+            try:
+                import gif_maker
+                gif_out = OUTPUT / f"{slug}_images" / "moving.gif"
+                gif_out.parent.mkdir(parents=True, exist_ok=True)
+                made_gif = None
+                if shop.get("enabled"):
+                    pics = [p for p in photos if not p.name.startswith("detail_")] or list(photos)
+                    made_gif = gif_maker.photos_to_gif(pics, gif_out)
+                else:
+                    src = media.get("video") or next((p for p in (clip_dir / "clip_blog.mp4", clip_dir / "clip.mp4")
+                                                      if p.exists()), None)
+                    made_gif = gif_maker.clip_to_gif(Path(src), gif_out) if src else None
+                if made_gif:
+                    media["gif"] = made_gif
+                    print(f"  움짤: 만듦 ({made_gif.stat().st_size // 1024}KB) → 글 중간에 넣어요")
+            except Exception as e:
+                print(f"  움짤은 건너뜀: {str(e).splitlines()[0][:100]}")
         confirmed = [m for m in post.metrics if not m.pending]
         if not confirmed:
             print("  ⚠ 확인된 지표가 하나도 없어요 (규칙: 검증 가능한 지표 최소 1개)")

@@ -149,8 +149,9 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
         try:
             items = post.toc().split("\n")[1:]
             items = [re.sub(r"^[①-⑮]\s*", "", t) for t in items]
+            from generate import THEMES as _themes  # (아래쪽 'from generate import THEMES' 와 이름이 겹치면 오류가 나서 따로)
             card = images.make_toc_card(items, folder / "toc.jpg",
-                                        THEMES.get(cfg.get("_theme", ""), THEMES["기본 청록"])[1]["heading_color"], brand)
+                                        _themes.get(cfg.get("_theme", ""), _themes["기본 청록"])[1]["heading_color"], brand)
             if card:
                 media["toc_card"] = card
         except Exception as e:

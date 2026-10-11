@@ -840,6 +840,7 @@ def main():
     rank = popular_order(cfg["naver"]["blog_id"], [it["post"].title for it in items + older])
     items += [it for it in older if it["post"].title in rank]  # 오래된 글이라도 지금 잘 나가면 목록에
     items.sort(key=lambda it: rank.get(it["post"].title, 999))  # 순위 없는 글은 최신 순서 그대로
+    items = items[:15]  # 목록이 길면 입력 줄이 창 밖으로 밀려 멈춘 것처럼 보인다
     for i, it in enumerate(items, 1):
         r = rank.get(it["post"].title)
         tag = f"★ 조회수 {r}위" if r else it.get("date", "")

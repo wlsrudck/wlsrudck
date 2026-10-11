@@ -61,6 +61,10 @@ class Update(BaseModel):
     update_note: str = Field(description="바뀐 게 있을 때 글 맨 위에 붙일 업데이트 문단 2~4문장. "
                                          "'📢 YYYY.MM.DD 업데이트' 로 시작, 무엇이 바뀌었는지 쉬운 말로. 바뀐 게 없으면 빈 문자열")
     new_title: str = Field(description="제목 속 연도·회차가 지나서 바꿔야 하면 새 제목, 아니면 빈 문자열")
+    ended: bool = Field(description="글이 다룬 행사·할인·신청 기간이 오늘 기준으로 이미 끝났으면 true")
+    next_round: str = Field(description="끝났으면 다음 회차·다음 시즌 일정 (조사로 확인된 것만, 예: '2027년 1차 신청 2월 예정'). "
+                                        "모르면 빈 문자열")
+    next_keyword: str = Field(description="끝났으면 다음 회차로 새 글을 쓸 검색 키워드 하나 (예: '2027 국가장학금 1차 신청'). 아니면 빈 문자열")
     image_fixes: list[ImageFix] = Field(description="그림 속 숫자가 바뀐 그림마다 하나 (바꿔 넣을 새 그림 내용). 없으면 빈 목록")
 
 
@@ -333,14 +337,17 @@ def check_one(client, cfg: dict, saved: dict, url: str = "") -> tuple[Update | N
         messages=[{"role": "user", "content": f"오늘 날짜: {dt.date.today():%Y.%m.%d}\n옛 글 제목: {post.get('title', '')}\n\n"
                    f"[옛 글 내용]\n{_facts(post)}\n\n[오늘 다시 확인한 결과]\n{notes[:6000]}\n\n"
                    "확인 결과를 정리해 주세요. 확인 결과에 근거가 있는 변경만 changes 에 넣습니다. "
+                   "제목은 changes 에 넣지 말고 new_title 로만 씁니다. 행사·신청 기간이 이미 끝났으면 ended=true 로 하고, "
+                   "update_note 는 '이 행사(신청)는 ○월 ○일에 끝났어요' + 다음 회차 안내(확인된 것만)로 씁니다. "
                    "옛 내용이 [그림 n] 줄에 있던 것이면 image 에 n 을 적고, 그 그림마다 image_fixes 에 바꿔 넣을 새 그림 내용을 씁니다."}])
     up = res.parsed_output
     if up:  # 조사에서 나오지 않은 출처를 단 변경은 믿지 않는다
         up.changes = [c for c in up.changes if c.source.strip() and c.before.strip() != c.after.strip()
                       and any(c.source.rstrip(".,/") in u or u in c.source for u in urls if u)]
+        up.changes = [c for c in up.changes if "제목" not in c.item]  # 제목은 new_title 로 따로
         fixed = {c.image for c in up.changes if c.image}
         up.image_fixes = [f for f in up.image_fixes if f.image in fixed]
-        if not up.changes:
+        if not up.changes and not up.ended:
             up.update_note = ""
     return up, notes
 
@@ -375,16 +382,16 @@ def main():
         try:
             up, notes = check_one(client, cfg["writing"], saved, item["url"])
         except Exception as e:
-            print(f"   ⚠ 확인 실패: {str(e).splitlines()[0][:80]}\n")
+            print(f"   ! 확인 실패: {str(e).splitlines()[0][:80]}\n")
             continue
         seen = json.loads(SEEN.read_text(encoding="utf-8")) if SEEN.exists() else {}
         seen[item["key"]] = str(dt.date.today())
         SEEN.write_text(json.dumps(seen, ensure_ascii=False), encoding="utf-8")
         if not up:
-            print("   ⚠ 확인 결과를 받지 못했어요\n")
+            print("   ! 확인 결과를 받지 못했어요\n")
             continue
-        if not up.changes and not up.new_title.strip():
-            print("   ✅ 그대로 맞아요" + (f" (확인 못 한 것: {', '.join(up.unsure[:3])})" if up.unsure else "") + "\n")
+        if not up.changes and not up.new_title.strip() and not up.ended:
+            print("   ○ 그대로 맞아요" + (f" (확인 못 한 것: {', '.join(up.unsure[:3])})" if up.unsure else "") + "\n")
             continue
         changed += 1
         url = item["url"] or _post_url(title, bid)
@@ -393,7 +400,7 @@ def main():
         for c in up.changes:
             where = f" (본문 {c.image}번째 그림 속)" if c.image else ""
             lines += [f"· {c.item}{where}", f"   전: {c.before}", f"   지금: {c.after}", f"   출처: {c.source}"]
-            print(f"   🔄 {c.item}: {c.before[:25]} → {c.after[:25]}")
+            print(f"   ▶ 바뀜 [{c.item}] {c.before[:30]}  →  {c.after[:30]}")
         safe = re.sub(r'[\\/:*?"<>|]', "", title)[:30]
         if up.image_fixes:
             lines += ["", "■ 바꿔야 할 그림 (새 그림을 같은 폴더에 만들어 뒀어요)"]
@@ -404,10 +411,18 @@ def main():
                     card = None
                     print(f"   (새 그림 만들기 실패: {str(e).splitlines()[0][:60]})")
                 lines.append(f"· 본문 {fx.image}번째 그림 → " + (f"새 그림: {card.name}" if card else "새 그림을 못 만들었어요. 그림을 지우고 글로 고쳐 주세요"))
-                print(f"   🖼 {fx.image}번째 그림 바꾸기" + (f" → {card.name}" if card else ""))
+                print(f"   ▶ 그림 바꾸기: {fx.image}번째 그림" + (f" → {card.name}" if card else ""))
+        if up.ended:
+            lines += ["", "■ 이미 끝난 행사·신청이에요",
+                      f"· 다음 회차: {up.next_round.strip() or '아직 발표 없음'}",
+                      "· 이 글은 지우지 말고 맨 위에 '끝났어요 + 다음 회차' 안내를 붙여 두세요 (검색으로 계속 들어와요)"]
+            print("   ▶ 끝난 행사·신청이에요" + (f" (다음: {up.next_round.strip()[:35]})" if up.next_round.strip() else ""))
+            if up.next_keyword.strip():
+                lines.append(f"· 다음 회차 새 글 키워드 추천: {up.next_keyword.strip()}  (발표가 나면 키워드에 넣고 새 글로)")
+                print(f"   ▶ 다음 회차 새 글 키워드: {up.next_keyword.strip()}")
         if up.new_title.strip():
             lines += ["", "■ 제목도 바꾸면 좋아요", up.new_title.strip()]
-            print(f"   🔄 제목: {up.new_title.strip()[:40]}")
+            print(f"   ▶ 새 제목 추천: {up.new_title.strip()[:40]}")
         if up.update_note.strip():
             lines += ["", "■ 글 맨 위(도입 바로 앞)에 붙여 넣을 문단", up.update_note.strip()]
         if up.unsure:

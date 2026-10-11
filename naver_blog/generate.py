@@ -1259,7 +1259,9 @@ def check_card_text(path: Path, expected: list[str], cfg: dict) -> tuple[bool, s
     content = [_image_block(path), {"type": "text", "text": (
         "이 그림에 쓰인 글자를 모두 읽어 보세요. 들어가야 할 글자:\n" + want + "\n\n"
         "위 글자가 모두 맞춤법 그대로 또렷하게 보이고, 그 밖에 깨지거나 뜻 없는 글자·틀린 한글이 없으면 첫 줄에 OK, "
-        "하나라도 틀리거나 빠지거나 이상한 글자가 있으면 첫 줄에 NG 를 쓰고 둘째 줄에 무엇이 틀렸는지 짧게 쓰세요.")}]
+        "하나라도 틀리거나 빠지거나 이상한 글자가 있으면 첫 줄에 NG 를 쓰고 둘째 줄에 무엇이 틀렸는지 짧게 쓰세요.\n"
+        "위 목록에 없는 문장(두 단어 넘게 이어진 글, 본문을 옮겨 적은 듯한 여러 줄 글)이 그림에 들어 있으면 그것도 NG 입니다 "
+        "(블로그 본문과 같은 글이 그림에 또 있으면 같은 말을 두 번 읽게 됩니다). 시계 숫자·작은 아이콘 글자는 괜찮습니다.")}]
     try:
         res = client.messages.create(model=cfg["model"], max_tokens=2000, messages=[{"role": "user", "content": content}])
         text = "".join(b.text for b in res.content if b.type == "text").strip()

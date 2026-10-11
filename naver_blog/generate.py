@@ -395,6 +395,9 @@ class Post(BaseModel):
         if self.shop_links:  # 판매 글: 도입 바로 뒤에 구매 링크 한 번
             out.append(("text", f"👉 {self.shop_name or '제품'} 자세히 보기\n" + "\n".join(self.shop_links)))
         if media.get("toc_card") and not self.simple:  # 목차를 글 색에 맞춘 카드 그림으로
+            # 안내 한 줄을 먼저 둔다: 사진은 '바로 앞 글줄' 뒤에 붙는데, 이 줄이 없으면 목차 카드가 썸네일과
+            # 같은 자리(도입 끝줄)를 잡아 썸네일 위로 올라가 버린다
+            out.append(("text", "👇 이 글은 이 순서로 정리했어요"))
             out.append(("photo", media["toc_card"]))
         elif self.toc() and not self.simple:
             out.append(("text", self.toc()))

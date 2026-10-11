@@ -111,8 +111,12 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
             return ai_images.shrink(path)  # 글에 올라가는 그림은 가로 1200px JPEG 로 (캐릭터 기준 그림은 그대로)
         except Exception as e:
             print(f"  (AI 이미지 실패: {ai_images.explain(e)})")
-            if "403" in str(e) or "429" in str(e) or "400" in str(e):
+            msg = f"{e} {ai_images.explain(e)}"
+            if any(c in msg for c in ("400", "402", "403", "429")) or "credit" in msg.lower():
                 ai_left = 0  # 키·결제 문제면 이번 글에서는 더 시도하지 않는다
+                if "402" in msg or "credit" in msg.lower():
+                    print("  ⚠ 구글 AI Studio 선불 크레딧이 떨어졌어요 → aistudio.google.com 결제에서 충전하면 다시 AI 그림을 그려요"
+                          " (그동안은 무료 사진·카드로 대신해요)")
             return None
 
     def ai_card(s, i: int) -> Path | None:

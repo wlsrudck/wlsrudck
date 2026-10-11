@@ -256,16 +256,28 @@ def decorate(post: "Post", cfg: dict, want_spots: bool = False) -> None:
     for i, sec in enumerate(post.sections, 1):
         if sec.heading.strip():
             lines.append(f"\n[{i}] {sec.heading}\n" + "\n".join(sec.paragraphs)[:700])
-    try:
-        client = anthropic.Anthropic(api_key=_api_key(), max_retries=4)
-        res = client.beta.messages.parse(
-            model=cfg["model"], max_tokens=4000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
-            messages=[{"role": "user", "content": DECOR_RULES + "\n\n" + "\n".join(lines)}], output_format=Decor)
-        d = res.parsed_output
-    except Exception as e:
-        print(f"  (꾸미기 정보 받기 실패 — 꾸미기 없이 써요: {str(e).splitlines()[0][:80]})")
-        return
+    d, err = None, ""
+    client = anthropic.Anthropic(api_key=_api_key(), max_retries=4)
+    for _ in range(2):  # 꾸미기 칸이 많아 가끔 답이 중간에 끊기거나 형식이 어긋난다 → 한 번 더 받는다
+        try:
+            res = client.beta.messages.parse(
+                model=cfg["model"], max_tokens=10000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
+                messages=[{"role": "user", "content": DECOR_RULES + "\n\n" + "\n".join(lines)}], output_format=Decor)
+            d = res.parsed_output
+            if d is not None:
+                break
+            err = f"답이 비었어요 ({res.stop_reason})"
+        except Exception as e:
+            err = str(e).splitlines()[0][:80]
+            loc = getattr(e, "errors", None)
+            if callable(loc):
+                try:
+                    err += " [" + "; ".join(".".join(str(x) for x in er.get("loc", ())) + ": " + er.get("msg", "")
+                                            for er in e.errors()[:2])[:120] + "]"
+                except Exception:
+                    pass
     if d is None:
+        print(f"  (꾸미기 정보 받기 실패 — 꾸미기 없이 써요: {err})")
         return
     post.theme, post.image_style = d.theme, d.image_style
     post.recap_title, post.recap = d.recap_title, d.recap

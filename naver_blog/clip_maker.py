@@ -748,7 +748,8 @@ def main():
     if "--voice-test" in sys.argv:
         voice_test(cfg)
         return
-    files = saved_posts()[:30]
+    every = saved_posts()  # 조회수 순위에 든 글은 오래됐어도 보여 주려고 전부 읽어 둔다
+    files = every[:30]
     if not files:
         print("클립으로 만들 글이 없어요. 업데이트 이후에 쓴 글부터 클립을 만들 수 있어요 (output 폴더의 .json).")
         return
@@ -758,11 +759,18 @@ def main():
         return
 
     print("블로그 통계에서 조회수 순위를 확인하는 중...")
-    rank = popular_order(cfg["naver"]["blog_id"], [it["post"].title for it in items])
+    older = []
+    for f in every[30:]:
+        try:
+            older.append(load_saved(f))
+        except Exception:
+            continue
+    rank = popular_order(cfg["naver"]["blog_id"], [it["post"].title for it in items + older])
+    items += [it for it in older if it["post"].title in rank]  # 오래된 글이라도 지금 잘 나가면 목록에
     items.sort(key=lambda it: rank.get(it["post"].title, 999))  # 순위 없는 글은 최신 순서 그대로
     for i, it in enumerate(items, 1):
         r = rank.get(it["post"].title)
-        tag = f"🔥 조회수 {r}위" if r else it.get("date", "")
+        tag = f"★ 조회수 {r}위" if r else it.get("date", "")
         print(f"  {i:2d}. [{tag}] {it['post'].title}")
     if not rank:
         print("  (조회수 순위를 찾지 못해 최신 글 순서로 보여 줘요)")

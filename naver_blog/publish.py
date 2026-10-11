@@ -243,6 +243,10 @@ def _style_targets(blocks, style: dict, key_lines=()) -> list[tuple[str, int | N
             first, *rest = value.split("\n")
             out.append((first.strip(), None, st["heading_color"], True, False))
             out += [(ln.strip(), None, "#222222", True, False) for ln in rest if ln.startswith("✅")]
+    # 경험 빈칸(✍️ […]): 빨간 굵은 글씨 — 발행 전에 꼭 눈에 띄게
+    for kind, value in blocks:
+        if kind == "text" and value.startswith("✍"):
+            out.append((value.strip(), None, "#e53935", True, False))
     # 행동 한 줄(✔ …): 굵게 + 행동 색 (서체 4역할 중 '행동형')
     for kind, value in blocks:
         if kind == "text" and value.startswith("✔ "):

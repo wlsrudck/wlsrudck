@@ -27,6 +27,7 @@ max_stock_photos = 3    # 글 하나에 넣을 무료 사진 최대 개수
 
 [writing]
 model = "claude-opus-5"
+fill_spots = true      # 메모에 경험이 없으면 글 안 1~2곳에 빨간 "✍️ [직접 겪은 일 한 줄]" 빈칸을 넣어 둔다 (발행 전에 채우거나 지우기)
 min_chars = 1500
 max_chars = 2500
 tone = "친근한 구어체, 존댓말, 과장 없이 담백하게"

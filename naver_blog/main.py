@@ -762,6 +762,8 @@ def main():
                  "photos": [str(p) for p in photos], "post": post.model_dump()}
         (OUTPUT / f"{dt.date.today()}_{slug}.json").write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
         failed = [f"{name}({detail})" for name, ok, detail in checks if not ok]
+        if post.spots:
+            print(f"  ✍️ 경험 빈칸 {len(post.spots)}곳: 임시저장 글의 빨간 줄을 직접 겪은 일로 바꾸거나, 그 줄을 지우고 발행하세요")
         print(f"  발행 전 점검: {len(checks) - len(failed)}/{len(checks)} 통과"
               + (f" - 확인할 것: {', '.join(failed)}" if failed else ""))
         if cfg.get("images", {}).get("card_news", True):

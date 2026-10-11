@@ -156,6 +156,13 @@ class Example(BaseModel):
     text: str = Field(description="독자가 읽을 계산 한 줄. 예: '월 20만 원 × 12개월 = 연 240만 원'")
 
 
+class Spot(BaseModel):
+    model_config = STRICT
+    number: int = Field(description="경험 한 줄이 들어가면 좋을 소제목 번호 ([n])")
+    hint: str = Field(description="글쓴이가 채울 경험 예시 한 줄(40자 이내). '예) 저도 …' 처럼 무엇을 적으면 되는지 보여 준다. "
+                                  "사실처럼 단정하지 않는다. 예: '예) 저도 지난달 이 번호로 전화해 봤는데 연결까지 ○분 걸렸어요'")
+
+
 class Decor(BaseModel):
     model_config = STRICT
     recap_title: str = Field( description="글 끝 '한눈에 다시 보기' 제목. 독자 질문처럼. 예: '결국 네 가지가 어떻게 다를까?'. "
@@ -172,6 +179,7 @@ class Decor(BaseModel):
     verdict_go: list[str] = Field(description="'이런 분은 바로' 2~3개(각 30자 이내). 판단할 거리가 없는 글이면 빈 목록")
     verdict_skip: list[str] = Field(description="'이런 분은 패스·다른 방법' 1~2개(각 30자 이내). 없으면 빈 목록")
     verdict_first: str = Field(description="'헷갈리면 여기부터' 한 줄(35자 이내): 가장 먼저 할 확인·행동. 없으면 빈 문자열")
+    spots: list[Spot] = Field(description="글쓴이의 직접 경험 한 줄이 들어가면 글이 살아날 자리 1~2곳 (아래 규칙)")
 
 
 DECOR_RULES = """아래 블로그 글에 붙일 꾸미기 정보를 주세요. 글 내용(조사로 확인된 사실)만 쓰고 새 사실을 지어내지 않습니다.
@@ -202,6 +210,10 @@ DECOR_RULES = """아래 블로그 글에 붙일 꾸미기 정보를 주세요. �
 - 정보 나열로 끝내지 않고 결론을 내려 줍니다: verdict_go(이런 분은 바로 하세요/이게 맞아요),
   verdict_skip(이런 분은 패스하거나 다른 방법이 나아요), verdict_first(헷갈리면 가장 먼저 확인할 것 하나).
 - 글 본문에 근거가 있는 조건만으로 나눕니다. 대상 조건·기한·비용·대안 같은 기준을 씁니다. 판단할 거리가 없으면 비워 둡니다.
+
+[경험 빈칸 — 글쓴이가 발행 전에 직접 채움]
+- 글쓴이가 실제로 해 봤다면 한 줄 덧붙이기 좋은 소제목 1~2곳을 고릅니다 (신청해 본 일, 전화해 본 일, 써 본 느낌, 가격 비교해 본 일 등).
+- hint 는 무엇을 적으면 되는지 보여 주는 예시입니다. 글쓴이가 지우거나 고쳐 쓰므로 '예) ' 로 시작합니다.
 
 [소제목 그림 글자]
 - 소제목마다 card_title(번호 없이 10자 이내)과 card_points(8자 이내 단어 3개)를 씁니다. card_points 는 문장이 아니라
@@ -237,7 +249,7 @@ def _calc_ok(expr: str, result: float) -> bool:
         return False
 
 
-def decorate(post: "Post", cfg: dict) -> None:
+def decorate(post: "Post", cfg: dict, want_spots: bool = False) -> None:
     """글을 다 쓴 뒤 꾸미기 정보(인포 카드·그림 글자·테마·그림 방식·한눈에 다시 보기)를 작은 요청으로 따로 받는다.
     실패해도 글은 그대로 (꾸미기 없이) 쓴다"""
     lines = [f"제목: {post.title}"]
@@ -264,6 +276,11 @@ def decorate(post: "Post", cfg: dict) -> None:
     post.verdict_go = [v.strip() for v in d.verdict_go if v.strip()][:3]
     post.verdict_skip = [v.strip() for v in d.verdict_skip if v.strip()][:2]
     post.verdict_first = d.verdict_first.strip()
+    if want_spots and cfg.get("fill_spots", True):  # 메모에 경험이 없을 때만: 글쓴이가 채울 빈칸
+        seen = set()
+        post.spots = [{"section": sp.number - 1, "hint": sp.hint.strip()} for sp in d.spots
+                      if 1 <= sp.number <= len(post.sections) and sp.hint.strip()
+                      and not (sp.number in seen or seen.add(sp.number))][:2]
     for sd in d.sections:
         if 1 <= sd.number <= len(post.sections):
             sec = post.sections[sd.number - 1]
@@ -309,6 +326,7 @@ class Post(BaseModel):
     verdict_go: SkipJsonSchema[list[str]] = []  # 그래서 나는? — 이런 분은 바로
     verdict_skip: SkipJsonSchema[list[str]] = []  # 이런 분은 패스
     verdict_first: SkipJsonSchema[str] = ""  # 헷갈리면 여기부터
+    spots: SkipJsonSchema[list[dict]] = []  # 경험 빈칸 [{section, hint}] — 발행 전에 글쓴이가 채우거나 지운다
     image_style: SkipJsonSchema[str] = ""
     theme: SkipJsonSchema[str] = ""
     suggest: SkipJsonSchema[list[str]] = []  # 네이버 검색창 자동완성 연관 키워드 (점검표용)
@@ -417,6 +435,9 @@ class Post(BaseModel):
             elif i in stock:
                 out.append(("photo", stock[i]))
             out.extend(("text", p) for p in s.paragraphs)
+            for sp in self.spots:  # 경험 빈칸 (빨간 글씨): 직접 겪은 일로 바꾸거나 지우고 발행
+                if sp.get("section") == i:
+                    out.append(("text", f"✍️ [여기에 직접 겪은 일 한 줄 — {sp.get('hint', '')}]"))
             ev = media.get("evidence")
             if ev and ev.get("section") == i:  # 공식 화면 캡처: 그 숫자를 쓴 문단 바로 뒤에
                 out.append(("photo", ev["path"]))
@@ -1098,6 +1119,7 @@ def checklist(post: "Post", memo: str, cfg: dict) -> list[tuple[str, bool, str]]
         ("태그 한 줄", 3 <= len(post.tags) <= 15, f"{len(post.tags)}개"),
         ("금지어", not banned, "없음" if not banned else ", ".join(banned)),
         ("AI 말투", not ai, "없음" if not ai else ", ".join(ai)),
+        ("경험 빈칸", not post.spots, "없음" if not post.spots else f"{len(post.spots)}곳 — 빨간 ✍️ 줄을 직접 겪은 일로 바꾸거나 지우고 발행"),
         ("AI 답변 흔적", not left, "없음" if not left else "지워 주세요: " + ", ".join(left)),
         ("긴 문장(60자 넘음)", len(long_sentences(post)) <= 2,
          f"{len(long_sentences(post))}개" + (f" — 예: {long_sentences(post)[0][:30]}…" if long_sentences(post) else "")),
@@ -1414,6 +1436,7 @@ def polish_saved(post: Post, memo: str, cfg: dict) -> Post:
         # 꾸미기 정보는 고쳐 쓰기 형식에 없으니 원래 글에서 그대로 옮긴다
         post.theme, post.image_style, post.recap_title, post.recap = old.theme, old.image_style, old.recap_title, old.recap
         post.source_urls = old.source_urls
+        post.spots = old.spots
         post.examples, post.verdict_go, post.verdict_skip, post.verdict_first = \
             old.examples, old.verdict_go, old.verdict_skip, old.verdict_first
         for a, b in zip(post.sections, old.sections):
@@ -1583,5 +1606,5 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
         else:
             names = list(dict.fromkeys(source_name(u, found[u]) for u in urls[:4]))
             post.sources = ["출처: " + ", ".join(names)]
-    decorate(post, cfg)
+    decorate(post, cfg, want_spots=not experience_memo(memo))
     return post

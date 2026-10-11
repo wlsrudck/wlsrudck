@@ -326,6 +326,24 @@ def prepare_media(post: Post, slug: str, photos: list[Path], cfg: dict, brand: s
                                                    photo=thumb_photo, brand=brand)
         if thumb_photo and Path(thumb_photo).name.startswith("ai_") and media["thumbnail"]:
             ai_images.stamp(media["thumbnail"])  # AI 배경 썸네일에도 표시
+    # 공식 화면 캡처: 글에 쓴 번호·금액이 실제로 적힌 공식 홈페이지 화면을 찍어 형광펜 칠해서 넣는다 (믿을 수 있는 글)
+    if cfg.get("evidence", True) and post.source_urls and not (writing or {}).get("shopping"):
+        try:
+            import evidence
+            text = "\n".join(p for s in post.sections for p in s.paragraphs)
+            ev = evidence.capture(post.source_urls, text, folder / "evidence.png", cs=cs_mode)
+            if ev:
+                squash = lambda t: re.sub(r"\s+", "", t)
+                where = next((i for i, s in enumerate(post.sections)
+                              if squash(ev["needle"]) in squash(" ".join(s.paragraphs))), 0)
+                ev["section"] = where
+                ev["caption"] = f"공식 홈페이지에서 직접 확인한 화면 ({ev['host']}, {dt.date.today():%Y.%m.%d} 기준)"
+                media["evidence"] = ev
+                print(f"  공식 화면 캡처: {ev['host']} 에서 '{ev['needle']}' 찾아 표시 → {where + 1}번째 소제목 뒤")
+            else:
+                print("  (공식 화면 캡처: 글에 쓴 숫자가 보이는 공식 화면을 못 찾아 넣지 않았어요)")
+        except Exception as e:
+            print(f"  (공식 화면 캡처는 건너뜀: {str(e).splitlines()[0][:80]})")
     print(f"  이미지 준비: 썸네일 {('사진형' if thumb_photo else '매거진형') if 'thumbnail' in media else '없음'}, "
           f"지표 카드 {'만듦' if 'metrics_card' in media else '없음'}, "
           f"요약 카드 {'만듦' if 'summary_card' in media else '없음'}, 비교표 {'만듦' if 'table' in media else '없음'}, 소제목 이미지: 인포 카드 {n_info}장 + AI {n_ai}장 + 정책브리핑 사진 {n_policy}장 + 위키미디어 사진 {n_commons}장 + 내용에 맞는 무료 사진 {n_stock}장 + 소제목 카드 {n_card}장")

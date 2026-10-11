@@ -304,6 +304,7 @@ class Post(BaseModel):
     links: SkipJsonSchema[list[str]] = []
     recap_title: SkipJsonSchema[str] = ""  # ↓ 꾸미기 정보 (decorate 가 채운다)
     recap: SkipJsonSchema[list[RecapItem]] = []
+    source_urls: SkipJsonSchema[list[str]] = []  # 조사에서 실제로 나온 출처 주소 (공식 화면 캡처용)
     examples: SkipJsonSchema[list[dict]] = []  # 내 경우로 계산해 보면 [{who, text}] (계산이 맞는 것만)
     verdict_go: SkipJsonSchema[list[str]] = []  # 그래서 나는? — 이런 분은 바로
     verdict_skip: SkipJsonSchema[list[str]] = []  # 이런 분은 패스
@@ -342,6 +343,9 @@ class Post(BaseModel):
                 caps.setdefault(str(photos[s.photo - 1]), c)
             elif i in stock and not Path(stock[i]).name.startswith("section_"):
                 caps[str(stock[i])] = c
+        ev = media.get("evidence")
+        if ev and ev.get("caption"):
+            caps[str(ev["path"])] = ev["caption"]
         return caps
 
     def body_text(self) -> str:
@@ -408,6 +412,9 @@ class Post(BaseModel):
             elif i in stock:
                 out.append(("photo", stock[i]))
             out.extend(("text", p) for p in s.paragraphs)
+            ev = media.get("evidence")
+            if ev and ev.get("section") == i:  # 공식 화면 캡처: 그 숫자를 쓴 문단 바로 뒤에
+                out.append(("photo", ev["path"]))
             if media.get("table") and i + 1 == max(1, min(self.table_after, len(self.sections))):
                 out.append(("photo", media["table"]))
             if i == 0 and media.get("video"):  # 이 글로 만든 짧은 영상 (체류 시간)
@@ -1396,6 +1403,7 @@ def polish_saved(post: Post, memo: str, cfg: dict) -> Post:
         post.links, post.updated = keep["links"], keep["updated"]
         # 꾸미기 정보는 고쳐 쓰기 형식에 없으니 원래 글에서 그대로 옮긴다
         post.theme, post.image_style, post.recap_title, post.recap = old.theme, old.image_style, old.recap_title, old.recap
+        post.source_urls = old.source_urls
         post.examples, post.verdict_go, post.verdict_skip, post.verdict_first = \
             old.examples, old.verdict_go, old.verdict_skip, old.verdict_first
         for a, b in zip(post.sections, old.sections):
@@ -1558,6 +1566,7 @@ def generate_post(keyword: str, memo: str, photos: list[Path], cfg: dict,
     if found:
         # 글쓴이가 지어낸 링크는 빼고, 실제 검색에서 나온 링크만 남긴다. 비어 있으면 검색 출처로 채운다.
         urls = [u for u in post.sources if u in found] or list(found)
+        post.source_urls = list(dict.fromkeys(urls + list(found)))[:10]
         # 홈판 글은 외부 링크가 있으면 노출에 불리하므로 기본값은 링크 없이 출처 이름만
         if cfg.get("source_links", cfg.get("style", "homefeed") != "homefeed"):
             post.sources = [source_line(u, found[u]) for u in urls[:3]]

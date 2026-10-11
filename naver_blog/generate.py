@@ -38,7 +38,7 @@ class Section(BaseModel):
     stock_query: str = Field(description="photo가 null이고 소제목이 있으면 반드시 적는 무료 사진 검색어(영어 2~4단어). "
                                          "소제목 내용을 보여주는 사물·장소")
     alt_queries: list[str] = Field(default=[], description="stock_query로 못 찾을 때 쓸 다른 영어 검색어 2개 (더 넓은 말로)")
-    paragraphs: list[str] = Field(description="문단 목록. 한 문단은 2~4문장")
+    paragraphs: list[str] = Field(description="문단 목록. 한 문단은 2~3문장 (모바일에서 5줄을 넘지 않게)")
     caption: str = Field(default="", description="이 소제목 사진 아래에 붙일 짧은 설명 한 줄(20자 안팎). 사진이 보여 주는 것을 "
                                                  "내용과 이어서. 예: '디지털 상품권은 앱에서 바로 충전돼요'. 지어낸 경험 금지")
     key_line: str = Field(default="", description="이 소제목에서 독자가 꼭 기억할 한 줄(가격·날짜·핵심 팁 등). "
@@ -874,6 +874,15 @@ STYLE_RULES = """
 - 가장 중요한 정보를 가장 먼저: 독자가 첫 화면에서 '나한테 필요한 글인지' 바로 알게 합니다 (커트 보니것).
 - 앞에 앉은 한 사람에게 설명하듯 씁니다. 그 사람이 지루해할 문장(당연한 말, 반복)은 지웁니다 (제임스 패터슨).
 
+[읽기 쉬운 글 — 가독성]
+- 한 문장에는 한 가지 내용만. 한 문장은 40자 안팎, 길어도 60자를 넘기지 않습니다. "~하고, ~해서, ~인데" 로
+  이어 붙이지 말고 끊습니다. "그리고·또한·따라서" 같은 접속사는 없어도 통하면 뺍니다.
+- 한 문단은 2~3문장. 휴대폰 화면에서 5줄을 넘는 문단은 나눕니다.
+- 같은 단어를 가까이에서 되풀이하지 않습니다. 꼭 필요하면 다른 말로 바꿉니다.
+- 항목이 4개 이상인 목록은 가장 중요한 것을 맨 앞에, 두 번째로 중요한 것을 맨 끝에 둡니다
+  (사람들은 목록의 앞과 끝을 가장 잘 읽습니다). 덜 중요한 것은 가운데로.
+- 다 쓴 뒤 독자가 되어 다시 읽습니다: 아직 풀리지 않은 궁금증(조건·예외·기한·비용)이 있으면 본문이나 Q&A에 답을 넣습니다.
+
 [AI 말투 피하기]
 - 다음 같은 교과서·보고서 말투는 쓰지 않습니다: "~에 대해 알아보겠습니다", "~는 필수적인 요소입니다",
   "~를 고려해야 합니다", "첫째·둘째·마지막으로", "결론적으로", "도움이 되셨기를 바랍니다".
@@ -937,6 +946,27 @@ def leftovers_in(post: "Post") -> list[str]:
     return found
 
 
+_SENT = re.compile(r"[^.!?。\n]+[.!?。]?")
+
+
+def long_sentences(post: "Post", limit: int = 60) -> list[str]:
+    """60자를 넘는 문장 (읽기 어려운 문장 점검용)"""
+    out = []
+    for sec in post.sections:
+        for para in sec.paragraphs:
+            for m in _SENT.finditer(para.replace("\n", " ")):
+                t = m.group(0).strip()
+                if len(t) > limit:
+                    out.append(t)
+    return out
+
+
+def long_paragraphs(post: "Post", limit: int = 3) -> list[str]:
+    """4문장 이상인 문단"""
+    return [p for sec in post.sections for p in sec.paragraphs
+            if len([x for x in re.split(r"(?<=[.!?])\s+", p.replace("\n", " ")) if x.strip()]) > limit]
+
+
 def ai_phrases_in(post: "Post") -> list[str]:
     text = post.all_text()
     found = []
@@ -983,6 +1013,9 @@ def checklist(post: "Post", memo: str, cfg: dict) -> list[tuple[str, bool, str]]
         ("금지어", not banned, "없음" if not banned else ", ".join(banned)),
         ("AI 말투", not ai, "없음" if not ai else ", ".join(ai)),
         ("AI 답변 흔적", not left, "없음" if not left else "지워 주세요: " + ", ".join(left)),
+        ("긴 문장(60자 넘음)", len(long_sentences(post)) <= 2,
+         f"{len(long_sentences(post))}개" + (f" — 예: {long_sentences(post)[0][:30]}…" if long_sentences(post) else "")),
+        ("긴 문단(4문장 이상)", len(long_paragraphs(post)) == 0, f"{len(long_paragraphs(post))}개"),
         ("꾸밈말(매우·정말·너무)", len(INTENSIFIERS.findall(post.body_text())) <= 3,
          f"{len(INTENSIFIERS.findall(post.body_text()))}개 (3개 이하 권장 — 빼도 뜻이 같으면 지우기)"),
         ("직접 경험(메모)", has_memo, "메모 반영" if has_memo else "메모 없음 → 정보글로만 작성"),

@@ -544,6 +544,15 @@ def pixabay_photo(query: str, api_key: str, out_dir: Path, exclude: set[int]) ->
     return None
 
 
+TEMPLATE_TAGS = re.compile(r"green\s*screen|chroma|subscribe|like button|bell icon|youtube|intro|outro|logo|"
+                           r"countdown|overlay|transition|template|lower third|button", re.I)
+
+
+def _template_video(hit: dict) -> bool:
+    """초록 화면·구독 버튼·자막 틀 같은 '영상 편집용 소스' (배경으로 쓰면 이상하다)"""
+    return bool(TEMPLATE_TAGS.search(hit.get("tags", "")))
+
+
 def pixabay_video(query: str, api_key: str, out_dir: Path, exclude: set[int]) -> tuple[Path, int] | None:
     """클립 배경으로 쓸 무료 동영상 하나를 내려받는다. 너무 큰 4K는 피하고 가로 1280~1920을 고른다. 없으면 None."""
     url = "https://pixabay.com/api/videos/?" + urllib.parse.urlencode({
@@ -553,7 +562,7 @@ def pixabay_video(query: str, api_key: str, out_dir: Path, exclude: set[int]) ->
         hits = json.load(r).get("hits", [])
     for hit in hits:
         if hit["id"] in exclude or _has_brand(hit) or _has_crime(hit, query) or _off_topic(hit, query) \
-                or hit.get("duration", 0) < 4 \
+                or hit.get("duration", 0) < 4 or _template_video(hit) \
                 or _taken("video", hit["id"], out_dir):
             continue
         rends = sorted((v for v in hit.get("videos", {}).values() if v.get("url")), key=lambda v: v.get("width", 0))

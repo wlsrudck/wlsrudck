@@ -57,23 +57,33 @@ LIMIT = 300  # 클립 설명 칸 글자 수 한도 (해시태그도 이 안에 �
 
 SWITCH = r"""(pat) => {
     // 글자(pat) 옆의 켜기/끄기 스위치를 찾아 표시한다. 이미 켜져 있으면 "on"
+    // 눈에 보이는 토글을 누른다 (숨은 체크박스를 누르면 화면의 스위치는 그대로라 '켬'이라 해도 꺼져 있었다)
     document.querySelectorAll("[data-cu-ai]").forEach(e => e.removeAttribute("data-cu-ai"));
-    // 글자가 맞는 것 중 가장 안쪽(글자가 가장 짧은) 칸을 고른다 — 바깥 큰 틀을 잡으면 엉뚱한 스위치를 누른다
-    const hits = [...document.querySelectorAll("*")].filter(e => e.children.length <= 3 && e.getClientRects().length &&
+    const shown = e => e && e.getClientRects().length && e.offsetWidth > 4 && e.offsetHeight > 4
+                       && getComputedStyle(e).visibility !== "hidden" && getComputedStyle(e).opacity !== "0";
+    const hits = [...document.querySelectorAll("*")].filter(e => e.children.length <= 3 && shown(e) &&
         new RegExp(pat).test((e.innerText || "").trim()));
     hits.sort((a, b) => (a.innerText || "").length - (b.innerText || "").length);
     const label = hits[0];
     if (!label) return "";
+    const SEL = "[role=switch], button[aria-pressed], button[aria-checked], input[type=checkbox], [class*=switch], [class*=toggle], [class*=Switch], [class*=Toggle]";
     let box = label;
     for (let i = 0; i < 8 && box; i++, box = box.parentElement) {
-        const sw = box.querySelector("[role=switch], input[type=checkbox], button[aria-pressed], button[aria-checked]");
-        if (sw) {
-            const readable = sw.type === "checkbox" || sw.hasAttribute("aria-checked") || sw.hasAttribute("aria-pressed");
-            const on = sw.checked || sw.getAttribute("aria-checked") === "true" || sw.getAttribute("aria-pressed") === "true";
-            if (on) return "on";
-            sw.setAttribute("data-cu-ai", "1");
-            return readable ? "found" : "found-blind";  // blind: 켜졌는지 읽을 수 없는 스위치 (다시 누르면 꺼질 수 있다)
-        }
+        const all = [...box.querySelectorAll(SEL)];
+        if (!all.length) continue;
+        // 눈에 보이는 것 → 그 안·주변의 진짜 상태(체크박스·aria)
+        let sw = all.find(shown) || all.find(e => e.closest("label") && shown(e.closest("label")));
+        if (sw && !shown(sw) && sw.closest("label")) sw = sw.closest("label");
+        if (!sw) continue;
+        const inp = sw.matches("input") ? sw : (sw.querySelector("input[type=checkbox]") || (sw.closest("label") || sw).querySelector("input[type=checkbox]")
+                    || box.querySelector("input[type=checkbox]"));
+        const aria = sw.matches("[aria-checked],[aria-pressed]") ? sw : sw.querySelector("[aria-checked],[aria-pressed]");
+        let on = null;
+        if (inp) on = inp.checked;
+        else if (aria) on = aria.getAttribute("aria-checked") === "true" || aria.getAttribute("aria-pressed") === "true";
+        if (on === true) return "on";
+        sw.setAttribute("data-cu-ai", "1");
+        return on === null ? "found-blind" : "found";
     }
     return "";
 }"""
@@ -147,6 +157,7 @@ def upload(video: Path) -> None:
             print(f"  · {x}", flush=True)
             super().append(x)
     log: list[str] = Log([f"영상: {video.name}"])
+    print(f"이 영상 목소리: {clip_voice(video)}", flush=True)
     print("자동으로 채우는 중이에요. 끝났다고 나올 때까지 화면을 누르지 말고 기다려 주세요 (1~2분).", flush=True)
     body, tags = read_caption(video)
     tail = ""
@@ -318,6 +329,15 @@ def upload(video: Path) -> None:
             ensure_desc(page, desc, log)
             # 영상 업로드가 끝나며 화면이 다시 그려지면 켜 둔 스위치가 꺼질 수 있다 → 마지막에 다시 확인
             again = turn_on(page, AI_PAT, recheck=True)
+            try:  # 스위치 모양을 저장해 둔다 (안 켜졌을 때 이 파일을 보면 정확히 고칠 수 있다)
+                html = page.main_frame.evaluate("""(pat) => { const l = [...document.querySelectorAll('*')].filter(e =>
+                    e.children.length <= 3 && new RegExp(pat).test((e.innerText||'').trim()))
+                    .sort((a,b)=>(a.innerText||'').length-(b.innerText||'').length)[0];
+                    let b = l; for (let i = 0; i < 4 && b && b.parentElement; i++) b = b.parentElement;
+                    return b ? b.outerHTML.slice(0, 6000) : ''; }""", AI_PAT)
+                (ROOT / "output" / "clip_switch.html").write_text(html, encoding="utf-8")
+            except Exception:
+                pass
             log.append("AI 활용 다시 확인: " + ("켜져 있음" if again == "이미 켜져 있음" else again))
         except Exception as e:
             log.append(f"설명 다시 확인 오류: {str(e).splitlines()[0][:60]}")
@@ -453,6 +473,16 @@ def tag_shop(page, shop: dict, log, click) -> None:
             pass
 
 
+def clip_voice(video: Path) -> str:
+    """이 영상을 만들 때 쓴 목소리 (클립 폴더의 목소리.txt)"""
+    for d in sorted((ROOT / "output").glob(f"{video.stem}_클립"), reverse=True):
+        try:
+            return (d / "목소리.txt").read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+    return "기록 없음 (구글 목소리로 바꾸기 전에 만든 영상일 수 있어요)"
+
+
 def post_json(video: Path) -> Path:
     """영상에 맞는 글 저장본. 글은 어제 쓰고 클립은 오늘 만들면 날짜가 달라서, 같은 키워드의 가장 최근 글을 찾는다"""
     out = ROOT / "output"
@@ -571,7 +601,8 @@ def pick_category(page, log, click, topic: str = "", shop: bool = False) -> None
 def _queries(title: str, keyword: str = "") -> list[str]:
     """블로그 글 찾기 검색어: 글자 수로 자르면 '종아리 마'처럼 낱말이 잘려 아무것도 안 나온다 → 낱말 단위로"""
     words = [w for w in re.split(r"[^0-9A-Za-z가-힣]+", title) if w]
-    qs = [" ".join(words[:3]), keyword.strip(), " ".join(words[:2]), " ".join(words[-3:]), ""]  # "" = 검색 없이 최근 글 목록
+    # 먼저 검색 없이 최근 글 목록에서 (검색해서 고르면 제목에 '<em class="srch">' 같은 표시 글자가 섞여 붙는다)
+    qs = ["", " ".join(words[:3]), keyword.strip(), " ".join(words[:2]), " ".join(words[-3:])]
     return [q for q in dict.fromkeys(qs) if q is not None]
 
 
@@ -583,7 +614,7 @@ def link_blog(page, title: str, log, click, keyword: str = "") -> None:
     got = ""
     for q in _queries(title, keyword):
         box = visible(fr.locator("input[placeholder*='블로그'], input[placeholder*='검색']"))
-        if box:
+        if box and q:
             box.fill(q)
             box.press("Enter")
             page.wait_for_timeout(2000)

@@ -721,14 +721,20 @@ def make_clip(saved: dict, cfg: dict, blog: bool = False) -> Path:
         wavs = google_tts_to_wavs(narrations, folder, gvoice, ccfg.get("speed", "+15%"))
         if wavs:
             print(f"      목소리: 구글 클라우드 {gvoice}")
+    used_voice = f"구글 클라우드 {ccfg.get('google_voice', 'ko-KR-Wavenet-A')}" if wavs else ""
     if not wavs:
         wavs = edge_tts_to_wavs(narrations, folder, ccfg.get("voice", "ko-KR-SunHiNeural"), ccfg.get("speed", "+15%"))
         if wavs:
+            used_voice = f"마이크로소프트 엣지 {ccfg.get('voice', 'ko-KR-SunHiNeural')}"
             print(f"      목소리: 마이크로소프트 온라인 음성 {ccfg.get('voice', 'ko-KR-SunHiNeural')}")
     else:
         wavs = tts_to_wavs(narrations, folder, ccfg.get("voice_rate", 220))
         if wavs:
+            used_voice = "윈도우 기본 음성"
             print("      목소리: 윈도우 기본 음성 (기계음에 가까워요)")
+    if not _gcp_key():
+        print("      (구글 음성 키를 못 찾았어요 — 창의 [구글 음성 키 넣기]로 넣으면 구글 목소리로 만들어요)")
+    (folder / "목소리.txt").write_text(used_voice or "목소리 없음 (자막만)", encoding="utf-8")
     if wavs:
         durations = [_wav_seconds(w) + 0.6 for w in wavs]
     else:

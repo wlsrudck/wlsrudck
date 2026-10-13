@@ -456,18 +456,46 @@ def written_titles(blog_id: str) -> list[str]:
     return [t.strip() for t in titles if t and t.strip()]
 
 
+# 영어 약자를 한글 읽는 소리로 (네이버 연관 키워드는 'CJ' 를 '씨제이'처럼 한글로 돌려준다)
+_LETTER = {"A": "에이", "B": "비", "C": "씨", "D": "디", "E": "이", "F": "에프", "G": "지", "H": "에이치", "I": "아이",
+           "J": "제이", "K": "케이", "L": "엘", "M": "엠", "N": "엔", "O": "오", "P": "피", "Q": "큐", "R": "알",
+           "S": "에스", "T": "티", "U": "유", "V": "브이", "W": "더블유", "X": "엑스", "Y": "와이", "Z": "제트"}
+# 같은 회사를 부르는 다른 이름 (한쪽으로 모은다)
+_ALIAS = [("대한통운", "씨제이"), ("씨제이씨제이", "씨제이"), ("지에스25", "지에스"), ("지에스편의점", "지에스편의점"),
+          ("세븐일레븐", "세븐일레븐"), ("케이티", "케이티"), ("에스케이텔레콤", "에스케이티"), ("엘지유플러스", "엘지유플러스")]
+# 질문 종류를 나타내는 흔한 말 (이걸 빼고 남은 '회사·대상' 이름이 같으면 같은 글로 본다)
+_GENERIC = ["배송조회", "택배", "배송", "조회", "고객센터", "전화번호", "대표번호", "콜센터", "편의점", "운송장", "번호",
+            "보내는법", "보내는방법", "접수"]
+
+
+def _canon(text: str) -> str:
+    """비교용 글자: 영어 약자 → 한글 소리, 띄어쓰기·기호 빼고, 같은 회사 다른 이름은 하나로"""
+    t = re.sub(r"[A-Za-z]{1,5}", lambda m: "".join(_LETTER.get(c, c) for c in m.group(0).upper())
+               if len(m.group(0)) <= 4 or m.group(0).isupper() else m.group(0).lower(), text)
+    t = re.sub(r"[^0-9A-Za-z가-힣]", "", t).lower()
+    for a, b in _ALIAS:
+        t = t.replace(a, b)
+    return t
+
+
 def already_written(kw: str, titles: list[str]) -> str:
-    """키워드가 들어 있는 내 글 제목 (없으면 ""). 빼지 않고 표시만 한다 — '삼성전자'처럼 넓은 키워드는
-    같은 말이 든 글이 있어도 다른 내용으로 또 쓸 수 있으므로 쓸지 말지는 사람이 고른다"""
-    k = re.sub(r"[^0-9A-Za-z가-힣]", "", kw).lower()
+    """키워드가 들어 있는 내 글 제목 (없으면 ""). 'CJ대한통운'과 '씨제이'처럼 영어·한글 소리가 달라도 같은 것으로 본다"""
+    k = _canon(kw)
     if len(k) < 2:
         return ""
     # 제목에 그대로 있거나, 키워드의 두 글자 조각 대부분이 한 제목에 들어 있으면 (예: '독감예방접종' ↔ '독감 무료 예방 접종') 쓴 글로 본다
     pieces = {k[i:i + 2] for i in range(len(k) - 1)}
+    core = k
+    for g in sorted(_GENERIC, key=len, reverse=True):
+        core = core.replace(g, "")
+    kinds = [g for g in _GENERIC if g in k]
     for title in titles:
-        t = re.sub(r"[^0-9A-Za-z가-힣]", "", title).lower()
+        t = _canon(title)
         if k in t or (len(pieces) >= 3 and sum(p in t for p in pieces) / len(pieces) >= 0.8
                       and all(n in t for n in re.findall(r"\d+", k))):  # 숫자는 꼭 같아야 (s27 ↔ s25 는 다른 글)
+            return title
+        # '씨제이택배배송조회' ↔ 'CJ대한통운 택배 배송조회 …': 회사 이름이 같고, 묻는 것(배송조회·고객센터 등)도 같으면
+        if len(core) >= 2 and kinds and core in t and any(g in t for g in kinds):
             return title
     return ""
 

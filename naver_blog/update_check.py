@@ -137,9 +137,10 @@ def fetch_body(url: str) -> tuple[list[str], list[str]]:
         lines = [x for x in lines if x and x != "\u200b"]
         imgs = []
         for tag in re.findall(r"<img\b[^>]*>", raw):
-            src = (re.search(r'data-lazy-src="([^"]+)"', tag) or re.search(r'\bsrc="([^"]+)"', tag))
+            src = (re.search(r'data-lazy-src="([^"]+)"', tag) or re.search(r'data-src="([^"]+)"', tag)
+                   or re.search(r'\bsrc="([^"]+)"', tag))
             src = html.unescape(src.group(1)) if src else ""
-            if re.search(r"(postfiles|blogfiles|blogpfthumb-phinf)\.pstatic\.net", src) and "storep" not in src:
+            if re.search(r"(postfiles|blogfiles|blogpfthumb-phinf|mblogthumb-phinf|blogthumb)\.pstatic\.net", src) and "storep" not in src:
                 src = re.sub(r"\?type=\w+", "", src) + "?type=w966"
                 if src not in imgs:
                     imgs.append(src)

@@ -634,6 +634,16 @@ def from_url(url: str, cfg: dict) -> dict:
     if not lines:
         raise RuntimeError("글 본문을 읽지 못했어요. 전체 공개 글인지 확인해 주세요.")
     title = _page_title(url) or lines[0][:40]
+    # 이 프로그램으로 쓴 글이면 저장해 둔 글을 그대로 쓴다 (쇼핑 정보·그림·글 연결이 이어지게)
+    squash = lambda t: re.sub(r"[^0-9A-Za-z가-힣]", "", t or "")
+    for f in saved_posts():
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+            if squash(d["post"].get("title")) == squash(title) and not d.get("from_url"):
+                print(f"  이 프로그램으로 쓴 글이라 저장해 둔 글로 만들어요: {f.name}")
+                return load_saved(f)
+        except Exception:
+            continue
     slug = f"글{m.group(1)}"
     pic_dir = OUTPUT / f"{slug}_images"
     pic_dir.mkdir(parents=True, exist_ok=True)
@@ -722,12 +732,12 @@ def make_clip(saved: dict, cfg: dict, blog: bool = False) -> Path:
         if wavs:
             print(f"      목소리: 구글 클라우드 {gvoice}")
     used_voice = f"구글 클라우드 {ccfg.get('google_voice', 'ko-KR-Wavenet-A')}" if wavs else ""
-    if not wavs:
+    if not wavs:  # 구글이 안 되면 엣지
         wavs = edge_tts_to_wavs(narrations, folder, ccfg.get("voice", "ko-KR-SunHiNeural"), ccfg.get("speed", "+15%"))
         if wavs:
             used_voice = f"마이크로소프트 엣지 {ccfg.get('voice', 'ko-KR-SunHiNeural')}"
             print(f"      목소리: 마이크로소프트 온라인 음성 {ccfg.get('voice', 'ko-KR-SunHiNeural')}")
-    else:
+    if not wavs:  # 엣지도 안 되면 윈도우 기본 (구글·엣지가 됐으면 절대 덮어쓰지 않는다)
         wavs = tts_to_wavs(narrations, folder, ccfg.get("voice_rate", 220))
         if wavs:
             used_voice = "윈도우 기본 음성"

@@ -107,15 +107,19 @@ PICK_TEXT = r"""(t) => {
 }"""
 # 블로그 글 고르기 창: 제목이 맞는 카드의 [선택] 버튼
 PICK_POST = r"""(want) => {
+    // 블로그 글 고르기 창: 제목이 맞는 글의 [선택] 버튼. 버튼마다 '그 글 한 장'(선택 버튼이 하나뿐인 칸)만 보고 판단한다
+    // (넓게 올라가면 여러 글이 든 목록 전체를 보게 되어 엉뚱한 첫 글을 고른다)
     document.querySelectorAll("[data-cu-post]").forEach(e => e.removeAttribute("data-cu-post"));
-    const norm = s => (s || "").replace(/[^0-9A-Za-z가-힣]/g, "");
+    const norm = s => (s || "").replace(/<[^>]+>/g, "").replace(/[^0-9A-Za-z가-힣]/g, "");
     const w = norm(want).slice(0, 14);
-    for (const b of [...document.querySelectorAll("button")].filter(b => (b.innerText || "").trim() === "선택"
-                                                                      && b.getClientRects().length)) {
+    const isBtn = b => (b.innerText || "").trim() === "선택" && b.getClientRects().length;
+    for (const b of [...document.querySelectorAll("button")].filter(isBtn)) {
         let card = b;
-        for (let i = 0; i < 4 && card && !norm(card.innerText).includes(w); i++) card = card.parentElement;
-        if (card && norm(card.innerText).includes(w)) { b.setAttribute("data-cu-post", "1");
-            return (card.innerText || "").split("\n")[0].slice(0, 40); }
+        while (card.parentElement && [...card.parentElement.querySelectorAll("button")].filter(isBtn).length === 1) {
+            card = card.parentElement;
+            if (norm(card.innerText).includes(w)) { b.setAttribute("data-cu-post", "1");
+                return (card.innerText || "").split("\n").find(t => norm(t).length > 4)?.slice(0, 40) || ""; }
+        }
     }
     return "";
 }"""
@@ -289,7 +293,7 @@ def upload(video: Path) -> None:
                 break
         log.append(f"해시태그: 설명 끝에 함께 넣음" if not n_tag else f"해시태그 칸에 {n_tag}개 넣음")
         # AI 활용 설정: 클립 그림·목소리를 AI로 만들었으므로 켠다 (네이버 안내에 맞게 투명하게)
-        log.append("AI 활용 설정: " + turn_on(page, AI_PAT))
+        log.append("AI 활용 설정: " + (turn_on_visual(page, AI_PAT) or turn_on(page, AI_PAT)))
         shop = shop_info(video)
         if shop:  # 쇼핑 블로그: 광고 표시를 켜고, 쇼핑커넥트 상품을 정보 태그로 붙인다 (수수료를 받는 영상이므로)
             got = turn_on(page, AD_PAT)
@@ -328,7 +332,7 @@ def upload(video: Path) -> None:
         try:
             ensure_desc(page, desc, log)
             # 영상 업로드가 끝나며 화면이 다시 그려지면 켜 둔 스위치가 꺼질 수 있다 → 마지막에 다시 확인
-            again = turn_on(page, AI_PAT, recheck=True)
+            again = turn_on_visual(page, AI_PAT) or turn_on(page, AI_PAT, recheck=True)
             try:  # 스위치 모양을 저장해 둔다 (안 켜졌을 때 이 파일을 보면 정확히 고칠 수 있다)
                 html = page.main_frame.evaluate("""(pat) => { const l = [...document.querySelectorAll('*')].filter(e =>
                     e.children.length <= 3 && new RegExp(pat).test((e.innerText||'').trim()))
@@ -385,6 +389,65 @@ def ensure_desc(page, desc: str, log: list) -> None:
 
 AI_PAT = r"^AI\s*활용\s*설정"
 AD_PAT = r"^(광고\s*[·ㆍ.,/]?\s*협찬|유료\s*광고|협찬\s*(표시|여부|설정)|광고\s*표시)"
+
+
+# 화면에서 글자 줄의 오른쪽 끝에 있는 토글 상자 찾기 (HTML 모양을 몰라도 된다: 사람이 눈으로 찾는 방식)
+FIND_TOGGLE = r"""(pat) => {
+    const shown = e => e.getClientRects().length && e.offsetWidth > 4;
+    const hits = [...document.querySelectorAll("*")].filter(e => e.children.length <= 3 && shown(e) &&
+        new RegExp(pat).test((e.innerText || "").trim()));
+    hits.sort((a, b) => (a.innerText || "").length - (b.innerText || "").length);
+    const label = hits[0];
+    if (!label) return null;
+    label.scrollIntoView({block: "center"});
+    const r = label.getBoundingClientRect();
+    const y = r.top + r.height / 2;
+    // 같은 줄을 오른쪽 끝에서 왼쪽으로 훑으며 토글 크기(가로 28~90, 세로 14~44)인 칸을 찾는다
+    for (let x = Math.min(innerWidth - 5, r.right + 900); x > r.right; x -= 4) {
+        for (const dy of [0, -6, 6, -12, 12, 18, -18, 24, 30, 36]) {
+            let e = document.elementFromPoint(x, y + dy);
+            for (let k = 0; k < 4 && e; k++, e = e.parentElement) {
+                const b = e.getBoundingClientRect();
+                if (b.width >= 28 && b.width <= 90 && b.height >= 14 && b.height <= 44 && !(e.innerText || "").trim())
+                    return {x: b.left, y: b.top, w: b.width, h: b.height};
+            }
+        }
+    }
+    return null;
+}"""
+
+
+def _colorful(page, box: dict) -> bool | None:
+    """토글 상자 색: 회색이면 꺼짐(False), 색이 있으면 켜짐(True), 모르겠으면 None"""
+    import io
+    from PIL import Image
+    try:
+        png = page.screenshot(clip={"x": box["x"], "y": box["y"], "width": box["w"], "height": box["h"]})
+        im = Image.open(io.BytesIO(png)).convert("RGB")
+        px = list(im.getdata())
+        sat = sorted(max(c) - min(c) for c in px)
+        top = sat[int(len(sat) * 0.8)]  # 가장 색이 진한 20% 기준
+        return True if top >= 60 else False if top <= 25 else None
+    except Exception:
+        return None
+
+
+def turn_on_visual(page, pat: str) -> str:
+    """눈으로 보듯이: 글자 줄 오른쪽의 토글을 찾고, 색으로 켜짐을 판단해 꺼져 있을 때만 누른다"""
+    box = page.main_frame.evaluate(FIND_TOGGLE, pat)
+    if not box:
+        return ""
+    page.wait_for_timeout(300)
+    box = page.main_frame.evaluate(FIND_TOGGLE, pat) or box  # 스크롤 뒤 자리 다시
+    before = _colorful(page, box)
+    if before is True:
+        return "이미 켜져 있음"
+    if before is None:
+        return "켜졌는지 색으로 알 수 없어요 — 화면에서 봐 주세요"
+    page.mouse.click(box["x"] + box["w"] / 2, box["y"] + box["h"] / 2)
+    page.wait_for_timeout(700)
+    after = _colorful(page, box)
+    return "켬 (색으로 확인)" if after is True else "눌렀지만 켜진 게 안 보여요 — 직접 켜 주세요"
 
 
 def turn_on(page, pat: str, recheck: bool = False) -> str:

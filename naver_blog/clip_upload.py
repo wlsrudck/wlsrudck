@@ -306,7 +306,7 @@ def upload(video: Path) -> None:
         title = post_title(video)
         if title:
             try:
-                link_blog(page, title, log, click)
+                link_blog(page, title, log, click, keyword=video.stem.split('_', 1)[-1])
             except Exception as e:
                 log.append(f"블로그 연결 오류: {str(e).splitlines()[0][:60]}")
         else:
@@ -534,17 +534,28 @@ def pick_category(page, log, click, topic: str = "", shop: bool = False) -> None
         CAT_FILE.write_text(json.dumps(saved, ensure_ascii=False), encoding="utf-8")
 
 
-def link_blog(page, title: str, log, click) -> None:
+def _queries(title: str, keyword: str = "") -> list[str]:
+    """블로그 글 찾기 검색어: 글자 수로 자르면 '종아리 마'처럼 낱말이 잘려 아무것도 안 나온다 → 낱말 단위로"""
+    words = [w for w in re.split(r"[^0-9A-Za-z가-힣]+", title) if w]
+    qs = [" ".join(words[:3]), keyword.strip(), " ".join(words[:2]), " ".join(words[-3:]), ""]  # "" = 검색 없이 최근 글 목록
+    return [q for q in dict.fromkeys(qs) if q is not None]
+
+
+def link_blog(page, title: str, log, click, keyword: str = "") -> None:
     if not click(page, ["블로그"], "콘텐츠 링크 [블로그]", timeout=6):
         return
     page.wait_for_timeout(1500)
     fr = page.main_frame
-    box = visible(fr.locator("input[placeholder*='블로그'], input[placeholder*='검색']"))
-    if box:
-        box.fill(title[:20])
-        box.press("Enter")
-        page.wait_for_timeout(2000)
-    got = fr.evaluate(PICK_POST, title)
+    got = ""
+    for q in _queries(title, keyword):
+        box = visible(fr.locator("input[placeholder*='블로그'], input[placeholder*='검색']"))
+        if box:
+            box.fill(q)
+            box.press("Enter")
+            page.wait_for_timeout(2000)
+        got = fr.evaluate(PICK_POST, title)
+        if got or not box:
+            break
     if got:
         fr.locator("[data-cu-post]").first.click()
         log.append(f"블로그 글 연결: {got}")

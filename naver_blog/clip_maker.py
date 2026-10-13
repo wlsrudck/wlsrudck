@@ -288,6 +288,64 @@ def edge_tts_to_wavs(texts: list[str], folder: Path, voice: str, rate: str) -> l
         return None
 
 
+GCP_KEY = ROOT / "gcp_tts_key.txt"  # 구글 클라우드 Text-to-Speech API 키 (창의 [구글 음성 키 넣기])
+GOOGLE_VOICES = ["ko-KR-Neural2-A", "ko-KR-Neural2-B", "ko-KR-Neural2-C", "ko-KR-Wavenet-A", "ko-KR-Wavenet-C",
+                 "ko-KR-Wavenet-D"]  # A·B 여자, C·D 남자
+
+
+def _gcp_key() -> str:
+    """이 블로그 폴더 → 없으면 바탕화면의 다른 블로그 폴더에 넣어 둔 키 (한 번만 넣으면 세 블로그가 같이 쓴다)"""
+    for f in [GCP_KEY, *sorted(ROOT.parent.glob("*/gcp_tts_key.txt"))]:
+        try:
+            k = f.read_text(encoding="utf-8-sig").strip()
+            if k:
+                return k
+        except Exception:
+            continue
+    return ""
+
+
+def _rate_number(rate: str) -> float:
+    """'+15%' → 1.15 (엣지 목소리 빠르기 설정을 그대로 쓴다)"""
+    m = re.match(r"\s*([+-]?\d+)\s*%", str(rate))
+    return max(0.5, min(2.0, 1 + int(m.group(1)) / 100)) if m else 1.0
+
+
+def google_tts_to_wavs(texts: list[str], folder: Path, voice: str, rate: str) -> list[Path] | None:
+    """구글 클라우드 TTS (상업적 이용 공식 허용, 매달 무료량 있음). 키가 없거나 실패하면 None"""
+    import base64
+    import urllib.request
+    key = _gcp_key()
+    if not key:
+        return None
+    paths = []
+    try:
+        for i, text in enumerate(texts, 1):
+            body = json.dumps({"input": {"text": text},
+                               "voice": {"languageCode": "ko-KR", "name": voice},
+                               "audioConfig": {"audioEncoding": "LINEAR16", "sampleRateHertz": 44100,
+                                               "speakingRate": _rate_number(rate)}}).encode()
+            req = urllib.request.Request(f"https://texttospeech.googleapis.com/v1/text:synthesize?key={key}", data=body,
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                audio = base64.b64decode(json.loads(r.read())["audioContent"])
+            wav = folder / f"voice_{i:02d}.wav"
+            wav.write_bytes(audio)  # LINEAR16 은 wav 머리말까지 붙어서 온다
+            paths.append(wav)
+        return paths
+    except Exception as e:
+        msg = str(e)
+        if hasattr(e, "read"):
+            try:
+                msg = json.loads(e.read()).get("error", {}).get("message", msg)
+            except Exception:
+                pass
+        print(f"      (구글 목소리 실패 → 엣지 목소리로 해요: {msg.splitlines()[0][:90]})")
+        for w in paths:
+            w.unlink(missing_ok=True)
+        return None
+
+
 def tts_to_wavs(texts: list[str], folder: Path, rate: int = 220) -> list[Path] | None:
     """윈도우 기본 음성으로 장면별 wav를 만든다. 한국어 음성이 없거나 pyttsx3가 없으면 None"""
     try:
@@ -657,9 +715,16 @@ def make_clip(saved: dict, cfg: dict, blog: bool = False) -> Path:
     print("[3/4] 목소리 만드는 중...")
     ccfg = cfg.get("clip", {})
     narrations = [sc.narration for sc in script.scenes]
-    wavs = edge_tts_to_wavs(narrations, folder, ccfg.get("voice", "ko-KR-SunHiNeural"), ccfg.get("speed", "+15%"))
-    if wavs:
-        print(f"      목소리: 마이크로소프트 온라인 음성 {ccfg.get('voice', 'ko-KR-SunHiNeural')}")
+    wavs = None
+    if ccfg.get("tts", "google") == "google" and _gcp_key():  # 구글 클라우드 목소리 (키가 있으면 먼저)
+        gvoice = ccfg.get("google_voice", "ko-KR-Neural2-A")
+        wavs = google_tts_to_wavs(narrations, folder, gvoice, ccfg.get("speed", "+15%"))
+        if wavs:
+            print(f"      목소리: 구글 클라우드 {gvoice}")
+    if not wavs:
+        wavs = edge_tts_to_wavs(narrations, folder, ccfg.get("voice", "ko-KR-SunHiNeural"), ccfg.get("speed", "+15%"))
+        if wavs:
+            print(f"      목소리: 마이크로소프트 온라인 음성 {ccfg.get('voice', 'ko-KR-SunHiNeural')}")
     else:
         wavs = tts_to_wavs(narrations, folder, ccfg.get("voice_rate", 220))
         if wavs:
@@ -797,13 +862,26 @@ def voice_test(cfg: dict) -> None:
             out.unlink(missing_ok=True)
             wavs[0].rename(out)
             print(f"  만듦: {out.name}")
+    if _gcp_key():
+        for voice in GOOGLE_VOICES:
+            wavs = google_tts_to_wavs([SAMPLE_TEXT], folder, voice, speed)
+            if not wavs:
+                break
+            out = folder / f"구글_{voice}.wav"
+            out.unlink(missing_ok=True)
+            wavs[0].rename(out)
+            print(f"  만듦: {out.name}")
+    else:
+        print("  (구글 음성 키가 없어서 구글 목소리 샘플은 건너뛰어요 — 창의 [구글 음성 키 넣기])")
     wavs = tts_to_wavs([SAMPLE_TEXT], folder, cfg.get("clip", {}).get("voice_rate", 220))
     if wavs:
         out = folder / "윈도우_기본.wav"
         out.unlink(missing_ok=True)
         wavs[0].rename(out)
         print(f"  만듦: {out.name}")
-    print(f"\n{folder} 폴더에서 하나씩 들어 보고, 마음에 드는 이름을 config.toml [clip]의 voice에 적으세요.")
+    print(f"\n{folder} 폴더에서 하나씩 들어 보세요.\n"
+          "  구글 목소리가 마음에 들면 config.toml [clip] 의 google_voice 에 이름(예: ko-KR-Neural2-A)을,\n"
+          "  엣지 목소리를 쓰려면 voice 에 이름을 적고 tts = \"edge\" 로 바꾸세요.")
     if sys.platform == "win32":
         import os
         os.startfile(folder)

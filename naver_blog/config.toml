@@ -62,6 +62,8 @@ quote_color = "#00756a"        # 인용구 안 글자 색 (비우면 소제목 �
 [clip]
 # true면 글을 쓸 때마다 네이버 클립용 세로 영상(mp4)도 같이 만든다. 따로 만들려면 8_make_clip.bat
 auto = false
+tts = "google"          # 클립 목소리: "google" = 구글 클라우드 (키가 있을 때, 상업적 이용 가능) / "edge" = 마이크로소프트 엣지
+google_voice = "ko-KR-Neural2-A"  # 구글 목소리 이름 ([목소리 테스트]로 들어 보고 고르기)
 gif = true      # 글 중간에 움짤(GIF) 하나: 매인·고객센터는 클립 영상 3초, 쇼핑은 상품 사진이 넘어가는 움짤 (스크롤만 해도 움직임)
 # 목소리: ko-KR-SunHiNeural(여자) 또는 ko-KR-InJoonNeural(남자)
 voice = "ko-KR-SunHiNeural"

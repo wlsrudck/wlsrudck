@@ -49,6 +49,7 @@ BUTTONS = [
         ("네이버 로그인", "2_login.bat", "로그인이 풀렸을 때 다시 로그인해요"),
         ("구글 AI 키 넣기", "@google_key", "Google AI Studio 에서 만든 키를 붙여 넣어 저장해요"),
         ("Pexels 키 넣기", "@pexels_key", "무료 사진 사이트 Pexels 키 (pexels.com/api 에서 무료로 받아요)"),
+        ("구글 음성 키 넣기", "@gcp_tts_key", "클립 목소리용 구글 클라우드 Text-to-Speech 키 (상업적 이용 가능, 매달 무료량)"),
         ("AI 이미지 시험", "16_ai_image_test.bat", "이 블로그 캐릭터와 소제목 그림 한 장을 만들어 봐요"),
         ("그림 스타일 바꾸기", "20_image_style.bat", "AI 그림을 자동 / 카드형 일러스트 / 실사 사진 중에서 골라요 (이 블로그만)"),
         ("사진 폴더 만들기", "2-5_make_photo_folders.bat", "키워드별 내 사진 폴더를 만들어요"),
@@ -94,6 +95,20 @@ def save_google_key() -> None:
         return
     (ROOT / "google_key.txt").write_text(key, encoding="utf-8")
     messagebox.showinfo("저장", "저장했어요. [AI 이미지 시험]을 눌러 확인해 보세요.")
+
+
+def save_gcp_tts_key() -> None:
+    """구글 클라우드 Text-to-Speech 키를 붙여 넣어 gcp_tts_key.txt 로 저장 (클립 목소리)"""
+    from tkinter import simpledialog
+    key = simpledialog.askstring("구글 음성 키 넣기", "구글 클라우드 콘솔 → 사용자 인증 정보에서 만든 API 키를 붙여 넣으세요 (Ctrl+V)", show="*")
+    if not key:
+        return
+    key = key.strip().strip('"').strip("'").strip()
+    if len(key) < 20 or " " in key:
+        messagebox.showerror("키 확인", f"키가 아닌 것 같아요 (글자 {len(key)}개). 키 옆 복사 버튼으로 다시 복사해 주세요.")
+        return
+    (ROOT / "gcp_tts_key.txt").write_text(key, encoding="utf-8")
+    messagebox.showinfo("저장", "저장했어요. [목소리 테스트]를 눌러 구글 목소리 샘플을 들어 보세요.")
 
 
 def save_pexels_key() -> None:
@@ -752,7 +767,8 @@ def main():
         run.columnconfigure(col, weight=1)
         for label, bat, tip in items:
             cmd = {"@google_key": save_google_key, "@pexels_key": save_pexels_key, "@clip_folder": open_clip_folder,
-                   "@clip_kakao": clip_to_kakao, "@hit_title": save_hit_title}.get(bat) or (lambda b=bat: run_bat(b))
+                   "@clip_kakao": clip_to_kakao, "@hit_title": save_hit_title,
+                   "@gcp_tts_key": save_gcp_tts_key}.get(bat) or (lambda b=bat: run_bat(b))
             ttk.Button(lf, text=label, command=cmd).pack(fill="x", pady=(6, 0))
             ttk.Label(lf, text=tip, foreground="#777", wraplength=250).pack(fill="x")
     bottom = ttk.Frame(run)

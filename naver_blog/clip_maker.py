@@ -717,7 +717,7 @@ def make_clip(saved: dict, cfg: dict, blog: bool = False) -> Path:
     narrations = [sc.narration for sc in script.scenes]
     wavs = None
     if ccfg.get("tts", "google") == "google" and _gcp_key():  # 구글 클라우드 목소리 (키가 있으면 먼저)
-        gvoice = ccfg.get("google_voice", "ko-KR-Neural2-A")
+        gvoice = ccfg.get("google_voice", "ko-KR-Wavenet-A")
         wavs = google_tts_to_wavs(narrations, folder, gvoice, ccfg.get("speed", "+15%"))
         if wavs:
             print(f"      목소리: 구글 클라우드 {gvoice}")

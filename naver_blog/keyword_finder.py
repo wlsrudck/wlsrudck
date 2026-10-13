@@ -479,6 +479,15 @@ def main():
                      "volume": vol, "docs": docs.get(c.keyword), "comp": comp, "grade": g,
                      "written": already_written(c.keyword, mine)})
     rows.sort(key=lambda r: (order[r["grade"]], -(r["volume"] or 0)))
+    try:  # 글자 규칙이 놓친 것까지 사람처럼 한 번 더 판단
+        from trending_keywords import covered_by_posts
+        for kw, title in covered_by_posts([r["keyword"] for r in rows if not r["written"]],
+                                          {"naver": cfg.get("naver", {}), "writing": cfg["writing"]}, mine).items():
+            for r in rows:
+                if r["keyword"] == kw:
+                    r["written"] = title
+    except Exception:
+        pass
     dup = [r for r in rows if r["written"]]
     rows = [r for r in rows if not r["written"]]  # 이미 쓴 주제는 목록에서 뺀다
     if dup:

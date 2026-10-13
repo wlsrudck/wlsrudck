@@ -515,6 +515,55 @@ def already_written(kw: str, titles: list[str]) -> str:
     return ""
 
 
+COVER_PROMPT = """아래는 내 블로그에 이미 올린 글 제목들과, 새로 쓸까 하는 키워드 후보들입니다.
+후보마다 '이 키워드로 네이버에서 검색한 사람이 내 기존 글 하나에서 원하는 답을 찾을 수 있는가'를 블로그 운영자처럼 판단하세요.
+- 같은 회사·서비스를 다른 이름으로 부른 것은 같은 것입니다 (CJ대한통운=씨제이택배=대한통운, GS25=지에스, CU=씨유, 일양택배=일양로지스 등).
+- 고객센터·정보 글은 보통 조회 방법, 전화번호, 고객센터, 운영시간, 상담원 연결, 이용 방법을 한 글에 함께 담습니다.
+  그 회사 글이 있으면 이런 키워드는 이미 쓴 것입니다.
+- 기존 글 제목에 없는 다른 질문(해지·환불·위약금·다른 지역·다른 상품 등)이라 새 글이 필요하면 쓰지 않은 것입니다.
+- 키워드가 띄어쓰기 없이 붙어 있거나 한글 소리로 적혀 있어도 뜻으로 판단합니다.
+
+[이미 쓴 글 제목]
+{titles}
+
+[후보 키워드]
+{keywords}"""
+
+
+def covered_by_posts(keywords: list[str], cfg: dict, titles: list[str] | None = None) -> dict[str, str]:
+    """사람처럼 판단: 후보 키워드 중 이미 쓴 글이 답하는 것 → {키워드: 그 글 제목}. 실패하면 빈 dict (글자 규칙만 쓴다)"""
+    keywords = [k for k in dict.fromkeys(keywords) if k.strip()][:80]
+    if not keywords:
+        return {}
+    try:
+        import anthropic
+        from pydantic import BaseModel
+
+        from generate import STRICT, _api_key
+
+        class Judge(BaseModel):
+            model_config = STRICT
+            keyword: str
+            covered_by: str  # 답이 되는 기존 글 제목 그대로, 없으면 빈 문자열
+
+        class Judges(BaseModel):
+            model_config = STRICT
+            items: list[Judge]
+
+        if titles is None:
+            titles = written_titles(cfg["naver"]["blog_id"])
+        client = anthropic.Anthropic(api_key=_api_key(), max_retries=3)
+        res = client.beta.messages.parse(
+            model=cfg["writing"]["model"], max_tokens=6000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
+            output_format=Judges, messages=[{"role": "user", "content": COVER_PROMPT.format(
+                titles="\n".join(f"- {t}" for t in titles[:600]), keywords="\n".join(f"- {k}" for k in keywords))}])
+        got = res.parsed_output.items if res.parsed_output else []
+        return {j.keyword: j.covered_by for j in got if j.covered_by.strip() and j.keyword in keywords}
+    except Exception as e:
+        print(f"  (이미 쓴 글 판단 실패 — 글자 비교만 해요: {str(e).splitlines()[0][:60]})")
+        return {}
+
+
 def map_category(topic: str, mapping: dict) -> str:
     return next((cat for key, cat in mapping.items() if key and key in topic), "")
 

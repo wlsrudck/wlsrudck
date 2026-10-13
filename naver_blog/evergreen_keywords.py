@@ -184,6 +184,14 @@ def find_evergreen(cfg: dict, keys: dict, plan: list[tuple[str, str]]) -> list[d
     kind_order = {"평생": 0, "시즌": 1, "평생?": 2, "?": 3}
     grade_order = {"S": 0, "A": 1, "B": 2, "?": 3, "C": 4}
     rows = [r for r in rows if r["grade"] != "C"]
+    try:  # 글자 규칙이 놓친 것까지 사람처럼 한 번 더 판단
+        from trending_keywords import covered_by_posts
+        for kw, title in covered_by_posts([r["keyword"] for r in rows if not r["written"]], cfg, titles).items():
+            for r in rows:
+                if r["keyword"] == kw:
+                    r["written"] = title
+    except Exception:
+        pass
     dup = [r for r in rows if r["written"]]
     rows = [r for r in rows if not r["written"]]  # 이미 쓴 주제는 목록에서 뺀다 (보여 줘도 고를 일이 없다)
     if dup:

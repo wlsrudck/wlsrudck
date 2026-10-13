@@ -149,6 +149,13 @@ def fill(cfg: dict, need: int) -> list[str]:
         pools[m] = (evergreen_candidates(cfg, keys) if m == "evergreen" else news_candidates(cfg) if m == "news"
                     else season_candidates(cfg, keys) if m == "season" else _gaps(cfg, keys) if m == "gaps"
                     else trending_candidates(cfg))
+    # 글자 규칙이 놓친 것까지: 내 글 제목 전체를 보고 '이미 답한 키워드'를 사람처럼 한 번 더 거른다
+    from trending_keywords import covered_by_posts
+    judged = covered_by_posts([r["keyword"] for rs in pools.values() for r in rs[:15]], cfg)
+    if judged:
+        print(f"  이미 쓴 글이 답하는 키워드 {len(judged)}개를 더 뺐어요 (예: "
+              + ", ".join(f"{k}→{v[:15]}" for k, v in list(judged.items())[:3]) + ")")
+        pools = {m: [r for r in rs if r["keyword"] not in judged] for m, rs in pools.items()}
     picked: list[dict] = []
     taken: set = set()
     while len(picked) < need and any(pools.values()):

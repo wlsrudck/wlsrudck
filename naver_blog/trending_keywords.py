@@ -447,13 +447,21 @@ def written_titles(blog_id: str) -> list[str]:
     import json
     from generate import my_posts
     titles = [t for t, _ in my_posts(blog_id, limit=200)] + all_titles(blog_id)
-    for f in (Path(__file__).parent / "output").glob("*.json"):
+    # 이 프로그램이 직접 고르고 쓴 글: 저장본의 키워드·제목 (예전엔 제목 칸을 잘못 읽어 하나도 안 들어갔다)
+    for f in (Path(__file__).parent / "output").glob("20??-??-??_*.json"):
         try:
             d = json.loads(f.read_text(encoding="utf-8"))
-            titles.append(d.get("title", "") if isinstance(d, dict) else "")
         except Exception:
-            pass
-    return [t.strip() for t in titles if t and t.strip()]
+            continue
+        if isinstance(d, dict):
+            titles += [d.get("keyword", ""), (d.get("post") or {}).get("title", "") if isinstance(d.get("post"), dict) else ""]
+    # keywords.csv 에서 이미 처리한 키워드 (상태 칸이 찬 줄 = 썼거나 건너뛴 것)
+    try:
+        from main import load_rows
+        titles += [r["keyword"] for r in load_rows() if r.get("status", "").strip()]
+    except Exception:
+        pass
+    return list(dict.fromkeys(t.strip() for t in titles if t and t.strip()))
 
 
 # 영어 약자를 한글 읽는 소리로 (네이버 연관 키워드는 'CJ' 를 '씨제이'처럼 한글로 돌려준다)

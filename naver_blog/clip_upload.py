@@ -58,11 +58,14 @@ LIMIT = 300  # 클립 설명 칸 글자 수 한도 (해시태그도 이 안에 �
 SWITCH = r"""(pat) => {
     // 글자(pat) 옆의 켜기/끄기 스위치를 찾아 표시한다. 이미 켜져 있으면 "on"
     document.querySelectorAll("[data-cu-ai]").forEach(e => e.removeAttribute("data-cu-ai"));
-    const label = [...document.querySelectorAll("*")].find(e => e.children.length <= 3 &&
+    // 글자가 맞는 것 중 가장 안쪽(글자가 가장 짧은) 칸을 고른다 — 바깥 큰 틀을 잡으면 엉뚱한 스위치를 누른다
+    const hits = [...document.querySelectorAll("*")].filter(e => e.children.length <= 3 && e.getClientRects().length &&
         new RegExp(pat).test((e.innerText || "").trim()));
+    hits.sort((a, b) => (a.innerText || "").length - (b.innerText || "").length);
+    const label = hits[0];
     if (!label) return "";
     let box = label;
-    for (let i = 0; i < 5 && box; i++, box = box.parentElement) {
+    for (let i = 0; i < 8 && box; i++, box = box.parentElement) {
         const sw = box.querySelector("[role=switch], input[type=checkbox], button[aria-pressed], button[aria-checked]");
         if (sw) {
             const on = sw.checked || sw.getAttribute("aria-checked") === "true" || sw.getAttribute("aria-pressed") === "true";
@@ -277,7 +280,7 @@ def upload(video: Path) -> None:
         log.append("AI 활용 설정: " + turn_on(page, r"^AI\s*활용\s*설정"))
         shop = shop_info(video)
         if shop:  # 쇼핑 블로그: 광고 표시를 켜고, 쇼핑커넥트 상품을 정보 태그로 붙인다 (수수료를 받는 영상이므로)
-            log.append("광고·협찬 설정: " + turn_on(page, r"^광고\s*[·ㆍ.]?\s*협찬\s*설정"))
+            log.append("광고·협찬 설정: " + turn_on(page, r"^(광고\s*[·ㆍ.,/]?\s*협찬|유료\s*광고|협찬\s*(표시|여부|설정)|광고\s*표시)"))
             try:
                 tag_shop(page, shop, log, click)
             except Exception as e:

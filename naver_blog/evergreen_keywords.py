@@ -184,6 +184,10 @@ def find_evergreen(cfg: dict, keys: dict, plan: list[tuple[str, str]]) -> list[d
     kind_order = {"평생": 0, "시즌": 1, "평생?": 2, "?": 3}
     grade_order = {"S": 0, "A": 1, "B": 2, "?": 3, "C": 4}
     rows = [r for r in rows if r["grade"] != "C"]
+    dup = [r for r in rows if r["written"]]
+    rows = [r for r in rows if not r["written"]]  # 이미 쓴 주제는 목록에서 뺀다 (보여 줘도 고를 일이 없다)
+    if dup:
+        print(f"이미 쓴 글과 겹치는 키워드 {len(dup)}개는 뺐어요 (예: " + ", ".join(r["keyword"] for r in dup[:3]) + ")")
     if is_cs(cfg):  # 고객센터: 같은 등급 안에서 '상황 + 회사' 키워드를 먼저, '회사+고객센터' 틀은 뒤로
         rows.sort(key=lambda r: (grade_order.get(r["grade"], 5), cs_rank(r), kind_order.get(r["kind"], 5), -r["volume"]))
     else:

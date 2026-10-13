@@ -444,7 +444,11 @@ def main():
         rows.append({"keyword": c.keyword, "kind": c.kind, "reason": c.reason, "title": c.title,
                      "volume": vol, "docs": docs.get(c.keyword), "comp": comp, "grade": g,
                      "written": already_written(c.keyword, mine)})
-    rows.sort(key=lambda r: (bool(r["written"]), order[r["grade"]], -(r["volume"] or 0)))  # 이미 쓴 것은 맨 아래로
+    rows.sort(key=lambda r: (order[r["grade"]], -(r["volume"] or 0)))
+    dup = [r for r in rows if r["written"]]
+    rows = [r for r in rows if not r["written"]]  # 이미 쓴 주제는 목록에서 뺀다
+    if dup:
+        print(f"      이미 쓴 글과 겹치는 키워드 {len(dup)}개는 뺐어요 (예: " + ", ".join(r["keyword"] for r in dup[:3]) + ")")
 
     OUTPUT.mkdir(exist_ok=True)
     safe = "".join(ch if ch.isalnum() else "_" for ch in topic)[:30]

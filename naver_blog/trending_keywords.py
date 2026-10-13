@@ -531,7 +531,10 @@ def find_trending(cfg: dict) -> list[dict] | None:
             r["volume"], r["comp"], r["grade"] = None, "", "?"
     order = {"S": 0, "A": 1, "B": 2, "?": 3, "C": 4}
     rows.sort(key=lambda r: (order.get(r["grade"], 5), -(r["volume"] or 0)))
-    return rows
+    dup = [r for r in rows if r.get("written")]
+    if dup:
+        print(f"이미 쓴 글과 겹치는 키워드 {len(dup)}개는 뺐어요 (예: " + ", ".join(r["keyword"] for r in dup[:3]) + ")")
+    return [r for r in rows if not r.get("written")]
 
 
 def main():

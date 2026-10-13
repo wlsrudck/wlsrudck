@@ -463,9 +463,11 @@ _LETTER = {"A": "에이", "B": "비", "C": "씨", "D": "디", "E": "이", "F": "
 # 같은 회사를 부르는 다른 이름 (한쪽으로 모은다)
 _ALIAS = [("대한통운", "씨제이"), ("씨제이씨제이", "씨제이"), ("지에스25", "지에스"), ("지에스편의점", "지에스편의점"),
           ("세븐일레븐", "세븐일레븐"), ("케이티", "케이티"), ("에스케이텔레콤", "에스케이티"), ("엘지유플러스", "엘지유플러스")]
-# 질문 종류를 나타내는 흔한 말 (이걸 빼고 남은 '회사·대상' 이름이 같으면 같은 글로 본다)
-_GENERIC = ["배송조회", "택배", "배송", "조회", "고객센터", "전화번호", "대표번호", "콜센터", "편의점", "운송장", "번호",
-            "보내는법", "보내는방법", "접수"]
+# 회사 이름 뒤에 붙는 말 (빼고 남은 것이 '회사 이름')
+_SUFFIX = ["택배", "편의점", "글로벌로지스", "로지스", "운송장", "번호"]
+# 묻는 것의 종류 — 회사 이름이 같아도 종류가 다르면 다른 글이다 (배송조회 글 ≠ 고객센터 글)
+_KINDS = {"배송조회": ["배송조회", "배송", "조회"], "고객센터": ["고객센터", "전화번호", "대표번호", "콜센터", "상담"],
+          "보내기": ["보내는법", "보내는방법", "접수", "예약"]}
 
 
 def _canon(text: str) -> str:
@@ -486,16 +488,16 @@ def already_written(kw: str, titles: list[str]) -> str:
     # 제목에 그대로 있거나, 키워드의 두 글자 조각 대부분이 한 제목에 들어 있으면 (예: '독감예방접종' ↔ '독감 무료 예방 접종') 쓴 글로 본다
     pieces = {k[i:i + 2] for i in range(len(k) - 1)}
     core = k
-    for g in sorted(_GENERIC, key=len, reverse=True):
-        core = core.replace(g, "")
-    kinds = [g for g in _GENERIC if g in k]
+    for w in sorted([w for ws in _KINDS.values() for w in ws] + _SUFFIX, key=len, reverse=True):
+        core = core.replace(w, "")
+    kinds = {name for name, ws in _KINDS.items() if any(w in k for w in ws)}
     for title in titles:
         t = _canon(title)
         if k in t or (len(pieces) >= 3 and sum(p in t for p in pieces) / len(pieces) >= 0.8
                       and all(n in t for n in re.findall(r"\d+", k))):  # 숫자는 꼭 같아야 (s27 ↔ s25 는 다른 글)
             return title
-        # '씨제이택배배송조회' ↔ 'CJ대한통운 택배 배송조회 …': 회사 이름이 같고, 묻는 것(배송조회·고객센터 등)도 같으면
-        if len(core) >= 2 and kinds and core in t and any(g in t for g in kinds):
+        # '씨제이택배배송조회' ↔ 'CJ대한통운 택배 배송조회 …': 회사 이름이 같고, 묻는 것의 종류(배송조회·고객센터·보내기)도 같으면
+        if len(core) >= 2 and kinds and core in t and any(w in t for name in kinds for w in _KINDS[name]):
             return title
     return ""
 

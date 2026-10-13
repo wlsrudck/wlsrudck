@@ -134,6 +134,10 @@ def fill(cfg: dict, need: int) -> list[str]:
     from evergreen_keywords import is_cs
     raw = cfg.get("cs", {}).get("mix", "gaps,evergreen,season") if is_cs(cfg) else acfg.get("mix", "evergreen,trending")
     mix = [m.strip() for m in str(raw).split(",") if m.strip()]
+    # 매인 블로그: 설정 파일의 비율에 '내 블로그 빈틈'을 하나 더 섞는다 (잘 된 글의 후속 글이 자동으로 나오게)
+    # 끄려면 config.toml [autofill] 에 gaps = false
+    if not is_cs(cfg) and acfg.get("gaps", True) and "gaps" not in mix:
+        mix.append("gaps")
     keys = load_keys()
     if not (keys.get("ad_access_license") and keys.get("ad_secret_key") and keys.get("ad_customer_id")):
         print("  키워드 자동 채우기: naver_keys.txt 에 검색광고 API 키가 없어서 건너뛰어요.")

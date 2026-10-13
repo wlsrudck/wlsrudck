@@ -1,7 +1,8 @@
 """키워드 자동 채우기: keywords.csv 에 쓸 키워드가 떨어지면 프로그램이 알아서 골라 넣는다.
 
 - 평생 키워드(꾸준히 검색되는 것)와 지금 뜨는 키워드를 반반 섞는다 (설정: [autofill] mix)
-  mix 에 season 을 넣으면 이번 달·다음 달 시즌 키워드도 섞는다 (고객센터 블로그 기본: 평생 2 + 시즌 1)
+  mix 에 season 을 넣으면 이번 달·다음 달 시즌 키워드도 섞는다 (고객센터 블로그 기본: 내 블로그 빈틈 1 + 평생 1 + 시즌 1)
+  mix 에 gaps 를 넣으면 이미 쓴 글 전체를 보고 이어 쓸 글·같은 업종 안 쓴 회사를 고른다
   mix 에 news 를 넣으면 네이버 뉴스 많이 본·댓글 많은 기사에서 고른 생활·돈 글감도 섞는다
 - S·A 등급, 이미 쓴 글과 겹치지 않는 것, 가사·쇼핑·이슈성 말이 없는 것만
 - 지금 뜨는 키워드는 연예 쪽보다 생활·경제·IT 쪽을 먼저 고른다
@@ -68,6 +69,16 @@ def season_candidates(cfg: dict, keys: dict) -> list[dict]:
     return out
 
 
+def _gaps(cfg: dict, keys: dict) -> list[dict]:
+    """내 블로그 빈틈: 이미 쓴 글 전체를 보고 이어 쓸 글·아직 안 다룬 같은 업종 회사 (검색량 S·A 만)"""
+    try:
+        from keyword_finder import gap_candidates
+        return gap_candidates(cfg, keys)
+    except Exception as e:
+        print(f"  (빈틈 찾기 실패: {str(e).splitlines()[0][:80]})")
+        return []
+
+
 def spread(rows: list[dict]) -> list[dict]:
     """같은 씨앗(업종)끼리 연달아 오지 않게 번갈아 세운다 (은행 → 택배 → 렌탈 → 은행 …)"""
     groups: dict[str, list[dict]] = {}
@@ -121,7 +132,7 @@ def fill(cfg: dict, need: int) -> list[str]:
     from main import load_rows, save_rows
     acfg = cfg.get("autofill", {})
     from evergreen_keywords import is_cs
-    raw = cfg.get("cs", {}).get("mix", "evergreen,evergreen,season") if is_cs(cfg) else acfg.get("mix", "evergreen,trending")
+    raw = cfg.get("cs", {}).get("mix", "gaps,evergreen,season") if is_cs(cfg) else acfg.get("mix", "evergreen,trending")
     mix = [m.strip() for m in str(raw).split(",") if m.strip()]
     keys = load_keys()
     if not (keys.get("ad_access_license") and keys.get("ad_secret_key") and keys.get("ad_customer_id")):
@@ -132,7 +143,8 @@ def fill(cfg: dict, need: int) -> list[str]:
     pools = {}
     for m in dict.fromkeys(mix):  # "trending,trending,evergreen" 처럼 같은 걸 두 번 적으면 그 비율(2:1)로 섞는다
         pools[m] = (evergreen_candidates(cfg, keys) if m == "evergreen" else news_candidates(cfg) if m == "news"
-                    else season_candidates(cfg, keys) if m == "season" else trending_candidates(cfg))
+                    else season_candidates(cfg, keys) if m == "season" else _gaps(cfg, keys) if m == "gaps"
+                    else trending_candidates(cfg))
     picked: list[dict] = []
     taken: set = set()
     while len(picked) < need and any(pools.values()):

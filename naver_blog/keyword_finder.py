@@ -74,13 +74,22 @@ def _stream_with_retry(client: anthropic.Anthropic, **kwargs):
             time.sleep(30)
 
 
+GAP_TOPIC = """이 블로그에 이미 쓴 글 전체를 보고 '다음에 써야 할 글'을 찾아 주세요 (아래 [이미 쓴 글 제목] 참고).
+1) 이미 다룬 회사·서비스·제도 중 한 가지 질문만 쓴 것 → 사람들이 그다음에 많이 찾는 다른 질문
+   (예: '○○ 고객센터 번호'만 썼으면 → '○○ 해지 위약금', '○○ 상담원 바로 연결', '○○ 환불 기간', '○○ 명의변경')
+2) 이 블로그가 자주 다루는 업종인데 아직 안 쓴 회사·서비스 (같은 업종의 다른 회사)
+3) 앞으로 4~6주 안에 검색이 몰릴 일 중 이 블로그 주제와 맞는 것 (신청·납부 기한, 명절 영업, 제도 변경)
+이미 쓴 글과 같은 질문은 내지 않습니다. reason 에는 어느 기존 글과 이어지는지 또는 어떤 빈틈인지 적습니다."""
+
+
 def find_candidates(topic: str, cfg: dict, blog: str, mine: list[str] | None = None) -> list[Candidate]:
     client = anthropic.Anthropic(api_key=_api_key(), max_retries=4)
     prompt = FIND_PROMPT.format(blog=blog or "정보 블로그", topic=topic, today=dt.date.today().isoformat(),
                                 banned=", ".join(BANNED_WORDS))
     if mine:  # 이미 쓴 글과 같은 주제는 후보로 내지 않게
         prompt += ("\n\n[이 블로그에 이미 쓴 글 제목] 아래와 같은 주제·같은 질문의 키워드는 후보로 내지 않습니다. "
-                   "같은 큰 주제라도 아직 다루지 않은 다른 질문만 고릅니다.\n" + "\n".join(f"- {t}" for t in mine[:150]))
+                   "같은 큰 주제라도 아직 다루지 않은 다른 질문만 고릅니다.\n"
+                   + "\n".join(f"- {t}" for t in mine[:400 if topic == GAP_TOPIC else 150]))
     tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": cfg.get("max_searches", 5),
               "user_location": {"type": "approximate", "country": "KR", "timezone": "Asia/Seoul"}}]
     messages = [{"role": "user", "content": prompt}]
@@ -369,12 +378,36 @@ def season_topic(today: dt.date) -> tuple[str, list[str], str]:
     return f"{m1}~{m2}월 시즌 키워드", seeds, ask
 
 
+def gap_candidates(cfg: dict, keys: dict) -> list[dict]:
+    """키워드 자동 채우기용: 내 블로그 빈틈 후보에 검색량·문서 수 등급을 매겨 S·A 만 (이미 쓴 것 제외)"""
+    from trending_keywords import already_written, written_titles
+    mine = written_titles(cfg["naver"]["blog_id"])
+    cands = find_candidates(GAP_TOPIC, cfg["writing"], cfg["naver"].get("blog_name", ""), mine)
+    words = [c.keyword for c in cands]
+    vols, _ = monthly_volumes(words, keys)
+    out = []
+    for c in cands:
+        vol, comp = vols.get(c.keyword) or (None, "")
+        docs = None
+        if keys.get("search_client_id"):
+            try:
+                docs = blog_doc_count(c.keyword, keys)
+            except Exception:
+                docs = None
+        g = grade(vol, docs, comp)
+        if g in ("S", "A") and not already_written(c.keyword, mine):
+            out.append({"keyword": c.keyword, "volume": vol, "comp": comp, "grade": g, "kind": "빈틈",
+                        "category": "", "seed": c.reason[:10], "written": ""})
+    return out
+
+
 def main():
     cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8-sig"))
     load_keys()  # naver_keys.txt가 없으면 빈 양식을 바로 만들어 둔다
-    args = [a for a in sys.argv[1:] if a != "--season"]
+    gaps = "--gaps" in sys.argv[1:]
+    args = [a for a in sys.argv[1:] if a not in ("--season", "--gaps")]
     season = "--season" in sys.argv[1:]
-    topic = " ".join(args).strip()
+    topic = GAP_TOPIC if gaps else " ".join(args).strip()
     if not topic and not season:
         topic = input("큰 주제를 입력하세요 (예: 청년 지원금, 캠핑, 국내주식 / 엔터 = 이번 달 시즌 키워드): ").strip()
         season = not topic or topic == "시즌"
@@ -396,7 +429,8 @@ def main():
                 cands.append(Candidate(keyword=k, kind="시즌", title="", reason="매년 이 시기에 검색이 몰리는 키워드"))
                 have.add(k.replace(" ", ""))
     else:
-        print(f"[1/3] '{topic}' 최근 소식 확인하고 후보 뽑는 중... (1~2분)")
+        print("[1/3] 내 글 전체를 보고 빈틈(다음에 쓸 글) 찾는 중... (1~2분)" if gaps
+              else f"[1/3] '{topic}' 최근 소식 확인하고 후보 뽑는 중... (1~2분)")
         cands = find_candidates(topic, cfg["writing"], blog, mine)
     print(f"      후보 {len(cands)}개")
 
@@ -408,7 +442,7 @@ def main():
     if all(keys.get(k) for k in ad_keys):
         print("[2/3] 네이버 검색광고로 월 검색량 확인 중...")
         try:
-            volumes, related = monthly_volumes(words, keys, "" if season else topic)
+            volumes, related = monthly_volumes(words, keys, "" if (season or gaps) else topic)
             # 실제 검색량이 있는 연관 키워드를 후보에 더한다
             # (검색 300~3만 회: 찾는 사람은 있고 너무 큰 키워드는 아닌 구간, 광고 경쟁 높음 제외, 최대 15개)
             extra = [r for r in related if 300 <= r[1] <= BIG and r[2] != "높음" and not SHOPPING.search(r[0])][:15]
@@ -451,9 +485,9 @@ def main():
         print(f"      이미 쓴 글과 겹치는 키워드 {len(dup)}개는 뺐어요 (예: " + ", ".join(r["keyword"] for r in dup[:3]) + ")")
 
     OUTPUT.mkdir(exist_ok=True)
-    safe = "".join(ch if ch.isalnum() else "_" for ch in topic)[:30]
+    safe = "내블로그_빈틈" if gaps else "".join(ch if ch.isalnum() else "_" for ch in topic)[:30]
     out = OUTPUT / f"키워드추천_{dt.date.today()}_{safe}.html"
-    out.write_text(to_html(topic, rows, has_numbers, season), encoding="utf-8")
+    out.write_text(to_html("내 블로그 빈틈 (다음에 쓸 글)" if gaps else topic, rows, has_numbers, season), encoding="utf-8")
     print(f"[3/3] 결과 표 저장: {out}")
     for i, r in enumerate(rows, 1):
         nums = "" if r["volume"] is None else f"  검색 {r['volume']:,}"

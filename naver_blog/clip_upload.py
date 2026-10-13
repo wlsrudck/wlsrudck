@@ -68,10 +68,11 @@ SWITCH = r"""(pat) => {
     for (let i = 0; i < 8 && box; i++, box = box.parentElement) {
         const sw = box.querySelector("[role=switch], input[type=checkbox], button[aria-pressed], button[aria-checked]");
         if (sw) {
+            const readable = sw.type === "checkbox" || sw.hasAttribute("aria-checked") || sw.hasAttribute("aria-pressed");
             const on = sw.checked || sw.getAttribute("aria-checked") === "true" || sw.getAttribute("aria-pressed") === "true";
             if (on) return "on";
             sw.setAttribute("data-cu-ai", "1");
-            return "found";
+            return readable ? "found" : "found-blind";  // blind: 켜졌는지 읽을 수 없는 스위치 (다시 누르면 꺼질 수 있다)
         }
     }
     return "";
@@ -277,10 +278,11 @@ def upload(video: Path) -> None:
                 break
         log.append(f"해시태그: 설명 끝에 함께 넣음" if not n_tag else f"해시태그 칸에 {n_tag}개 넣음")
         # AI 활용 설정: 클립 그림·목소리를 AI로 만들었으므로 켠다 (네이버 안내에 맞게 투명하게)
-        log.append("AI 활용 설정: " + turn_on(page, r"^AI\s*활용\s*설정"))
+        log.append("AI 활용 설정: " + turn_on(page, AI_PAT))
         shop = shop_info(video)
         if shop:  # 쇼핑 블로그: 광고 표시를 켜고, 쇼핑커넥트 상품을 정보 태그로 붙인다 (수수료를 받는 영상이므로)
-            log.append("광고·협찬 설정: " + turn_on(page, r"^(광고\s*[·ㆍ.,/]?\s*협찬|유료\s*광고|협찬\s*(표시|여부|설정)|광고\s*표시)"))
+            got = turn_on(page, AD_PAT)
+            log.append("광고·협찬 설정: " + (got if "못 찾음" not in got else "쇼핑커넥트 태그를 붙이면 네이버가 자동으로 켜요"))
             try:
                 tag_shop(page, shop, log, click)
             except Exception as e:
@@ -314,6 +316,9 @@ def upload(video: Path) -> None:
         # 마지막으로 설명이 정말 들어 있는지 다시 본다 (영상이 다 올라가면서 화면이 새로 그려져 지워지는 경우가 있다)
         try:
             ensure_desc(page, desc, log)
+            # 영상 업로드가 끝나며 화면이 다시 그려지면 켜 둔 스위치가 꺼질 수 있다 → 마지막에 다시 확인
+            again = turn_on(page, AI_PAT, recheck=True)
+            log.append("AI 활용 다시 확인: " + ("켜져 있음" if again == "이미 켜져 있음" else again))
         except Exception as e:
             log.append(f"설명 다시 확인 오류: {str(e).splitlines()[0][:60]}")
         save_log(page)
@@ -358,7 +363,11 @@ def ensure_desc(page, desc: str, log: list) -> None:
     log.append("설명 칸을 못 찾음 — 직접 붙여 넣어 주세요")
 
 
-def turn_on(page, pat: str) -> str:
+AI_PAT = r"^AI\s*활용\s*설정"
+AD_PAT = r"^(광고\s*[·ㆍ.,/]?\s*협찬|유료\s*광고|협찬\s*(표시|여부|설정)|광고\s*표시)"
+
+
+def turn_on(page, pat: str, recheck: bool = False) -> str:
     """글자(pat) 옆 스위치를 켠다. 결과 한마디"""
     for fr in page.frames:
         try:
@@ -367,9 +376,23 @@ def turn_on(page, pat: str) -> str:
             got = ""
         if got == "on":
             return "이미 켜져 있음"
+        if got == "found-blind":
+            if recheck:
+                return "켜졌는지 읽을 수 없어요 — 화면에서 한 번 봐 주세요"
+            try:
+                fr.locator("[data-cu-ai]").first.click(timeout=5000)
+                return "켬 (화면에서 한 번 확인해 주세요)"
+            except Exception as e:
+                return f"켜기 실패 ({str(e).splitlines()[0][:40]}) — 직접 켜 주세요"
         if got == "found":
             try:
                 fr.locator("[data-cu-ai]").first.click()
+                page.wait_for_timeout(500)
+                if fr.evaluate(SWITCH, pat) != "on":  # 눌렀는데도 안 켜졌으면 한 번 더
+                    fr.locator("[data-cu-ai]").first.click()
+                    page.wait_for_timeout(500)
+                    if fr.evaluate(SWITCH, pat) != "on":
+                        return "켜기 확인 안 됨 — 직접 켜 주세요"
                 return "켬"
             except Exception as e:
                 return f"켜기 실패 ({str(e).splitlines()[0][:40]})"

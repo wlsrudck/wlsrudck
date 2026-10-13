@@ -299,7 +299,7 @@ def upload(video: Path) -> None:
                 log.append("커버 칸을 못 찾음 (영상 첫 장면이 커버가 돼요)")
         # 카테고리 (1차·2차): 이 블로그에서 전에 고른 것이 있으면 그대로, 처음이면 목록을 보여 주고 번호로 고르게
         try:
-            pick_category(page, log, click, post_title(video) + " " + video.stem)
+            pick_category(page, log, click, post_title(video) + " " + video.stem, shop=bool(shop))
         except Exception as e:
             log.append(f"카테고리 오류: {str(e).splitlines()[0][:60]}")
         # 콘텐츠 링크 → 블로그: 이 영상을 만든 블로그 글을 찾아 연결 (클립을 본 사람이 글로 넘어오게)
@@ -502,7 +502,7 @@ def _first_match(opts: list[str], words: list[str]) -> str:
     return ""
 
 
-def pick_category(page, log, click, topic: str = "") -> None:
+def pick_category(page, log, click, topic: str = "", shop: bool = False) -> None:
     """1차·2차 카테고리. 글 주제에 맞는 것을 화면 선택지에서 찾아 고르고(주제별로 기억),
     못 찾으면 이 블로그에서 전에 고른 것 → 그래도 없으면 번호로 고르게"""
     import json
@@ -511,6 +511,8 @@ def pick_category(page, log, click, topic: str = "") -> None:
     except Exception:
         saved = {}
     group, w1, w2 = topic_group(topic)
+    if shop:  # 쇼핑커넥트 상품 영상: 쇼핑 > 상품리뷰 (주제별 기억보다 먼저)
+        group, w1, w2 = "쇼핑 상품", ["쇼핑"], ["상품리뷰", "리뷰"]
     mem = saved.get("groups", {}).get(group, {}) if group else {}
 
     def choose(opener, want, words, what, fallback=""):

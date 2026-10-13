@@ -403,7 +403,7 @@ def shop_info(video: Path) -> dict:
     """쇼핑 글이면 {name, link}. 아니면 빈 dict"""
     import json
     try:
-        post = json.loads((ROOT / "output" / f"{video.stem}.json").read_text(encoding="utf-8"))["post"]
+        post = json.loads(post_json(video).read_text(encoding="utf-8"))["post"]
     except Exception:
         return {}
     links = [u for u in post.get("shop_links") or [] if u.startswith("http")]
@@ -453,10 +453,21 @@ def tag_shop(page, shop: dict, log, click) -> None:
             pass
 
 
+def post_json(video: Path) -> Path:
+    """영상에 맞는 글 저장본. 글은 어제 쓰고 클립은 오늘 만들면 날짜가 달라서, 같은 키워드의 가장 최근 글을 찾는다"""
+    out = ROOT / "output"
+    f = out / f"{video.stem}.json"
+    if f.exists():
+        return f
+    slug = video.stem.split("_", 1)[-1]
+    same = sorted(out.glob(f"20??-??-??_{slug}.json"), key=lambda p: p.name, reverse=True)
+    return same[0] if same else f
+
+
 def post_title(video: Path) -> str:
     """영상 이름(날짜_키워드)과 같은 이름으로 저장된 글의 제목"""
     import json
-    f = ROOT / "output" / f"{video.stem}.json"
+    f = post_json(video)
     try:
         return json.loads(f.read_text(encoding="utf-8"))["post"]["title"]
     except Exception:

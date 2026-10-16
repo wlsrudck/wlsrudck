@@ -176,24 +176,25 @@ def make_collage(photos: list[Path], out: Path, gap: int = 8) -> Path | None:
 
 
 def _thumb_photo(lines, out, photo: Path, brand: str) -> Path:
+    """사진형 썸네일. 홈판·카톡·검색 화면이 사진 위아래(또는 양옆)를 잘라 보여 주므로 글자는 가운데에 모은다"""
     with Image.open(photo) as src:
         im = ImageOps.fit(ImageOps.exif_transpose(src).convert("RGB"), (1080, 1080), Image.LANCZOS)
-    # 아래쪽으로 갈수록 어두워지는 그라데이션: 흰 글자가 어떤 사진 위에서도 읽히게
+    # 전체를 살짝, 글자가 놓이는 가운데 띠를 더 어둡게: 흰 글자가 어떤 사진 위에서도 읽히게
     shade = Image.new("L", (1, 1080))
     for y in range(1080):
-        t = max(0.0, (y - 300) / 780)
-        shade.putpixel((0, y), int(40 + 190 * t ** 1.3))
+        t = max(0.0, 1 - abs(y - 540) / 420)
+        shade.putpixel((0, y), int(70 + 120 * t ** 1.2))
     im = Image.composite(Image.new("RGB", im.size, "black"), im, shade.resize(im.size))
     d = ImageDraw.Draw(im)
-    size = _fit_size(d, lines, 920, 124)
+    size = _fit_size(d, lines, 900, 132)
     font, line_h = _font(size), int(size * 1.22)
-    y = 1080 - 110 - line_h * len(lines)
-    d.rectangle([80, y - 40, 170, y - 30], fill="white")
+    y = 540 - line_h * len(lines) // 2
+    d.rectangle([500, y - 44, 580, y - 34], fill="white")
     for line in lines:
-        d.text((80, y), line, font=font, fill="white")
+        d.text((540, y), line, font=font, fill="white", anchor="ma", stroke_width=3, stroke_fill="#000000")
         y += line_h
     if brand:
-        d.text((80, 70), brand, font=_font(34), fill=(255, 255, 255))
+        d.text((540, 1000), brand, font=_font(34), fill=(255, 255, 255), anchor="mm")
     im.save(out, quality=92)
     return out
 

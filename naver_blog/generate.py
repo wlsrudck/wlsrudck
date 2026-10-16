@@ -1441,8 +1441,26 @@ def _wrap_line(line: str, width: int = MOBILE_WIDTH) -> list[str]:
     return _wrap_line(line[:cut], width) + _wrap_line(line[cut:], width)
 
 
+_MD = re.compile(r"\*\*|^#{1,6}\s+", re.M)
+
+
+def _strip_md(v):
+    if isinstance(v, str):
+        return _MD.sub("", v)
+    if isinstance(v, list):
+        return [_strip_md(x) for x in v]
+    if isinstance(v, BaseModel):
+        for k in type(v).model_fields:
+            val = getattr(v, k, None)
+            if isinstance(val, (str, list, BaseModel)):
+                setattr(v, k, _strip_md(val))
+    return v
+
+
 def mobile_wrap(post: "Post", width: int = MOBILE_WIDTH) -> None:
-    """본문 문단의 긴 줄을 모바일 폭에 맞게 나눈다. 핵심 한 줄(key_line)은 글자 꾸미기 대상이라 그대로 둔다"""
+    """본문 문단의 긴 줄을 모바일 폭에 맞게 나눈다. 핵심 한 줄(key_line)은 글자 꾸미기 대상이라 그대로 둔다.
+    먼저 마크다운 기호(**굵게**, ## 제목)가 새어 나왔으면 지운다 — 네이버에는 별표가 그대로 찍혀 AI 티가 난다"""
+    _strip_md(post)
     for sec in post.sections:
         keep = sec.key_line.strip()
         new = []

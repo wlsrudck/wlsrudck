@@ -201,7 +201,7 @@ def find_evergreen(cfg: dict, keys: dict, plan: list[tuple[str, str]]) -> list[d
         rows.sort(key=lambda r: (grade_order.get(r["grade"], 5), cs_rank(r), money_rank(r["keyword"]),
                                  kind_order.get(r["kind"], 5), -r["volume"]))
     else:
-        from keyword_finder import money_rank  # 같은 등급이면 돈이 걸린 키워드(신청·조회·보험·대출 …)를 먼저
+        from keyword_finder import money_rank  # 같은 등급이면 돈이 걸린 키워드(보험·대출·세금·지원금 …)를 먼저
         rows.sort(key=lambda r: (grade_order.get(r["grade"], 5), money_rank(r["keyword"]), kind_order.get(r["kind"], 5),
                                  -r["volume"]))
     return rows[:40]

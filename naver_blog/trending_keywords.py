@@ -442,11 +442,67 @@ def related_pool(keyword: str, posts: list[tuple[str, str]], recent: list[tuple[
     return pool
 
 
+def sibling_blogs() -> list[tuple[Path, str]]:
+    """바탕화면의 다른 블로그 폴더 중 '같은 독자를 두고 겹칠 수 있는' 블로그 (폴더, 아이디).
+    매인 ↔ 고객센터는 서로 본다 (같은 지원금·생활정보 글을 두 블로그가 쓰면 비슷한 문서로 묶여 하나가 검색에서 빠진다).
+    쇼핑 블로그는 상품 글이라 겹치지 않으므로 보지도, 보이지도 않는다"""
+    import tomllib
+    here = Path(__file__).parent.resolve()
+
+    def conf(folder: Path) -> dict:
+        try:
+            return tomllib.loads((folder / "config.toml").read_text(encoding="utf-8-sig"))
+        except Exception:
+            return {}
+    if conf(here).get("shopping", {}).get("enabled"):
+        return []
+    out = []
+    for f in sorted(here.parent.glob("*/config.toml")):
+        if f.parent.resolve() == here:
+            continue
+        c = conf(f.parent)
+        bid = str(c.get("naver", {}).get("blog_id", "")).strip()
+        if bid and not c.get("shopping", {}).get("enabled"):
+            out.append((f.parent, bid))
+    return out
+
+
+def sibling_titles() -> list[str]:
+    """다른 블로그(매인↔고객센터)에 이미 있는 글 제목: 그 블로그 최근 글 + 그 폴더의 전체 글 목록·프로그램 저장본"""
+    import json
+    from generate import my_posts
+    titles: list[str] = []
+    for folder, bid in sibling_blogs():
+        try:
+            titles += [t for t, _ in my_posts(bid, limit=200)]
+        except Exception:
+            pass
+        try:  # 그 블로그 프로그램이 하루 한 번 읽어 둔 전체 글 목록
+            d = json.loads((folder / "output" / "my_posts.json").read_text(encoding="utf-8"))
+            if d.get("blog") == bid:
+                titles += [p[0] for p in d["posts"]]
+        except Exception:
+            pass
+        for f in (folder / "output").glob("20??-??-??_*.json"):
+            try:
+                d = json.loads(f.read_text(encoding="utf-8"))
+                if isinstance(d, dict) and isinstance(d.get("post"), dict):
+                    titles += [d.get("keyword", ""), d["post"].get("title", "")]
+            except Exception:
+                continue
+    return titles
+
+
 def written_titles(blog_id: str) -> list[str]:
-    """이미 쓴 글 제목: 내 블로그 최근 글(RSS) + 이 프로그램이 만든 글(output/*.json)"""
+    """이미 쓴 글 제목: 내 블로그 최근 글(RSS) + 이 프로그램이 만든 글(output/*.json)
+    + 겹칠 수 있는 다른 내 블로그(매인↔고객센터)의 글 — 두 블로그가 같은 글로 서로 깎아 먹지 않게"""
     import json
     from generate import my_posts
     titles = [t for t, _ in my_posts(blog_id, limit=200)] + all_titles(blog_id)
+    try:
+        titles += sibling_titles()
+    except Exception:
+        pass
     # 이 프로그램이 직접 고르고 쓴 글: 저장본의 키워드·제목 (예전엔 제목 칸을 잘못 읽어 하나도 안 들어갔다)
     for f in (Path(__file__).parent / "output").glob("20??-??-??_*.json"):
         try:

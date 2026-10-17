@@ -197,9 +197,13 @@ def find_evergreen(cfg: dict, keys: dict, plan: list[tuple[str, str]]) -> list[d
     if dup:
         print(f"이미 쓴 글과 겹치는 키워드 {len(dup)}개는 뺐어요 (예: " + ", ".join(r["keyword"] for r in dup[:3]) + ")")
     if is_cs(cfg):  # 고객센터: 같은 등급 안에서 '상황 + 회사' 키워드를 먼저, '회사+고객센터' 틀은 뒤로
-        rows.sort(key=lambda r: (grade_order.get(r["grade"], 5), cs_rank(r), kind_order.get(r["kind"], 5), -r["volume"]))
+        from keyword_finder import money_rank
+        rows.sort(key=lambda r: (grade_order.get(r["grade"], 5), cs_rank(r), money_rank(r["keyword"]),
+                                 kind_order.get(r["kind"], 5), -r["volume"]))
     else:
-        rows.sort(key=lambda r: (grade_order.get(r["grade"], 5), kind_order.get(r["kind"], 5), -r["volume"]))
+        from keyword_finder import money_rank  # 같은 등급이면 돈이 걸린 키워드(신청·조회·보험·대출 …)를 먼저
+        rows.sort(key=lambda r: (grade_order.get(r["grade"], 5), money_rank(r["keyword"]), kind_order.get(r["kind"], 5),
+                                 -r["volume"]))
     return rows[:40]
 
 

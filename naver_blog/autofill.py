@@ -102,17 +102,57 @@ def trending_candidates(cfg: dict) -> list[dict]:
     good = [r for r in rows if _ok(r)]
     if not cfg.get("autofill", {}).get("entertainment", False):  # 연예·사람 이슈는 금방 식고 사실 확인이 어려워 기본은 뺀다
         good = [r for r in good if ENTERTAINMENT not in (r.get("category") or "")]
-    return good
+    from keyword_finder import money_rank
+    return sorted(good, key=lambda r: money_rank(r["keyword"]))  # 같은 '지금 뜨는' 안에서 돈이 걸린 것 먼저
 
 
 def news_candidates(cfg: dict) -> list[dict]:
     """네이버 뉴스 많이 본·댓글 많은 기사에서 고른 생활·돈 글감 (하루 한 번 읽고 저장해 둔 것을 쓴다)"""
     try:
         from news_trends import find_news
-        return [r for r in find_news(cfg) if r["grade"] == "A" and not r["written"]]
+        from keyword_finder import money_rank
+        return sorted([r for r in find_news(cfg) if r["grade"] == "A" and not r["written"]],
+                      key=lambda r: money_rank(r["keyword"]))
     except Exception as e:
         print(f"  (뉴스 글감 읽기 실패: {str(e).splitlines()[0][:80]})")
         return []
+
+
+def hot_issue(cfg: dict) -> str:
+    """이슈 속도전: 오늘 뉴스에서 뜬 생활·돈 글감 하나를 키워드 목록 '맨 앞'에 넣는다 (매인 블로그, 하루 1개).
+    지원금·요금·제도 변화 같은 이슈는 먼저 쓴 글이 홈판을 가져가므로, 쌓아 둔 키워드가 다 떨어질 때까지 기다리지 않는다.
+    끄려면 config.toml [autofill] 에 hot_issue = false"""
+    import datetime as dt
+    import json
+    from pathlib import Path
+
+    from evergreen_keywords import is_cs
+    if is_cs(cfg) or cfg.get("shopping", {}).get("enabled") or not cfg.get("autofill", {}).get("hot_issue", True):
+        return ""
+    mark = Path(__file__).parent / "output" / "이슈_우선.json"
+    today = str(dt.date.today())
+    try:
+        if json.loads(mark.read_text(encoding="utf-8")).get("date") == today:
+            return ""  # 오늘은 이미 하나 넣었다
+    except Exception:
+        pass
+    from main import load_rows, save_rows
+    rows = load_rows()
+    cands = news_candidates(cfg)
+    if not cands:
+        return ""
+    from trending_keywords import covered_by_posts
+    judged = covered_by_posts([r["keyword"] for r in cands[:10]], cfg)
+    have = {r["keyword"].replace(" ", "") for r in rows}
+    pick = next((r for r in cands if r["keyword"] not in judged and r["keyword"].replace(" ", "") not in have), None)
+    if not pick:
+        return ""
+    save_rows([{"keyword": pick["keyword"], "memo": question_memo(pick["keyword"]), "status": "",
+                "category": pick.get("category", "")}] + rows)
+    mark.parent.mkdir(exist_ok=True)
+    mark.write_text(json.dumps({"date": today, "keyword": pick["keyword"]}, ensure_ascii=False), encoding="utf-8")
+    print(f"⚡ 오늘의 이슈를 맨 앞에 넣었어요: {pick['keyword']} ({pick.get('why', '')}) — 먼저 쓴 글이 홈판을 가져가요")
+    return pick["keyword"]
 
 
 def question_memo(keyword: str) -> str:

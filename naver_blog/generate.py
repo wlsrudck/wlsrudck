@@ -338,6 +338,7 @@ class Post(BaseModel):
     verdict_go: SkipJsonSchema[list[str]] = []  # 그래서 나는? — 이런 분은 바로
     verdict_skip: SkipJsonSchema[list[str]] = []  # 이런 분은 패스
     verdict_first: SkipJsonSchema[str] = ""  # 헷갈리면 여기부터
+    shop_post: SkipJsonSchema[str] = ""  # 매인 글 끝: 같은 상황에 쓰는 내 쇼핑 블로그 글 (제목|주소)
     index_link: SkipJsonSchema[str] = ""  # 구글용 '전체 글 목록' 글 (이름|주소) — 글 끝에 붙여 구글이 목록 글을 찾게
     spots: SkipJsonSchema[list[dict]] = []  # 경험 빈칸 [{section, hint}] — 발행 전에 글쓴이가 채우거나 지운다
     image_style: SkipJsonSchema[str] = ""
@@ -509,6 +510,9 @@ class Post(BaseModel):
             out.append(("text", "\n".join(c.strip() for c in self.closing if c.strip())))
         if self.next_teaser.strip():
             out.append(("text", self.next_teaser.strip()))
+        if self.shop_post and not self.simple:  # 같은 상황에 쓰는 생활템 글 (내 쇼핑 블로그)
+            title, _, url = self.shop_post.partition("|")
+            out.append(("text", f"🛒 이럴 때 같이 보면 좋은 생활템\n▶ {title.strip()}\n{url.strip()}"))
         if end_links:  # 내 블로그 다른 글 (제목|주소)
             lines = ["함께 보면 좋은 글"]
             for item in end_links:

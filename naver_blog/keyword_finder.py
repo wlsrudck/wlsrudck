@@ -258,6 +258,18 @@ BIG = 30000  # 월 검색이 이보다 많으면 '큰 키워드'로 본다
 SHOPPING = re.compile(r"세트|선물|추천|최저가|구매|쿠폰|할인코드|가성비|후기|\d+호$|브랜드|쇼핑")
 
 
+# 돈이 걸린 키워드: 같은 등급이면 먼저 쓴다. 신청·조회·지급일처럼 '행동'하러 온 검색이거나
+# 금융·보험·세금·법률처럼 비싼 광고가 붙는 주제라 같은 조회수에 수익이 크다
+MONEY = re.compile(r"신청|조회|지급일|지급|대상|자격|환급|지원금|장려금|수당|바우처|연금|보험|대출|금리|이자|적금|예금|청약|"
+                   r"세금|세액|공제|연말정산|종합소득|부가세|요금|할인|혜택|보상|보험금|위약금|환불|수수료|과태료|벌금|"
+                   r"상속|증여|소송|변호사|법무|계약|보증금|전세|월세|대출|카드|포인트|캐시백|무료")
+
+
+def money_rank(keyword: str) -> int:
+    """0 = 돈이 걸린 키워드 (같은 등급 안에서 먼저), 1 = 보통"""
+    return 0 if MONEY.search(keyword or "") else 1
+
+
 def grade(volume: int | None, docs: int | None, comp: str = "") -> str:
     """검색량이 제법 있고(수요) 문서가 적을수록(공급 부족) 좋은 키워드.
     문서 수가 없으면(검색 API 키 없음) 검색광고의 경쟁 정도(높음/중간/낮음)로 대신 판단한다."""
@@ -478,7 +490,7 @@ def main():
         rows.append({"keyword": c.keyword, "kind": c.kind, "reason": c.reason, "title": c.title,
                      "volume": vol, "docs": docs.get(c.keyword), "comp": comp, "grade": g,
                      "written": already_written(c.keyword, mine)})
-    rows.sort(key=lambda r: (order[r["grade"]], -(r["volume"] or 0)))
+    rows.sort(key=lambda r: (order[r["grade"]], money_rank(r["keyword"]), -(r["volume"] or 0)))
     try:  # 글자 규칙이 놓친 것까지 사람처럼 한 번 더 판단
         from trending_keywords import covered_by_posts
         for kw, title in covered_by_posts([r["keyword"] for r in rows if not r["written"]],

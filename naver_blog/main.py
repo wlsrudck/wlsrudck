@@ -539,6 +539,12 @@ def main():
     img.setdefault("ai_color", ai_images.CHARACTERS[mode][1])
 
 
+    if mode == "main" and not args.dry_run and not args.make_folders and cfg.get("autofill", {}).get("enabled", True):
+        try:  # 이슈 속도전: 오늘 뜬 생활·돈 이슈 하나를 줄 맨 앞에 (하루 1개, 끄려면 [autofill] hot_issue = false)
+            from autofill import hot_issue
+            hot_issue(cfg)
+        except Exception as e:
+            print(f"  (오늘의 이슈 확인 실패: {str(e).splitlines()[0][:80]})")
     rows = load_rows()
     pending = [r for r in rows if not (r.get("status") or "").strip()]
     if shop.get("enabled") and shop.get("require_link", True):  # 제휴 링크가 없는 상품 글은 수익이 안 잡히므로 기다린다
@@ -744,6 +750,12 @@ def main():
             post.notice = ("이 글은 공개된 공시·기사·증권사 자료를 정리한 참고용이에요. 특정 종목의 매수·매도 추천이 아니니, "
                            "투자 판단과 책임은 본인 기준으로 해 주세요.")
         post.videos = []
+        if mode == "main" and not reused and not post.shop_post:
+            try:  # 같은 상황에 쓰는 내 쇼핑 블로그 글 하나 (홈판 방문자를 수수료로도 받는다, 끄려면 [cross] shop_link = false)
+                from shop_link import pick_shop_post
+                post.shop_post = pick_shop_post(post, keyword, cfg)
+            except Exception as e:
+                print(f"  (쇼핑 블로그 글 연결 건너뜀: {str(e).splitlines()[0][:60]})")
         try:  # 구글용 전체 글 목록 글 주소 ([구글용 글 목록 만들기]에서 저장) → 글 끝에 한 줄
             from google_index import saved_index_url
             iu = saved_index_url()

@@ -189,6 +189,25 @@ _HIDE_PRIVATE = """() => {
 }"""
 
 
+def _quiet_cut(im, target: int, reach: int = 500, need: int = 24) -> int:
+    """target 근처(위로 reach 까지)에서 그림·글 덩어리 사이의 '여백 띠'(색이 거의 같은 줄이 need 줄 넘게 이어진 곳)를
+    찾아 그 가운데서 자른다 — 그림 한가운데·글 줄 사이를 자르지 않게. 못 찾으면 가장 비어 있는 줄"""
+    from PIL import ImageStat
+    g = im.convert("L")
+    run, best, best_v = 0, target, None
+    for y in range(target, max(target - reach, 200), -1):
+        v = ImageStat.Stat(g.crop((0, y, g.width, y + 1))).var[0]
+        if v < 6:
+            run += 1
+            if run >= need:
+                return y + need // 2
+        else:
+            run = 0
+        if best_v is None or v < best_v:
+            best, best_v = y, v
+    return best
+
+
 def for_ddalkkak(parts: list[Path], folder: Path) -> Path:
     """딸깍·다른 AI 에 넣기 좋게: 긴 캡처를 가로 1000 × 세로 1400 이하 JPG 조각으로 (한 장 1MB 안팎)"""
     from PIL import Image
@@ -200,12 +219,14 @@ def for_ddalkkak(parts: list[Path], folder: Path) -> Path:
             im = im.convert("RGB")
             if im.width > 1000:
                 im = im.resize((1000, round(im.height * 1000 / im.width)))
-            for y in range(0, im.height, 1400):
-                piece = im.crop((0, y, im.width, min(im.height, y + 1400)))
-                if piece.height < 80:
-                    continue
-                piece.save(out / f"{n:02}.jpg", quality=82, optimize=True)
-                n += 1
+            y = 0
+            while y < im.height:
+                cut = _quiet_cut(im, y + 1400) if y + 1400 < im.height else im.height
+                piece = im.crop((0, y, im.width, cut))
+                if piece.height >= 80:
+                    piece.save(out / f"{n:02}.jpg", quality=82, optimize=True)
+                    n += 1
+                y = cut
     return out
 
 

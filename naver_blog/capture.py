@@ -302,6 +302,30 @@ def product_photos(url: str, out: Path) -> int:
     return n
 
 
+def ask_buy_link() -> str:
+    """브랜드커넥트에서 [링크 복사] 한 제휴 링크를 받는다 (복사해 두고 엔터 → 클립보드에서 읽음). 없으면 빈 문자열"""
+    print("\n브랜드커넥트 화면에서 [링크 복사]를 누른 뒤 엔터를 치세요. (링크 없이 넘어가려면 그냥 엔터)")
+    typed = input("> ").strip()
+    text = typed
+    if not text.startswith("http"):
+        try:
+            import tkinter
+            r = tkinter.Tk()
+            r.withdraw()
+            text = r.clipboard_get().strip()
+            r.destroy()
+        except Exception:
+            text = ""
+    m = re.search(r"https?://\S+", text)
+    url = m.group(0) if m else ""
+    if url and not re.search(r"naver\.me|naver\.com|brandconnect|smartstore|shopping", url):
+        print(f"  (복사된 주소가 네이버 쇼핑 링크가 아닌 것 같아요: {url[:50]} → 넣지 않았어요)")
+        return ""
+    if url:
+        print(f"  구매 링크 넣었어요: {url}")
+    return url
+
+
 def summarize_product(pieces_dir: Path) -> str:
     """조각 그림들에서 상품 사실만 글로 정리 (딸깍 '초안' 칸에 붙여 넣는 용도). 실패하면 빈 문자열"""
     import base64
@@ -571,9 +595,14 @@ def main():
                 print("  파일 이름이 칸 이름이에요: hero 칸 ← hero.jpg, section_1 칸 ← section_1.jpg ...")
                 print("  (상품이 안 나오는 칸 — 재료·장면 — 은 [개별 생성]으로 AI 그림을 써도 돼요)")
             text = summarize_product(dk)
-            if text:
-                (files[0].parent / "상품정보_정리.txt").write_text(text, encoding="utf-8-sig", newline="\r\n")
-                print("→ '상품정보_정리.txt' 를 열어 통째로 복사해서 딸깍 초안(주제) 칸에 붙여 넣으면 돼요.")
+            link = ask_buy_link()
+            head = (f"■ 구매 링크 (본문에 이 주소를 글자 하나 바꾸지 말고 그대로, 가격 문단 끝과 글 맨 끝에 한 번씩): {link}"
+                    if link else "■ 구매 링크: (브랜드커넥트 [링크 복사] 주소를 여기에 붙여 넣으세요)")
+            ad = "■ 광고 문구 (글 맨 위와 맨 끝에 그대로): 이 포스팅은 네이버 쇼핑 커넥트 활동의 일환으로, 판매 발생 시 수수료를 제공받습니다."
+            (files[0].parent / "상품정보_정리.txt").write_text("\n".join([head, ad, "", text or ""]).strip(),
+                                                           encoding="utf-8-sig", newline="\r\n")
+            print("→ '상품정보_정리.txt' 를 열어 통째로 복사해서 딸깍 초안(주제) 칸에 붙여 넣으면 돼요."
+                  + ("" if link else " (맨 위 '구매 링크' 줄에 링크를 직접 붙여 넣어 주세요)"))
         except Exception as e:
             print(f"(딸깍용 만들기 실패: {str(e).splitlines()[0][:80]})")
     try:

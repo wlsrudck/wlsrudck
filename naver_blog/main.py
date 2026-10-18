@@ -446,6 +446,11 @@ def bump_today():
 def load_config() -> dict:
     """config.toml을 읽는다. 같은 [칸]이 두 번 들어가 있으면(붙여넣다 겹친 경우) 합쳐서 읽는다."""
     text = (ROOT / "config.toml").read_text(encoding="utf-8-sig")
+    # 쇼핑 블로그 이름을 바꿨다 (살림 → 생활템 전체). 설정 파일은 업데이트로 덮어쓰지 않으므로 여기서 한 번 고친다
+    new = text.replace('blog_name = "혼자 사는 살림노트"', 'blog_name = "생활템 고르는 기준"')
+    if new != text:
+        (ROOT / "config.toml").write_text(new, encoding="utf-8")
+        text = new
     try:
         return tomllib.loads(text)
     except tomllib.TOMLDecodeError as e:

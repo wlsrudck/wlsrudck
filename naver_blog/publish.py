@@ -1362,6 +1362,11 @@ def _category_no(page, blog_id: str, name: str) -> int | None:
         cats = json.loads(CATEGORY_CACHE.read_text(encoding="utf-8"))
     except Exception:
         cats = {}
+    try:  # 이름을 바꾼 카테고리는 새 이름으로 (키워드 목록에 예전 이름이 남아 있어도)
+        from shop_categories import RENAMED
+        name = next((new for old, new in RENAMED.items() if _norm_cat(old) == _norm_cat(name)), name)
+    except Exception:
+        pass
     want = _norm_cat(name)
     hit = next((no for n, no in cats.items() if _norm_cat(n) == want), None)
     if hit is None:

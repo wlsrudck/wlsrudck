@@ -161,7 +161,7 @@ def main():
             print("그만둘게요.")
             return
     blog_id = input("쇼핑 블로그 아이디 (blog.naver.com/ 뒤의 글자, 엔터 = rudwlsck): ").strip() or "rudwlsck"
-    blog_name = input("블로그 이름 (엔터 = 혼자 사는 살림노트): ").strip() or "혼자 사는 살림노트"
+    blog_name = input("블로그 이름 (엔터 = 생활템 고르는 기준): ").strip() or "생활템 고르는 기준"
     dst.mkdir(exist_ok=True)
     n = copy_program(dst)
     cfg = dst / "config.toml"

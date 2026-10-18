@@ -77,6 +77,35 @@ def url_variants(url: str) -> list[str]:
             f"https://blog.naver.com/PostView.naver?blogId={bid}&logNo={no}"]
 
 
+# 창 전체가 아니라 '안쪽 상자'가 스크롤되는 화면(브랜드커넥트·쇼핑몰 등): 가장 긴 스크롤 상자를 찾아 둔다
+_FIND_SCROLLER = """() => {
+    if (document.scrollingElement.scrollHeight > innerHeight + 300) return 0;
+    let best = null, bh = 0;
+    for (const el of document.querySelectorAll('body *')) {
+        const oy = getComputedStyle(el).overflowY;
+        if (!/(auto|scroll|overlay)/.test(oy)) continue;
+        if (el.scrollHeight > el.clientHeight + 200 && el.scrollHeight > bh) { best = el; bh = el.scrollHeight; }
+    }
+    window.__scroller = best;
+    return bh;
+}"""
+# 안쪽 상자를 펼쳐서(높이 제한·스크롤 없애기) 페이지 전체 길이로 만든다 → 한 번에 길게 찍힌다
+_UNROLL = """() => {
+    const el = window.__scroller;
+    if (!el) return 0;
+    for (let e = el; e && e !== document.documentElement; e = e.parentElement) {
+        e.style.setProperty('overflow', 'visible', 'important');
+        e.style.setProperty('height', 'auto', 'important');
+        e.style.setProperty('max-height', 'none', 'important');
+    }
+    for (const e of [document.documentElement, document.body]) {
+        e.style.setProperty('overflow', 'visible', 'important');
+        e.style.setProperty('height', 'auto', 'important');
+    }
+    return document.documentElement.scrollHeight;
+}"""
+
+
 class PostGone(Exception):
     pass
 
@@ -121,25 +150,39 @@ def capture(url: str) -> list[Path]:
         if gone:
             browser.close()
             raise PostGone(gone)
+        blog = bool(post_id(url)[0])
+        inner = 0 if blog else page.evaluate(_FIND_SCROLLER)
+        if inner:  # 안쪽 상자가 스크롤되는 화면: 그 상자를 끝까지 내려 늦게 뜨는 사진을 부른 뒤 펼친다
+            print("  (이 화면은 안쪽 상자가 스크롤돼요 → 끝까지 내려서 펼쳐 찍어요)")
+            for _ in range(200):
+                done = page.evaluate("() => { const e = window.__scroller; e.scrollBy(0, 700); "
+                                     "return e.scrollTop + e.clientHeight >= e.scrollHeight - 5; }")
+                page.wait_for_timeout(250)
+                if done:
+                    break
+            page.evaluate("() => { window.__scroller.scrollTop = 0; }")
+            page.wait_for_timeout(800)
+            page.evaluate(_UNROLL)
+            page.wait_for_timeout(1200)
         # 본문 끝까지만 천천히 내려서 사진을 불러온다 (그 아래 댓글·다른 글 목록은 끝없이 늘어나므로 찍지 않는다)
         end = 0
         for _ in range(150):
             end = page.evaluate(BODY_END)
             h = page.evaluate("document.documentElement.scrollHeight")
             y = page.evaluate("window.scrollY + window.innerHeight")
-            if (end and y >= end + 300) or y >= h - 5:
+            if (blog and end and y >= end + 300) or y >= h - 5:
                 break
             page.mouse.wheel(0, 700)
             page.wait_for_timeout(300)
         page.wait_for_timeout(800)
-        end = page.evaluate(BODY_END)
+        end = page.evaluate(BODY_END) if blog else 0  # 블로그 글이 아닌 화면(상품 페이지 등)은 끝까지 다 찍는다
         page.evaluate("window.scrollTo(0, 0)")
         page.wait_for_timeout(1000)
         # 위·아래에 붙어 다니는 메뉴 막대가 그림마다 겹치지 않게 숨긴다
         page.add_style_tag(content="[class*='floating'],[class*='Floating'],[class*='app_banner'],[class*='AppBanner']"
                                    "{display:none !important}")
         total = page.evaluate("document.documentElement.scrollHeight")
-        total = min(total, end + 60) if end else min(total, MAX_H)
+        total = min(total, end + 60) if end else min(total, MAX_H if blog else MAX_H * 2)
         y, n = 0, 1
         while y < total:
             h = min(PART_H, total - y)

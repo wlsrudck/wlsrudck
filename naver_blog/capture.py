@@ -209,6 +209,20 @@ def for_ddalkkak(parts: list[Path], folder: Path) -> Path:
     return out
 
 
+def slot_photos(src: Path, out: Path, slots: int = 5) -> int:
+    """딸깍 이미지 칸 이름대로 딱 몇 장만: hero = 대표 사진 1번, section_1~ = 나머지 대표·상세 사진 순서대로"""
+    import shutil
+    out.mkdir(exist_ok=True)
+    for old in out.glob("*"):
+        old.unlink()
+    num = lambda p: int(re.sub(r"\D", "", p.stem) or 0)
+    photos = sorted(src.glob("대표_*"), key=num) + sorted(src.glob("상세_*"), key=num)
+    names = ["hero"] + [f"section_{i}" for i in range(1, slots)]
+    for name, p in zip(names, photos):
+        shutil.copy(p, out / f"{name}{p.suffix}")
+    return min(len(photos), slots)
+
+
 def product_photos(url: str, out: Path) -> int:
     """글쓰기 때 쓰는 상품 읽기로 진짜 상품 사진(대표 사진 + 상세페이지에서 고른 장면)을 받아 둔다. 받은 장수"""
     try:
@@ -498,8 +512,10 @@ def main():
             print("상세페이지 글자를 상품 정보로 정리하는 중 (Claude)...")
             got = product_photos(url, files[0].parent / "딸깍용_사진")
             if got:
-                print(f"딸깍 이미지 칸(파일 선택)에 넣을 진짜 상품 사진 {got}장: {files[0].parent / '딸깍용_사진'}")
-                print("  hero(대표) ← 대표_1, section 칸들 ← 상세_ 사진. AI 로 상품을 새로 그리면 실제와 다른 상품이 돼요.")
+                pick = slot_photos(files[0].parent / "딸깍용_사진", files[0].parent / "딸깍_이것만")
+                print(f"\n★ 딸깍 이미지 칸에는 '딸깍_이것만' 폴더의 {pick}장만 쓰면 돼요: {files[0].parent / '딸깍_이것만'}")
+                print("  파일 이름이 칸 이름이에요: hero 칸 ← hero.jpg, section_1 칸 ← section_1.jpg ...")
+                print("  (상품이 안 나오는 칸 — 재료·장면 — 은 [개별 생성]으로 AI 그림을 써도 돼요)")
             text = summarize_product(dk)
             if text:
                 (files[0].parent / "상품정보_정리.txt").write_text(text, encoding="utf-8-sig", newline="\r\n")

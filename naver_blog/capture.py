@@ -168,10 +168,94 @@ def write_debug(page, folder: Path, inner: int) -> None:
         pass
 
 
+PAGE_W = 1000  # 상품 페이지는 PC 화면 폭으로 (상세페이지 그림이 이 폭에 맞춰 만들어져 있다)
+
+
+def capture_page(url: str, folder: Path) -> list[Path]:
+    """블로그 글이 아닌 화면(상품 페이지 등): 글쓰기 때 상품을 읽는 방식 그대로 연다 —
+    보이는 브라우저(숨은 브라우저는 상품 화면이 짧게 나오는 경우가 있다)·PC 폭·로그인으로 열고,
+    '상세정보 펼쳐보기'를 누르고 끝까지 내려 사진을 다 불러온 다음, 안쪽 상자·작은 창까지 펼쳐서 찍는다"""
+    from playwright.sync_api import sync_playwright
+
+    from shop_fetch import _EXPAND
+    saved: list[Path] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False, args=["--window-position=-2400,0"])  # 화면 밖에 띄운다
+        ctx = browser.new_context(storage_state=str(STATE) if STATE.exists() else None, locale="ko-KR",
+                                  viewport={"width": PAGE_W, "height": 1400})
+        page = ctx.new_page()
+        print(f"  여는 주소: {url}" + (" (로그인)" if STATE.exists() else ""))
+        try:
+            page.goto(url, wait_until="commit", timeout=60000)
+        except Exception:
+            pass
+        for _ in range(30):
+            page.wait_for_timeout(500)
+            try:
+                if page.evaluate("() => document.title.length > 3 && document.body && document.body.innerText.length > 200"):
+                    break
+            except Exception:
+                pass
+        page.wait_for_timeout(2500)
+        for _ in range(6):
+            page.mouse.wheel(0, 1400)
+            page.wait_for_timeout(700)
+        opened = 0
+        try:
+            opened = page.evaluate(_EXPAND)
+            if opened:
+                print("  ('상세정보 펼쳐보기'를 눌렀어요)")
+                page.wait_for_timeout(1500)
+        except Exception:
+            pass
+        bottom = 0
+        for _ in range(80):  # 끝까지 내려 가며 늦게 뜨는 상세 그림을 부른다
+            page.mouse.wheel(0, 1500)
+            page.wait_for_timeout(450)
+            try:
+                if page.evaluate("() => scrollY + innerHeight >= document.documentElement.scrollHeight - 20"):
+                    bottom += 1
+                    if bottom >= 3:
+                        break
+                else:
+                    bottom = 0
+            except Exception:
+                break
+        inner = page.evaluate(_FIND_SCROLLER)
+        if inner:
+            print("  (이 화면은 안쪽 상자가 스크롤돼요 → 끝까지 내려서 펼쳐 찍어요)")
+            for _ in range(200):
+                done = page.evaluate("() => { const e = window.__scroller; e.scrollBy(0, 900); "
+                                     "return e.scrollTop + e.clientHeight >= e.scrollHeight - 5; }")
+                page.wait_for_timeout(250)
+                if done:
+                    break
+            page.evaluate("() => { window.__scroller.scrollTop = 0; }")
+            page.evaluate(_UNROLL)
+        unroll_frames(page)
+        page.evaluate("window.scrollTo(0, 0)")
+        page.wait_for_timeout(1200)
+        write_debug(page, folder, inner)
+        total = min(page.evaluate("document.documentElement.scrollHeight"), 60000)
+        print(f"  페이지 길이 {total}픽셀 → 나눠서 찍는 중")
+        y, n, part = 0, 1, 3000
+        while y < total:
+            h = min(part, total - y)
+            out = folder / f"{n:02}.png"
+            page.screenshot(path=str(out), full_page=True, clip={"x": 0, "y": y, "width": PAGE_W, "height": h})
+            saved.append(out)
+            y += h
+            n += 1
+        browser.close()
+    return saved
+
+
 def capture(url: str) -> list[Path]:
     from playwright.sync_api import sync_playwright
     folder = OUT / dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     folder.mkdir(parents=True, exist_ok=True)
+    if not post_id(url)[0] and "blog.naver.com" not in url:
+        return capture_page(url, folder)
     saved: list[Path] = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)

@@ -120,6 +120,54 @@ GONE = [(r"삭제되었|삭제된 게시물|존재하지 않는 게시물|찾을
          "로그인이 필요한 글이에요. [네이버 로그인]을 다시 한 뒤 찍어 주세요.")]
 
 
+def unroll_frames(page) -> int:
+    """페이지 안의 작은 창(iframe)마다: 안을 끝까지 내려 사진을 부르고, 창 높이를 안쪽 내용 길이로 늘린다. 늘린 창 수"""
+    grown = 0
+    for _ in range(2):  # 창 안에 창이 있을 수 있어 두 번
+        for fr in page.frames[1:]:
+            try:
+                el = fr.frame_element()
+                box = el.bounding_box()
+                if not box or box["height"] < 150 or box["width"] < 200:
+                    continue
+                for _ in range(80):
+                    done = fr.evaluate("() => { const e = document.scrollingElement; e.scrollBy(0, 900); "
+                                       "return e.scrollTop + innerHeight >= e.scrollHeight - 5; }")
+                    page.wait_for_timeout(200)
+                    if done:
+                        break
+                fr.evaluate("() => { document.scrollingElement.scrollTop = 0; }")
+                h = fr.evaluate("() => Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)")
+                if h > box["height"] + 50:
+                    el.evaluate("(e, h) => { e.style.setProperty('height', h + 'px', 'important'); "
+                                "e.style.setProperty('max-height', 'none', 'important'); "
+                                "e.setAttribute('scrolling', 'no'); }", h)
+                    grown += 1
+            except Exception:
+                continue
+        page.wait_for_timeout(800)
+    if grown:
+        print(f"  (페이지 안의 작은 창 {grown}개를 내용 길이만큼 늘려서 찍어요)")
+    return grown
+
+
+def write_debug(page, folder: Path, inner: int) -> None:
+    """찍기 전 화면 구조를 남긴다 (잘려 찍히면 이 파일을 보내 주면 원인을 바로 안다)"""
+    try:
+        info = page.evaluate("""() => ({doc: document.documentElement.scrollHeight, view: innerHeight,
+            frames: [...document.querySelectorAll('iframe')].map(f => ({src: (f.src || '').slice(0, 80),
+                h: Math.round(f.getBoundingClientRect().height)})),
+            scrollers: [...document.querySelectorAll('body *')].filter(e => /(auto|scroll|overlay)/.test(getComputedStyle(e).overflowY)
+                && e.scrollHeight > e.clientHeight + 100).slice(0, 10).map(e => ({tag: e.tagName, cls: String(e.className).slice(0, 60),
+                h: e.clientHeight, sh: e.scrollHeight}))})""")
+        lines = [f"페이지 길이 {info['doc']} / 화면 {info['view']} / 안쪽 상자 {inner}",
+                 *[f"작은 창: 높이 {f['h']} {f['src']}" for f in info["frames"]],
+                 *[f"스크롤 상자: {x['tag']}.{x['cls']} 보이는 {x['h']} / 전체 {x['sh']}" for x in info["scrollers"]]]
+        (folder / "찍기_정보.txt").write_text("\n".join(lines), encoding="utf-8-sig")
+    except Exception:
+        pass
+
+
 def capture(url: str) -> list[Path]:
     from playwright.sync_api import sync_playwright
     folder = OUT / dt.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -164,6 +212,9 @@ def capture(url: str) -> list[Path]:
             page.wait_for_timeout(800)
             page.evaluate(_UNROLL)
             page.wait_for_timeout(1200)
+        if not blog:  # 상품 상세가 '페이지 안의 작은 창(iframe)'에 들어 있으면 그 창을 내용 길이만큼 늘린다
+            unroll_frames(page)
+            write_debug(page, folder, inner)
         # 본문 끝까지만 천천히 내려서 사진을 불러온다 (그 아래 댓글·다른 글 목록은 끝없이 늘어나므로 찍지 않는다)
         end = 0
         for _ in range(150):

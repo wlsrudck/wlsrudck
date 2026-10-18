@@ -147,6 +147,39 @@ def read_detail_images(srcs: list[str], referer: str, model: str, img_dir: Path 
     return text, saved
 
 
+# 글에 들어가면 안 되는 화면 글자: 제휴 수수료·링크 발급 안내 (브랜드커넥트 화면). 독자와 상관없고, 수수료가 글에 나오면 곤란하다
+_PRIVATE = re.compile(r"수수료|링크\s*복사|링크\s*발급|발급\s*시\s*주의|심사지침|기재방법|제휴|커미션|정산|파트너")
+
+
+def clean_page_text(text: str) -> str:
+    out, skip = [], False
+    for l in text.splitlines():
+        if _PRIVATE.search(l):
+            skip = True  # 바로 다음 줄의 값('5%' 같은)도 함께 뺀다
+            continue
+        if skip and re.fullmatch(r"\s*[\d.,]+\s*%?\s*(원)?\s*", l):
+            skip = False
+            continue
+        skip = False
+        out.append(l)
+    return "\n".join(out)
+
+
+def brandconnect_info(text: str) -> dict:
+    """브랜드커넥트 상품 화면: '상품 정보' 아래 줄이 판매처(…브랜드스토어), 그다음 줄이 상품명"""
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    try:
+        i = next(n for n, l in enumerate(lines) if l.replace(" ", "") == "상품정보")
+    except StopIteration:
+        return {}
+    rest = lines[i + 1:i + 6]
+    store = next((l for l in rest if re.search(r"스토어|공식|몰$", l)), "")
+    after = rest[rest.index(store) + 1:] if store else rest
+    name = next((l for l in after if len(l) >= 6 and not re.match(r"^[\d.,\s%원|리뷰]+$", l) and "리뷰" not in l), "")
+    brand = re.sub(r"\s*(브랜드스토어|공식스토어|스마트스토어|공식몰)$", "", store).strip()
+    return {"name": name, "brand": brand}
+
+
 def fetch_product(url: str, img_dir: Path, headless: bool = False, model: str = "") -> dict:
     """{'name','price','brand','url','facts'(글쓰기 자료 글자),'images'[Path]}. 못 읽으면 예외"""
     with sync_playwright() as p:
@@ -202,11 +235,18 @@ def fetch_product(url: str, img_dir: Path, headless: bool = False, model: str = 
     brand = str((brand.get("name") if isinstance(brand, dict) else brand) or "").strip()
     if not name:
         raise RuntimeError("상품 페이지를 읽지 못했어요 (상품명 없음)")
-    m = re.search(r"리뷰\s*([\d,.]+\s*만?)", d.get("text") or "")
+    text = clean_page_text(d.get("text") or "")
+    bc = brandconnect_info(text) if "brandconnect" in (d.get("url") or url) else {}
+    if bc.get("name") and (not name or re.search(r"brand\s*connect|브랜드\s*커넥트|^네이버", name, re.I)):
+        name = bc["name"]
+    brand = brand or bc.get("brand", "")
+    m = re.search(r"리뷰\s*([\d,.]+\s*만?)", text)
     reviews = m.group(1).strip() if m else ""
-    if not price:  # 브랜드커넥트 상품 화면처럼 메타 정보가 없으면 화면 글자에서 판매가를 찾는다
-        m = re.search(r"(?:판매가|할인가|최종가)\s*(?:\d+\s*%\s*)?([\d,]{3,})\s*원", d.get("text") or "") or \
-            re.search(r"([\d,]{4,})\s*원", d.get("text") or "")
+    m = re.search(r"(?<![\d.])([1-5]\.\d{1,2})\s*\n?\s*\|?\s*리뷰", text)
+    rating = m.group(1) if m else ""
+    if not price:  # 브랜드커넥트 상품 화면처럼 메타 정보가 없으면 화면 글자에서 찾는다 (할인가 → 최종가 → 판매가 순)
+        m = (re.search(r"(?:할인가|최종가)\s*(?:\d+\s*%\s*)?([\d,]{3,})\s*원", text)
+             or re.search(r"판매가\s*(?:\d+\s*%\s*)?([\d,]{3,})\s*원", text) or re.search(r"([\d,]{4,})\s*원", text))
         price = m.group(1).replace(",", "") if m else ""
 
     # 대표 이미지: og:image 먼저, 그다음 화면 위쪽(상품 사진 영역)의 큰 사진
@@ -251,11 +291,12 @@ def fetch_product(url: str, img_dir: Path, headless: bool = False, model: str = 
         f"가격(읽은 시점 기준, 바뀔 수 있음): {price}원" if price else "",
         f"판매 페이지 요약: {str(d.get('desc') or '').strip()}" if d.get("desc") else "",
         f"리뷰 수: {reviews}" if reviews else "",
+        f"평점: {rating}점 (5점 만점, 판매 페이지 표시 기준)" if rating else "",
         f"상세페이지 그림에서 읽은 내용:\n{detail_text}" if detail_text else "",
         "판매 페이지 글자(상세 설명·옵션·리뷰 요약 등, 베껴 쓰지 말고 사실만 골라 쓸 것):",
-        d.get("text", "")[:9000],
+        text[:9000],
     ] if x)
-    return {"name": name, "price": price, "brand": brand, "reviews": reviews, "url": d.get("url", url), "facts": facts, "images": images,
+    return {"name": name, "price": price, "brand": brand, "reviews": reviews, "rating": rating, "url": d.get("url", url), "facts": facts, "images": images,
             "detail_read": bool(detail_text), "detail_photos": len(detail_photos)}
 
 

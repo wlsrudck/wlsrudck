@@ -1,1 +1,1 @@
-VERSION = "305"
+VERSION = "306"

@@ -251,7 +251,11 @@ def fetch_product(url: str, img_dir: Path, headless: bool = False, model: str = 
 
     # 대표 이미지: og:image 먼저, 그다음 화면 위쪽(상품 사진 영역)의 큰 사진
     srcs = []
-    for s in [d.get("image") or ""] + [i["src"] for i in sorted(d.get("imgs", []), key=lambda i: i["top"])]:
+    og = d.get("image") or ""
+    # 브랜드커넥트 화면의 og:image 는 상품이 아니라 'BRAND CONNECT' 로고다 → 빼고 화면 속 상품 사진만
+    if "brandconnect" in (d.get("url") or url) or re.search(r"logo|og_?image|default|brand_?connect", og, re.I):
+        og = ""
+    for s in [og] + [i["src"] for i in sorted(d.get("imgs", []), key=lambda i: i["top"])]:
         key = re.sub(r"\?.*$", "", s)
         if s and key not in {re.sub(r"\?.*$", "", x) for x in srcs}:
             srcs.append(s)

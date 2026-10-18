@@ -209,6 +209,30 @@ def for_ddalkkak(parts: list[Path], folder: Path) -> Path:
     return out
 
 
+def _ahash(p: Path):
+    try:
+        from PIL import Image
+        with Image.open(p) as im:
+            g = im.convert("L").resize((8, 8))
+        px = list(g.getdata())
+        avg = sum(px) / 64
+        return sum(1 << i for i, v in enumerate(px) if v > avg)
+    except Exception:
+        return None
+
+
+def _looks_like_logo(p: Path) -> bool:
+    """로고·배너 그림(색이 몇 가지뿐인 평평한 그림)인지: 'BRAND CONNECT' 주황 로고 같은 것"""
+    try:
+        from PIL import Image
+        with Image.open(p) as im:
+            colors = im.convert("RGB").resize((64, 64)).getcolors(4096) or []
+        top = sorted(colors, reverse=True)[:2]
+        return sum(c for c, _ in top) / 4096 > 0.85  # 두 가지 색이 85% 넘게 차지
+    except Exception:
+        return False
+
+
 def slot_photos(src: Path, out: Path, slots: int = 5) -> int:
     """딸깍 이미지 칸 이름대로 딱 몇 장만: hero = 대표 사진 1번, section_1~ = 나머지 대표·상세 사진 순서대로"""
     import shutil
@@ -217,6 +241,15 @@ def slot_photos(src: Path, out: Path, slots: int = 5) -> int:
         old.unlink()
     num = lambda p: int(re.sub(r"\D", "", p.stem) or 0)
     photos = sorted(src.glob("대표_*"), key=num) + sorted(src.glob("상세_*"), key=num)
+    photos = [p for p in photos if not _looks_like_logo(p)]
+    keep, seen = [], []
+    for p in photos:  # 거의 같은 사진(같은 상품 컷 두 번)은 한 장만
+        h = _ahash(p)
+        if h is not None and any(bin(h ^ x).count("1") <= 6 for x in seen):
+            continue
+        seen += [h] if h is not None else []
+        keep.append(p)
+    photos = keep
     names = ["hero"] + [f"section_{i}" for i in range(1, slots)]
     for name, p in zip(names, photos):
         shutil.copy(p, out / f"{name}{p.suffix}")

@@ -209,6 +209,31 @@ def for_ddalkkak(parts: list[Path], folder: Path) -> Path:
     return out
 
 
+def product_photos(url: str, out: Path) -> int:
+    """글쓰기 때 쓰는 상품 읽기로 진짜 상품 사진(대표 사진 + 상세페이지에서 고른 장면)을 받아 둔다. 받은 장수"""
+    try:
+        from shop_fetch import fetch_product_safe
+        cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8-sig"))
+        print("진짜 상품 사진 고르는 중 (상품 페이지를 한 번 더 열어요)...")
+        d = fetch_product_safe(url, out, model=cfg.get("writing", {}).get("model", ""))
+    except Exception as e:
+        print(f"  (상품 사진 받기 실패: {str(e).splitlines()[0][:60]})")
+        return 0
+    n = 0
+    for p in d.get("images", []):
+        p = Path(p)
+        if not p.exists():
+            continue
+        m = re.match(r"(product|detail)_(\d+)", p.stem)
+        name = (f"대표_{m.group(2)}" if m and m.group(1) == "product" else f"상세_{m.group(2)}") if m else p.stem
+        try:
+            p.rename(p.with_name(name + p.suffix))
+            n += 1
+        except Exception:
+            pass
+    return n
+
+
 def summarize_product(pieces_dir: Path) -> str:
     """조각 그림들에서 상품 사실만 글로 정리 (딸깍 '초안' 칸에 붙여 넣는 용도). 실패하면 빈 문자열"""
     import base64
@@ -471,6 +496,10 @@ def main():
             dk = for_ddalkkak(files, files[0].parent)
             print(f"\n딸깍에 넣을 조각: {dk} ({len(list(dk.glob('*.jpg')))}장, 장마다 가볍게 줄였어요)")
             print("상세페이지 글자를 상품 정보로 정리하는 중 (Claude)...")
+            got = product_photos(url, files[0].parent / "딸깍용_사진")
+            if got:
+                print(f"딸깍 이미지 칸(파일 선택)에 넣을 진짜 상품 사진 {got}장: {files[0].parent / '딸깍용_사진'}")
+                print("  hero(대표) ← 대표_1, section 칸들 ← 상세_ 사진. AI 로 상품을 새로 그리면 실제와 다른 상품이 돼요.")
             text = summarize_product(dk)
             if text:
                 (files[0].parent / "상품정보_정리.txt").write_text(text, encoding="utf-8-sig", newline="\r\n")

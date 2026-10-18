@@ -171,6 +171,77 @@ def write_debug(page, folder: Path, inner: int) -> None:
 PAGE_W = 1000  # 상품 페이지는 PC 화면 폭으로 (상세페이지 그림이 이 폭에 맞춰 만들어져 있다)
 
 
+_HIDE_PRIVATE = """() => {
+    const bad = /^(수수료|링크\\s*복사|링크\\s*발급\\s*시\\s*주의사항)/;
+    for (const el of document.querySelectorAll('body *')) {
+        const t = (el.innerText || '').trim();
+        if (!t || t.length > 40 || !bad.test(t)) continue;
+        // 그 글자가 든 줄(또는 안내 상자)을 통째로 가린다. 페이지 전체(body)나 큰 덩어리까지는 올라가지 않는다
+        const limit = /주의사항/.test(t) ? 700 : 160;
+        let box = el;
+        while (box.parentElement && box.parentElement !== document.body) {
+            const r = box.parentElement.getBoundingClientRect();
+            if (r.height > limit) break;
+            box = box.parentElement;
+        }
+        box.style.setProperty('visibility', 'hidden', 'important');
+    }
+}"""
+
+
+def for_ddalkkak(parts: list[Path], folder: Path) -> Path:
+    """딸깍·다른 AI 에 넣기 좋게: 긴 캡처를 가로 1000 × 세로 1400 이하 JPG 조각으로 (한 장 1MB 안팎)"""
+    from PIL import Image
+    out = folder / "딸깍용"
+    out.mkdir(exist_ok=True)
+    n = 1
+    for p in parts:
+        with Image.open(p) as im:
+            im = im.convert("RGB")
+            if im.width > 1000:
+                im = im.resize((1000, round(im.height * 1000 / im.width)))
+            for y in range(0, im.height, 1400):
+                piece = im.crop((0, y, im.width, min(im.height, y + 1400)))
+                if piece.height < 80:
+                    continue
+                piece.save(out / f"{n:02}.jpg", quality=82, optimize=True)
+                n += 1
+    return out
+
+
+def summarize_product(pieces_dir: Path) -> str:
+    """조각 그림들에서 상품 사실만 글로 정리 (딸깍 '초안' 칸에 붙여 넣는 용도). 실패하면 빈 문자열"""
+    import base64
+    try:
+        import anthropic
+
+        from generate import _api_key
+        cfg = tomllib.loads((ROOT / "config.toml").read_text(encoding="utf-8-sig"))
+        model = cfg.get("writing", {}).get("model", "")
+        files = sorted(pieces_dir.glob("*.jpg"))
+        if not files or not model:
+            return ""
+        step = max(1, -(-len(files) // 14))  # 많으면 고르게 14장까지
+        content = []
+        for k, f in enumerate(files[::step], 1):
+            content += [{"type": "text", "text": f"조각 {k}:"},
+                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                                     "data": base64.standard_b64encode(f.read_bytes()).decode()}}]
+        content.append({"type": "text", "text": (
+            "위 그림들은 한 상품의 판매 페이지를 위에서부터 차례로 자른 것입니다. 블로그 글 자료로 쓸 상품 사실만 한국어로 정리하세요.\n"
+            "- 항목: 상품명, 브랜드, 가격(할인가 기준, '읽은 시점 기준'), 평점·리뷰 수, 구성·용량, 성분·소재, 특징, 사용법, 주의사항, 인증·시험 결과\n"
+            "- 그림에 글자로 분명히 적힌 것만. 짐작·꾸밈 금지. '1위·100%·최고' 같은 홍보 문구는 '(판매처 주장)'을 붙입니다.\n"
+            "- 시험 결과는 시험 기관·대상·기간이 적혀 있으면 함께 적습니다.\n"
+            "- 제휴 수수료·링크 발급 안내는 쓰지 않습니다.\n"
+            "- 짧은 줄 목록으로, 항목 이름 앞에 ■ 를 붙입니다.")})
+        client = anthropic.Anthropic(api_key=_api_key(), max_retries=3)
+        res = client.messages.create(model=model, max_tokens=2500, messages=[{"role": "user", "content": content}])
+        return "".join(b.text for b in res.content if b.type == "text").strip()
+    except Exception as e:
+        print(f"  (상품 정보 글로 정리하기 실패: {str(e).splitlines()[0][:60]})")
+        return ""
+
+
 def capture_page(url: str, folder: Path) -> list[Path]:
     """블로그 글이 아닌 화면(상품 페이지 등): 글쓰기 때 상품을 읽는 방식 그대로 연다 —
     보이는 브라우저(숨은 브라우저는 상품 화면이 짧게 나오는 경우가 있다)·PC 폭·로그인으로 열고,
@@ -236,6 +307,7 @@ def capture_page(url: str, folder: Path) -> list[Path]:
         page.evaluate("window.scrollTo(0, 0)")
         page.wait_for_timeout(1200)
         write_debug(page, folder, inner)
+        page.evaluate(_HIDE_PRIVATE)  # 수수료·링크 발급 안내는 찍지 않는다 (딸깍·글에 들어가면 곤란)
         total = min(page.evaluate("document.documentElement.scrollHeight"), 60000)
         print(f"  페이지 길이 {total}픽셀 → 나눠서 찍는 중")
         y, n, part = 0, 1, 3000
@@ -394,6 +466,17 @@ def main():
     if not files:
         print("찍힌 게 없어요.")
         return
+    if not post_id(url)[0] and "blog.naver.com" not in url:  # 상품 페이지: 딸깍에 넣기 좋은 조각 + 글 정리
+        try:
+            dk = for_ddalkkak(files, files[0].parent)
+            print(f"\n딸깍에 넣을 조각: {dk} ({len(list(dk.glob('*.jpg')))}장, 장마다 가볍게 줄였어요)")
+            print("상세페이지 글자를 상품 정보로 정리하는 중 (Claude)...")
+            text = summarize_product(dk)
+            if text:
+                (files[0].parent / "상품정보_정리.txt").write_text(text, encoding="utf-8-sig", newline="\r\n")
+                print("→ '상품정보_정리.txt' 를 열어 통째로 복사해서 딸깍 초안(주제) 칸에 붙여 넣으면 돼요.")
+        except Exception as e:
+            print(f"(딸깍용 만들기 실패: {str(e).splitlines()[0][:80]})")
     try:
         one = contact_sheet(files)
     except Exception as e:

@@ -1126,19 +1126,34 @@ _MARK_SEARCH = """(scope) => {
     t.setAttribute("data-nb-pick", "1");
     return (t.className || "input") + " | " + (t.placeholder || "");
 }"""
-_MARK_FIRST_RESULT = """() => {
+_MARK_FIRST_RESULT = """([query, kind]) => {
     document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
     const vis = e => e.getClientRects().length > 0 && e.getBoundingClientRect().height > 30;
-    // 결과 목록: 그림(포스터)이 있는 항목 중 맨 위
+    const nz = t => (t || "").toLowerCase().replace(/시즌\\s*/g, "").replace(/[^\\p{L}\\p{N}]/gu, "");
+    const grams = t => { const s = nz(t), out = new Set(); for (let i = 0; i < s.length - 1; i++) out.add(s.slice(i, i + 2)); return out; };
+    const q = grams(query);
+    // 결과 목록: 그림(포스터)이 하나 있는 항목들. 제목이 작품 이름과 맞는 것만 (다른 종류 — 노래·책 — 는 빼고)
+    const wrong = kind === "영화" ? /노래|앨범|도서|책\\s*·|방송\\s*·/ : /노래|앨범|도서|책\\s*·|영화\\s*·/;
     const items = [...document.querySelectorAll("li, [class*='item'], [class*='result'] > *")].filter(vis)
         .filter(e => e.querySelectorAll("img").length === 1 && (e.innerText || "").trim().length > 1
                      && !e.closest(".se-component"));
-    const it = items[0];
-    if (!it) return "";
-    const btn = [...it.querySelectorAll("button, a")].find(b => /넣기|추가|첨부|선택/.test(b.innerText || "")) || it;
+    let best = null, bestScore = 0;
+    for (const it of items) {
+        const text = (it.innerText || "").trim();
+        if (wrong.test(text)) continue;
+        const title = text.split("\\n")[0];
+        const g = grams(title);
+        let hit = 0; q.forEach(x => { if (g.has(x)) hit++; });
+        const score = q.size ? hit / q.size : 0;
+        if (nz(title) && (nz(query).includes(nz(title)) || nz(title).includes(nz(query)))) { best = it; bestScore = 1; break; }
+        if (score > bestScore) { best = it; bestScore = score; }
+    }
+    if (!best || bestScore < 0.6) return items.length ? "맞는 결과 없음: " + items.slice(0, 3).map(i => (i.innerText || "").trim().split("\\n")[0]).join(" / ") : "";
+    const btn = [...best.querySelectorAll("button, a")].find(b => /넣기|추가|첨부|선택/.test(b.innerText || "")) || best;
     btn.setAttribute("data-nb-pick", "1");
-    return (it.innerText || "").trim().slice(0, 40);
+    return "OK " + (best.innerText || "").trim().replace(/\\s+/g, " ").slice(0, 40);
 }"""
+_CATS = ["전체", "영화", "TV", "방송", "드라마", "책", "도서", "음악", "공연", "전시", "공연·전시", "장소", "쇼핑", "뉴스", "웹툰"]
 
 
 def _insert_material(page: Page, editor, query: str, kind: str, anchor: str, screenshot_dir: Path | None) -> bool:
@@ -1154,11 +1169,20 @@ def _insert_material(page: Page, editor, query: str, kind: str, anchor: str, scr
         editor.locator("[data-nb-pick]").first.click(timeout=5000)
         _pause(0.8, 1.2)
         tabs = ["영화"] if kind == "영화" else ["TV", "방송", "드라마"]
+        # 글감 종류 고르기: 아래쪽 검색 막대의 드롭다운(예: [영화 ▾]) → 열고 TV/영화 고르기. 탭 모양이면 바로 누른다
+        cur = editor.evaluate(_MARK_TEXT_BTN, [[c for c in _CATS if c not in tabs], ""])
+        if cur:  # 지금 다른 종류가 골라져 있다 → 드롭다운을 연다
+            log.append(f"종류 드롭다운(지금 다른 종류): {cur}")
+            editor.locator("[data-nb-pick]").first.click(timeout=5000)
+            _pause(0.5, 0.8)
         got = editor.evaluate(_MARK_TEXT_BTN, [tabs, ""])
-        log.append(f"탭: {got or '못 찾음'}")
+        log.append(f"종류: {got or '못 찾음'}")
         if got:
             editor.locator("[data-nb-pick]").first.click(timeout=5000)
             _pause(0.6, 1.0)
+        elif cur:
+            log.append("TV/영화 종류를 못 골라 넣지 않음 (다른 종류 카드가 들어가지 않게)")
+            return False
         got = editor.evaluate(_MARK_SEARCH, "")
         log.append(f"검색 칸: {got or '못 찾음'}")
         if not got:
@@ -1171,7 +1195,7 @@ def _insert_material(page: Page, editor, query: str, kind: str, anchor: str, scr
         for attempt in (1, 2):
             for _ in range(12):
                 page.wait_for_timeout(500)
-                got = editor.evaluate(_MARK_FIRST_RESULT)
+                got = editor.evaluate(_MARK_FIRST_RESULT, [query, kind])
                 if got:
                     break
             if got or attempt == 2:
@@ -1186,7 +1210,10 @@ def _insert_material(page: Page, editor, query: str, kind: str, anchor: str, scr
                 page.keyboard.type(query, delay=60)
                 page.wait_for_timeout(800)
                 page.keyboard.press("Enter")
-        log.append(f"첫 결과: {got or '없음'}")
+        log.append(f"결과: {got or '없음'}")
+        if got and not got.startswith("OK"):
+            print(f"  (글감: '{query}'와 맞는 작품이 없어 넣지 않았어요 — {got[:60]})")
+            return False
         if not got and screenshot_dir:  # 원인 확인용: 검색 뒤 화면 구조
             try:
                 html = editor.evaluate("() => [...document.querySelectorAll('input')].filter(e => e.getClientRects().length)"

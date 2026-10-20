@@ -448,6 +448,11 @@ def load_config() -> dict:
     text = (ROOT / "config.toml").read_text(encoding="utf-8-sig")
     # 쇼핑 블로그 이름을 바꿨다 (살림 → 생활템 전체). 설정 파일은 업데이트로 덮어쓰지 않으므로 여기서 한 번 고친다
     new = text.replace('blog_name = "혼자 사는 살림노트"', 'blog_name = "생활템 고르는 기준"')
+    # 쇼핑 블로그를 방송·연예 블로그('방송에 나온 그것')로 바꿨다: 방송 정보 글 + 방송에 나온 제품 글
+    if re.search(r"(?ms)^\[shopping\][^\[]*?^enabled\s*=\s*true", new) and not re.search(r"(?m)^\[broadcast\]", new):
+        new = new.rstrip() + ("\n\n[broadcast]\n# 방송·연예 블로그: 링크가 있는 줄 = 방송 속 제품 글, 없는 줄 = 방송 정보 글 (끄려면 false)\n"
+                              "enabled = true\n")
+        new = new.replace('blog_name = "생활템 고르는 기준"', 'blog_name = "방송에 나온 그것"')
     if new != text:
         (ROOT / "config.toml").write_text(new, encoding="utf-8")
         text = new
@@ -517,6 +522,9 @@ def main():
               f"[{cfg['naver'].get('blog_id', '')}] 아이디 로그인을 먼저 해 주세요. (글은 쓰지 않았어요)")
         return
     shop = cfg.get("shopping", {})
+    broadcast = bool(shop.get("enabled") and cfg.get("broadcast", {}).get("enabled"))
+    import copy
+    info_cfg = copy.deepcopy(cfg) if broadcast else None  # 방송 정보 글(링크 없는 줄)은 쇼핑 설정 없이 쓴다
     if shop.get("enabled"):
         cfg["writing"]["shopping"] = True
         cfg.setdefault("autofill", {})["enabled"] = False  # 상품 링크는 사람이 넣어야 해서 자동 채우기는 하지 않는다
@@ -542,6 +550,26 @@ def main():
     img = cfg.setdefault("images", {})
     img["_mode"] = mode
     img.setdefault("ai_color", ai_images.CHARACTERS[mode][1])
+    from shop_categories import BROADCAST_MAP, BROADCAST_TOPICS, PRODUCT_CATEGORY
+
+    def is_product(r: dict) -> bool:
+        """방송·연예 블로그: 링크·정보 링크가 있거나 '방송 속 그 제품' 카테고리인 줄 = 상품 글"""
+        return bool((r.get("link") or "").strip() or (r.get("info_link") or "").strip()
+                    or (r.get("category") or "").replace(" ", "") == PRODUCT_CATEGORY.replace(" ", ""))
+    if broadcast:
+        cfg["writing"]["broadcast"] = True
+        info_cfg["writing"]["broadcast"] = True
+        iim = info_cfg.setdefault("images", {})
+        iim["commons_photos"] = False  # 위키 사진(인물 사진이 섞일 수 있음)·정부 사진은 쓰지 않는다
+        iim["policy_photos"] = False
+        iim["_mode"] = mode
+        iim.setdefault("ai_color", img["ai_color"])
+        af = info_cfg.setdefault("autofill", {})
+        af.update({"enabled": True, "entertainment": True, "mix": "trending", "gaps": False, "hot_issue": False})
+        tr = info_cfg.setdefault("trending", {})
+        tr.update({"map": BROADCAST_MAP, "map_only": True, "topics": BROADCAST_TOPICS})
+        print("[방송·연예 블로그 모드] 링크가 있는 줄 = 방송 속 제품 글, 없는 줄 = 방송 정보 글 (가십·사생활은 쓰지 않아요)")
+    shop_cfg, shop_all = cfg, shop
 
 
     if mode == "main" and not args.dry_run and not args.make_folders and cfg.get("autofill", {}).get("enabled", True):
@@ -553,16 +581,20 @@ def main():
     rows = load_rows()
     pending = [r for r in rows if not (r.get("status") or "").strip()]
     if shop.get("enabled") and shop.get("require_link", True):  # 제휴 링크가 없는 상품 글은 수익이 안 잡히므로 기다린다
-        waiting = [r["keyword"] for r in pending if not (r.get("link") or "").strip()]
+        has = lambda r: bool((r.get("link") or "").strip())
+        waiting = [r["keyword"] for r in pending if not has(r) and (not broadcast or is_product(r))]
         if waiting:
             print(f"제휴 링크를 기다리는 상품 {len(waiting)}개 (건너뜀): " + ", ".join(waiting[:5]) + (" ..." if len(waiting) > 5 else ""))
-        pending = [r for r in pending if (r.get("link") or "").strip()]
-    if not pending and cfg.get("autofill", {}).get("enabled", True) and not args.make_folders:
+        pending = [r for r in pending if has(r) or (broadcast and not is_product(r))]
+    af_cfg = info_cfg if broadcast else cfg  # 방송·연예: 링크 없는 방송 정보 키워드는 자동으로 채운다
+    if not pending and af_cfg.get("autofill", {}).get("enabled", True) and not args.make_folders:
         from autofill import fill
-        acfg = cfg.get("autofill", {})
-        if fill(cfg, min(int(acfg.get("count", 0) or pub.get("max_posts_per_day", 2)), 5)):  # 한 번에 많이 쌓지 않게 최대 5개
+        acfg = af_cfg.get("autofill", {})
+        if fill(af_cfg, min(int(acfg.get("count", 0) or pub.get("max_posts_per_day", 2)), 5)):  # 한 번에 많이 쌓지 않게 최대 5개
             rows = load_rows()
             pending = [r for r in rows if not (r.get("status") or "").strip()]
+            if broadcast:  # 링크를 기다리는 상품 줄은 여전히 빼 둔다
+                pending = [r for r in pending if not is_product(r) or (r.get("link") or "").strip()]
     if not pending:
         print("처리할 키워드가 없습니다. keywords.csv에 추가하세요.")
         return
@@ -619,6 +651,12 @@ def main():
         if made > 0 and not args.dry_run:
             sleep_minutes(pub["between_posts_minutes"], "다음 글까지 대기")
 
+        if broadcast:  # 줄마다: 상품 글이면 쇼핑 설정, 방송 정보 글이면 정보 글 설정
+            prod = is_product(row)
+            cfg, shop = (shop_cfg, shop_all) if prod else (info_cfg, {})
+            if prod and not (row.get("category") or "").strip():
+                row["category"] = PRODUCT_CATEGORY
+            print(f"  ({'방송 속 제품 글' if prod else '방송 정보 글'})")
         keyword = row["keyword"]
         dup = "" if (shop.get("enabled") or (OUTPUT / f"{dt.date.today()}_{slugify(keyword)}.json").exists()) \
             else already_written(keyword, all_mine)

@@ -629,7 +629,7 @@ def find_trending(cfg: dict) -> list[dict] | None:
     from keyword_finder import SHOPPING, blog_doc_count, grade, load_keys, monthly_volumes
     from main import load_rows
     tcfg = cfg.get("trending", {})
-    mapping = {**DEFAULT_MAP, **tcfg.get("map", {})}
+    mapping = dict(tcfg["map"]) if tcfg.get("map_only") else {**DEFAULT_MAP, **tcfg.get("map", {})}
     print("크리에이터 어드바이저에서 지금 뜨는 키워드를 읽는 중... (30초~1분)")
     items = fetch_trending(cfg["naver"]["blog_id"], tcfg.get("topics", CA_TOPICS))
     if not items:

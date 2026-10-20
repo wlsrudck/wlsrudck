@@ -279,6 +279,14 @@ def known_categories(rows: list[dict]) -> list[str]:
     for r in rows:
         if r.get("category") and r["category"] not in cats:
             cats.append(r["category"])
+    try:
+        from main import load_config
+        bc = bool(load_config().get("broadcast", {}).get("enabled"))
+    except Exception:
+        bc = False
+    if is_shop() and bc:  # 방송·연예 블로그
+        from shop_categories import BROADCAST_CATEGORIES
+        return BROADCAST_CATEGORIES
     if is_shop():  # 쇼핑 블로그: 블로그 카테고리 순서 그대로 (예전 이름·지운 카테고리는 빼고)
         from shop_categories import RENAMED
         extra = [c for c in cats if c not in SHOP_CATEGORIES and c not in RENAMED and c not in ("가성비템",)]

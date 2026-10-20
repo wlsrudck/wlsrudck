@@ -818,6 +818,9 @@ def main():
         cfg.setdefault("images", {})["_theme"] = style.get("theme", "")
         media = prepare_media(post, slug, photos, cfg.get("images", {}), cfg["naver"].get("blog_name", ""), cfg["writing"],
                               keyword=keyword)
+        if cfg["writing"].get("broadcast") and not cfg["writing"].get("shopping") and (post.work_title or "").strip():
+            # 방송·연예 정보 글: 네이버 글감의 공식 포스터·정보 카드를 본문에 넣는다 (방송 캡처·연예인 사진 대신)
+            media["material"] = (post.work_title.strip(), "영화" if "영화" in (post.work_kind or "") else "TV")
         preview = OUTPUT / f"{dt.date.today()}_{slug}.html"
         checks = checklist(post, row.get("memo", ""), cfg["writing"])
         if style.get("theme"):

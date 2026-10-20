@@ -1099,6 +1099,113 @@ def _insert_video_after(page: Page, editor, video: Path, anchor: str, title: str
     return False
 
 
+# ── 글감(방송·영화 정보 카드) ─────────────────────────────────────────────
+# 에디터 위 도구 막대의 [글감] → TV/영화 탭 → 작품 검색 → 첫 결과를 넣는다. 네이버가 주는 공식 포스터·정보 카드라 저작권 걱정이 없다.
+_MARK_TEXT_BTN = """([words, scope]) => {
+    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const root = scope ? (document.querySelector(scope) || document) : document;
+    const vis = e => e.getClientRects().length > 0;
+    const norm = t => (t || "").replace(/\s+/g, "");
+    for (const w of words) {
+        const b = [...root.querySelectorAll("button, a, li, [role='tab'], span")].filter(vis)
+            .find(e => norm(e.innerText) === norm(w) || norm(e.getAttribute("aria-label")) === norm(w)
+                       || norm(e.getAttribute("title")) === norm(w));
+        if (b) { const t = b.closest("button, a, [role='tab'], li") || b; t.setAttribute("data-nb-pick", "1");
+                 return (t.className || t.tagName) + " | " + w; }
+    }
+    return "";
+}"""
+_MATERIAL_PANEL = "[class*='material'], [class*='Material'], [class*='sidebar'], [class*='side-panel'], [class*='layer']"
+_MARK_SEARCH = """(scope) => {
+    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const vis = e => e.getClientRects().length > 0;
+    const ins = [...document.querySelectorAll("input[type='text'], input[type='search'], input:not([type])")].filter(vis)
+        .filter(e => /검색|search|입력/i.test((e.placeholder || "") + (e.className || "") + (e.getAttribute("aria-label") || "")));
+    const t = ins[ins.length - 1];
+    if (!t) return "";
+    t.setAttribute("data-nb-pick", "1");
+    return (t.className || "input") + " | " + (t.placeholder || "");
+}"""
+_MARK_FIRST_RESULT = """() => {
+    document.querySelectorAll("[data-nb-pick]").forEach(e => e.removeAttribute("data-nb-pick"));
+    const vis = e => e.getClientRects().length > 0 && e.getBoundingClientRect().height > 30;
+    // 결과 목록: 그림(포스터)이 있는 항목 중 맨 위
+    const items = [...document.querySelectorAll("li, [class*='item'], [class*='result'] > *")].filter(vis)
+        .filter(e => e.querySelectorAll("img").length === 1 && (e.innerText || "").trim().length > 1
+                     && !e.closest(".se-component"));
+    const it = items[0];
+    if (!it) return "";
+    const btn = [...it.querySelectorAll("button, a")].find(b => /넣기|추가|첨부|선택/.test(b.innerText || "")) || it;
+    btn.setAttribute("data-nb-pick", "1");
+    return (it.innerText || "").trim().slice(0, 40);
+}"""
+
+
+def _insert_material(page: Page, editor, query: str, kind: str, anchor: str, screenshot_dir: Path | None) -> bool:
+    """anchor 문단 뒤에 글감(방송·영화 정보 카드)을 넣는다. 실패하면 False (글은 그대로 저장)"""
+    log = [f"글감 검색: {query} ({kind})"]
+    try:
+        _caret_after(page, editor, anchor)
+        before = editor.evaluate(_COMPONENT_COUNT)
+        got = editor.evaluate(_MARK_TEXT_BTN, [["글감"], ""])
+        log.append(f"글감 버튼: {got or '못 찾음'}")
+        if not got:
+            return False
+        editor.locator("[data-nb-pick]").first.click(timeout=5000)
+        _pause(0.8, 1.2)
+        tabs = ["영화"] if kind == "영화" else ["TV", "방송", "드라마"]
+        got = editor.evaluate(_MARK_TEXT_BTN, [tabs, ""])
+        log.append(f"탭: {got or '못 찾음'}")
+        if got:
+            editor.locator("[data-nb-pick]").first.click(timeout=5000)
+            _pause(0.6, 1.0)
+        got = editor.evaluate(_MARK_SEARCH, "")
+        log.append(f"검색 칸: {got or '못 찾음'}")
+        if not got:
+            return False
+        box = editor.locator("[data-nb-pick]").first
+        box.click(timeout=5000)
+        box.fill(query)
+        page.keyboard.press("Enter")
+        for _ in range(12):
+            page.wait_for_timeout(500)
+            got = editor.evaluate(_MARK_FIRST_RESULT)
+            if got:
+                break
+        log.append(f"첫 결과: {got or '없음'}")
+        if not got:
+            return False
+        editor.locator("[data-nb-pick]").first.click(timeout=5000)
+        _pause(0.8, 1.2)
+        if editor.evaluate(_COMPONENT_COUNT) <= before:  # 눌러도 안 들어가면 '넣기·확인' 버튼을 한 번 더 찾는다
+            got = editor.evaluate(_MARK_TEXT_BTN, [["넣기", "첨부", "추가", "확인", "등록"], ""])
+            log.append(f"넣기 버튼: {got or '못 찾음'}")
+            if got:
+                editor.locator("[data-nb-pick]").first.click(timeout=5000)
+                _pause(0.8, 1.2)
+        ok = editor.evaluate(_COMPONENT_COUNT) > before
+        log.append("결과: " + ("넣음" if ok else "안 들어감"))
+        return ok
+    except Exception as e:
+        log.append(f"오류: {str(e).splitlines()[0][:120]}")
+        return False
+    finally:
+        try:  # 글감 창 닫기
+            if editor.evaluate(_MARK_TEXT_BTN, [["닫기", "글감 닫기"], ""]):
+                editor.locator("[data-nb-pick]").first.click(timeout=3000)
+            else:
+                page.keyboard.press("Escape")
+        except Exception:
+            pass
+        if screenshot_dir:
+            try:
+                screenshot_dir.mkdir(parents=True, exist_ok=True)
+                _save_log(editor, screenshot_dir, "editor_material.txt", log)
+                page.screenshot(path=str(screenshot_dir / "editor_material.png"))
+            except Exception:
+                pass
+
+
 def _insert_photo_after(page: Page, editor, photo: Path, anchor: str):
     """anchor 문단 끝에 커서를 두고 사진을 올린다. (사진은 커서 위치 다음에 들어간다)"""
     if not _click_paragraph_end(page, editor, anchor):
@@ -1435,6 +1542,13 @@ def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, aut
                                  captions=post.photo_captions(photos, media), title_hint=post.title)
             total = sum(1 for k, _ in blocks if k == "photo")
             print(f"  네이버 입력: 본문 완료, 사진 {done}/{total}장")
+            mat = media.get("material")
+            if mat and mat[0]:
+                # 첫 소제목 문단 끝 뒤에 (썸네일·도입 바로 아래보다 본문 안이 자연스럽다)
+                heads = [i for i, (k, _) in enumerate(blocks) if k == "heading"]
+                after = next((v.split("\n")[-1].strip() for k, v in blocks[heads[0] + 1:] if k == "text"), "") if heads else ""
+                ok = _insert_material(page, editor, mat[0], mat[1], after or post.intro[-1].strip(), screenshot_dir)
+                print(f"  글감(방송·영화 정보 카드): {'넣음 — ' + mat[0] if ok else '못 넣음 (output/editor_material.txt 참고, 글은 그대로 저장해요)'}")
             _pause(1.5, 3.0)
             try:
                 notes = _check_editor(page, editor, post)

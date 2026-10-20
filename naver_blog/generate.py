@@ -309,6 +309,9 @@ class Post(BaseModel):
                                         "핵심 답을 숫자·날짜와 함께. 정리형 문체면 빈 문자열")
     thumbnail_text: list[str] = Field(description="썸네일에 크게 넣을 짧은 문구 1~2줄. 한 줄 8자 안팎(최대 12자). 제목과 다른 말")
     thumbnail_query: str = Field(description="썸네일 배경 사진을 찾을 영어 검색어 2~4단어. 주제를 한눈에 보여주는 장소·사물. 사람·로고·국기·기관 문장(紋章) 제외")
+    work_title: str = Field(default="", description="이 글이 다루는 방송·드라마·예능·영화 작품의 정식 제목 하나(예: '닥터X 하얀 마피아의 시대'). "
+                                                 "방송·영화 글이 아니면 빈 문자열")
+    work_kind: str = Field(default="", description="work_title 의 종류: 'TV'(드라마·예능·방송) 또는 '영화'. 없으면 빈 문자열")
     sections: list[Section]
     tags: list[str] = Field(description="해시태그 5~10개, '#' 없이")
     summary: list[str] = Field(description="글 핵심 요약 3~4개. 각 20자 이내")
@@ -355,7 +358,7 @@ class Post(BaseModel):
     @classmethod
     def load(cls, data: dict) -> "Post":
         """저장해 둔 글 불러오기 (예전 버전에서 저장해 새 칸이 없는 글도 읽히게)"""
-        data = {"closing": [], "next_teaser": "", "related": [], **data}
+        data = {"closing": [], "next_teaser": "", "related": [], "work_title": "", "work_kind": "", **data}
         return cls.model_validate(data)
 
     def photo_captions(self, photos: list[Path], media: dict | None = None) -> dict[str, str]:

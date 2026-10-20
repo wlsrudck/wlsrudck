@@ -1167,12 +1167,33 @@ def _insert_material(page: Page, editor, query: str, kind: str, anchor: str, scr
         box.click(timeout=5000)
         box.fill(query)
         page.keyboard.press("Enter")
-        for _ in range(12):
-            page.wait_for_timeout(500)
-            got = editor.evaluate(_MARK_FIRST_RESULT)
-            if got:
+        got = ""
+        for attempt in (1, 2):
+            for _ in range(12):
+                page.wait_for_timeout(500)
+                got = editor.evaluate(_MARK_FIRST_RESULT)
+                if got:
+                    break
+            if got or attempt == 2:
                 break
+            # 아래쪽 작은 글감 검색 막대: 한 글자씩 쳐야 검색되는 경우가 있다 → 지우고 다시 쳐서 엔터
+            log.append("결과 없음 → 검색어를 한 글자씩 다시 입력")
+            if editor.evaluate(_MARK_SEARCH, ""):
+                box = editor.locator("[data-nb-pick]").first
+                box.click(timeout=5000)
+                page.keyboard.press("Control+A")
+                page.keyboard.press("Backspace")
+                page.keyboard.type(query, delay=60)
+                page.wait_for_timeout(800)
+                page.keyboard.press("Enter")
         log.append(f"첫 결과: {got or '없음'}")
+        if not got and screenshot_dir:  # 원인 확인용: 검색 뒤 화면 구조
+            try:
+                html = editor.evaluate("() => [...document.querySelectorAll('input')].filter(e => e.getClientRects().length)"
+                                       ".map(i => (i.closest('div') || i).parentElement.outerHTML.slice(0, 3000)).join('\\n---\\n')")
+                (screenshot_dir / "editor_material_html.txt").write_text(html, encoding="utf-8")
+            except Exception:
+                pass
         if not got:
             return False
         editor.locator("[data-nb-pick]").first.click(timeout=5000)

@@ -38,6 +38,10 @@ ILLUST = ("밝고 따뜻한 3D 카툰 일러스트(부드러운 조명, 둥근 �
           "캐릭터에게 의사 가운·청진기·약사 복장처럼 전문가로 보이는 차림을 입히지 않습니다. "
           "실제 판매 상품(특정 브랜드 제품)을 그리지 않습니다.")
 
+# 모든 그림 공통: 상표 그림 금지 (방송사·OTT·앱·브랜드 로고를 아이콘처럼 그려 넣는 경우가 있었다 — 넷플릭스 N, SBS 등)
+NO_BRAND = ("방송사·OTT·앱·회사·브랜드의 로고와 상표 마크(예: 넷플릭스 N, 방송사 로고, 앱 아이콘)를 아이콘이나 소품으로도 그리지 않습니다. "
+            "아이콘이 필요하면 TV·재생 버튼·달력·시계·휴대폰 같은 일반 모양만 씁니다.")
+
 _model_cache: dict[str, str] = {}
 
 
@@ -111,7 +115,7 @@ def generate(prompt: str, out: Path, key: str, model: str = "", style: str | Non
     """이미지 한 장을 만들어 out 에 저장. 실패하면 예외.
     style: 그림 방식 설명(없으면 글자 없는 사진 느낌), refs: 참고 그림(같은 캐릭터로 그리게)"""
     model = pick_model(key, model)
-    full = f"{prompt}\n\n{style if style is not None else STYLE}"
+    full = f"{prompt}\n\n{style if style is not None else STYLE}\n{NO_BRAND}"
     if model.startswith("imagen"):
         d = _req(f"{API}/models/{model}:predict?key={key}",
                  {"instances": [{"prompt": full}], "parameters": {"sampleCount": 1, "aspectRatio": aspect}})

@@ -376,6 +376,8 @@ CONTROVERSY = re.compile(r"좌파|우파|극우|극좌|진보|보수\s*성향|�
                          # 사람 신상 캐기·연애사·범죄 (사생활·명예훼손 신고가 잦고 광고도 잘 안 붙는다)
                          r"프로필|본명|결별|열애|파경|재혼설|살해|살인|흉기|폭행|성범죄|성폭행|피의자|용의자|숨진|숨져|"
                          r"극단(적)?\s*선택|자살|사망(?!\s*(보험|신고|진단|률|원인\s*통계))")
+# 연예인 사생활 키워드 (방송·연예 정보 블로그에서 뺀다 — 작품·방송 정보가 아니라 사람 이야기)
+PRIVATE_LIFE = re.compile(r"결혼|결혼식|열애|이혼|재혼|임신|출산|딸|아들|아내|남편|부모|가족|생활고|투병|사망|별세|장례|빚|사기|고소|소송|폭행|음주")
 LYRICS = re.compile(r"가사|노래방|악보|lyrics|음원\s*추출|음원\s*다운|mp3", re.I)  # 저작권 문제가 생길 수 있는 글감
 
 
@@ -641,6 +643,9 @@ def find_trending(cfg: dict) -> list[dict] | None:
         if kw.replace(" ", "") in have or SHOPPING.search(kw) or LYRICS.search(kw):
             continue
         if not tcfg.get("controversy", False) and CONTROVERSY.search(kw):
+            dropped.append(kw)
+            continue
+        if tcfg.get("map_only") and PRIVATE_LIFE.search(kw):  # 방송·연예 블로그: 사생활(결혼·가족·투병 등)은 정보 글감이 아니다
             dropped.append(kw)
             continue
         have.add(kw.replace(" ", ""))  # 같은 키워드가 여러 주제에 올라와도 한 번만

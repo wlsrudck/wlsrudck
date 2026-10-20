@@ -16,3 +16,12 @@ PRODUCT_CATEGORY = "방송 속 그 제품"
 # 크리에이터 어드바이저 '지금 뜨는 키워드'에서 읽을 주제와 → 이 블로그 카테고리 (이것만 쓴다)
 BROADCAST_TOPICS = ["드라마", "방송", "스타·연예인", "영화"]
 BROADCAST_MAP = {"드라마": "드라마", "방송": "예능·방송", "스타": "예능·방송", "영화": "OTT·영화"}
+
+
+def broadcast_overrides(cfg: dict) -> dict:
+    """방송·연예 블로그면 '지금 뜨는 키워드'·자동 채우기가 드라마·방송·스타·영화만 읽어 이 블로그 카테고리로 넣게 cfg 를 고친다"""
+    if cfg.get("shopping", {}).get("enabled") and cfg.get("broadcast", {}).get("enabled"):
+        cfg.setdefault("trending", {}).update({"map": BROADCAST_MAP, "map_only": True, "topics": BROADCAST_TOPICS})
+        cfg.setdefault("autofill", {}).update({"enabled": True, "entertainment": True, "mix": "trending", "gaps": False,
+                                              "hot_issue": False})
+    return cfg

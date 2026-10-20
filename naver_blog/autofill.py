@@ -233,7 +233,8 @@ def add_question_memos() -> int:
 
 if __name__ == "__main__":
     from main import load_config, load_rows
-    cfg = load_config()
+    from shop_categories import broadcast_overrides
+    cfg = broadcast_overrides(load_config())
     n = min(int(cfg.get("autofill", {}).get("count", 0) or cfg["publish"].get("max_posts_per_day", 2)), 5)
     pending = [r for r in load_rows() if not r["status"].strip()]
     if len(pending) < n:

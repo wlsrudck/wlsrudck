@@ -687,7 +687,8 @@ def find_trending(cfg: dict) -> list[dict] | None:
 
 def main():
     from main import load_config, load_rows, save_rows
-    cfg = load_config()
+    from shop_categories import broadcast_overrides
+    cfg = broadcast_overrides(load_config())
     rows = find_trending(cfg)
     if rows is None:
         print("\n⚠ 인기 키워드를 읽지 못했어요. output 폴더의 trend_debug.png 와 trend_debug.txt 를 캡처해서 보내 주세요.")

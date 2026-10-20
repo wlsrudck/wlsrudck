@@ -262,6 +262,15 @@ def is_cs() -> bool:
         return False
 
 
+def is_broadcast() -> bool:
+    try:
+        from main import load_config
+        c = load_config()
+        return bool(c.get("shopping", {}).get("enabled") and c.get("broadcast", {}).get("enabled"))
+    except Exception:
+        return False
+
+
 def is_shop() -> bool:
     try:
         from main import load_config
@@ -767,8 +776,9 @@ def main():
     shop = is_shop()
     cs = is_cs()
     for col, (group, items) in enumerate(BUTTONS):
-        if shop:  # 쇼핑 블로그는 이슈·정보 키워드 찾기 버튼을 숨긴다
-            items = [it for it in items if it[1] not in SHOP_HIDDEN]
+        if shop:  # 쇼핑 블로그는 이슈·정보 키워드 찾기 버튼을 숨긴다 (방송·연예 블로그는 지금 뜨는 키워드·자동 채우기를 쓴다)
+            hidden = SHOP_HIDDEN - ({"11_trending_keywords.bat", "13_autofill_keywords.bat"} if is_broadcast() else set())
+            items = [it for it in items if it[1] not in hidden]
         else:
             items = [it for it in items if it[1] != "15_find_products.bat"]
         if cs:  # 고객센터 블로그는 이슈·계절 키워드를 쓰지 않는다

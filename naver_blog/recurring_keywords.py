@@ -182,6 +182,76 @@ def brainstorm(desc: str, cfg: dict) -> list[dict]:
     return [p.model_dump() for p in (res.parsed_output.picks if res.parsed_output else [])]
 
 
+class Next(BaseModel):
+    model_config = STRICT
+    keyword: str = Field(description="그 일이 터진 뒤 사람들이 이어서 칠 검색어 (짧게)")
+    why: str = Field(description="언제·왜 이걸 찾게 되는지 한 줄")
+
+
+class Nexts(BaseModel):
+    model_config = STRICT
+    items: list[Next] = Field(description="12개 안팎")
+
+
+NEXT = """'{base}' 이(가) 다가오면(또는 발표·고지·방송되면) 사람들이 이어서 검색할 '다음 궁금증'을 예상해 주세요. 오늘: {today}
+- 받고 나서 / 안 됐을 때 / 기한·날짜 / 계산·금액 / 신청·이의신청·분납·환급 / 나는 해당되나 / 바뀐 점 / 문제가 생겼을 때 같은 갈래로.
+- 지금은 검색이 거의 없어도 그때 갑자기 몰릴 말이 좋습니다. 큰 키워드를 그대로 되풀이하지 말고 구체적인 궁금증으로.
+- 사람 이야기·논란·정치는 넣지 않습니다."""
+
+
+def derived(base: str, cfg: dict, keys: dict) -> list[dict]:
+    """선점 키워드: base 가 터진 뒤 이어서 검색될 파생 키워드 + 지금 블로그 글이 얼마나 있나(적을수록 나 혼자 걸린다)"""
+    import anthropic
+
+    from generate import _api_key, naver_suggest
+    from keyword_finder import blog_doc_count, monthly_volumes
+    cands: dict[str, str] = {}
+    try:
+        client = anthropic.Anthropic(api_key=_api_key(), max_retries=3)
+        res = client.beta.messages.parse(
+            model=cfg["writing"]["model"], max_tokens=3000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
+            output_format=Nexts, messages=[{"role": "user", "content": NEXT.format(base=base, today=dt.date.today())}])
+        for n in (res.parsed_output.items if res.parsed_output else []):
+            cands.setdefault(n.keyword.strip(), "예상: " + n.why)
+    except Exception as e:
+        print(f"  (다음 궁금증 예상 실패: {str(e).splitlines()[0][:60]})")
+    core = re.sub(r"20\d\d\s*년?\s*", "", base).strip()
+    for q in naver_suggest(core, 10):
+        if q.replace(" ", "") != core.replace(" ", ""):
+            cands.setdefault(q, "자동완성(지금 실제로 치는 말)")
+    vols: dict = {}
+    if keys.get("ad_access_license"):
+        try:
+            vols, related = monthly_volumes(list(cands)[:20], keys, topic=core)
+            head = core.split()[0] if core.split() else core
+            for name, v, c in related[:40]:
+                if head and head in name and name not in cands and len(cands) < 30:
+                    cands[name] = "연관 검색어"
+                    vols[name] = (v, c)
+        except Exception:
+            pass
+    out = []
+    for kw, why in list(cands.items())[:30]:
+        docs = None
+        if keys.get("search_client_id"):
+            try:
+                docs = blog_doc_count(kw, keys)
+            except Exception:
+                docs = None
+        v = vols.get(kw) or (None, "")
+        out.append({"keyword": kw, "why": why, "docs": docs, "volume": v[0], "comp": v[1]})
+    # 블로그 글이 적은 것(선점), 그다음 예상한 것, 검색량 순
+    out.sort(key=lambda r: (r["docs"] if r["docs"] is not None else 10 ** 6, not r["why"].startswith("예상"),
+                            -(r["volume"] or 0)))
+    return [r for r in out if r["docs"] is None or r["docs"] < 5000]
+
+
+def docs_label(n) -> str:
+    if n is None:
+        return "글 수 ?"
+    return f"🔥 글 {n}개 (선점)" if n < 300 else f"글 {n:,}개 (적음)" if n < 2000 else f"글 {n:,}개"
+
+
 def season_check(picks: list[dict], keys: dict) -> None:
     """데이터랩 24달: 다시 뜰 달(다음 달 또는 이번 달)이 작년에도 평소보다 높았는지 → r['season'] 설명"""
     from evergreen_keywords import _month_keys, _months, datalab_trends
@@ -280,6 +350,32 @@ def main():
     save_rows(rows + [{"keyword": picks[n - 1]["keyword"], "memo": f"{QUESTION_PREFIX} {picks[n - 1]['when']}에 다시 검색됨 — "
                        f"{picks[n - 1]['why']}", "status": "", "category": picks[n - 1]["category"]} for n in nums])
     print(f"{len(nums)}개를 keywords.csv 에 넣었어요.")
+    if input("\n고른 키워드가 터진 뒤 이어서 검색될 '선점 키워드'도 찾을까요? (엔터 = 예 / 0 = 아니오): ").strip() == "0":
+        return
+    for n in nums[:3]:
+        base = picks[n - 1]["keyword"]
+        print(f"\n[{base}] 이후에 몰릴 파생 키워드 찾는 중 (예상 + 자동완성 + 연관 검색어, 블로그 글 수 확인)...")
+        ds = derived(base, cfg, keys)
+        if not ds:
+            print("  찾지 못했어요.")
+            continue
+        for i, d in enumerate(ds, 1):
+            vol = f"월 {d['volume']:,}" if d.get("volume") else "검색 아직 적음"
+            print(f"  {i:2d}. {d['keyword']}  — {docs_label(d['docs'])} / {vol} / {d['why'][:40]}")
+        ans = input("  넣을 번호 (예: 1,2 / 엔터 = 🔥 선점 표시된 것 전부 / 0 = 안 넣음): ").strip()
+        if ans == "0":
+            continue
+        idx = [int(x) for x in re.findall(r"\d+", ans) if 1 <= int(x) <= len(ds)] if ans else \
+              [i for i, d in enumerate(ds, 1) if d["docs"] is not None and d["docs"] < 300]
+        if not idx:
+            continue
+        rows = load_rows()
+        have = {r["keyword"].replace(" ", "") for r in rows}
+        new = [{"keyword": ds[i - 1]["keyword"], "memo": f"{QUESTION_PREFIX} {base} 이후에 몰릴 질문 — {ds[i - 1]['why']}",
+                "status": "", "category": picks[n - 1]["category"]} for i in idx
+               if ds[i - 1]["keyword"].replace(" ", "") not in have]
+        save_rows(rows + new)
+        print(f"  선점 키워드 {len(new)}개를 넣었어요.")
 
 
 if __name__ == "__main__":

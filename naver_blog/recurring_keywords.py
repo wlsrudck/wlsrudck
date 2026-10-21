@@ -85,6 +85,8 @@ def blog_categories(cfg: dict) -> list[str]:
         _, mapping, _ = blog_topic_setup(cfg)
         names = list(dict.fromkeys(mapping.values()))
     hide = re.compile(r"연예|게시판|지난|보관") if not cfg.get("broadcast", {}).get("enabled") else re.compile(r"게시판|지난")
+    if cfg.get("cs", {}).get("enabled"):  # 고객센터 블로그: 방법 글 칸만 (이슈·꿀팁·잡담 칸은 주제를 흐린다)
+        hide = re.compile(r"이슈|꿀팁|금융|은행|낙서|게시판|지난|보관|연예")
     return [n for n in names if not hide.search(n)]
 
 

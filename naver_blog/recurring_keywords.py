@@ -99,6 +99,28 @@ def read_past(blog_id: str, topics: list[str]) -> tuple[dict[str, dict], dict[st
             browser.close()
             raise RuntimeError("로그인이 풀렸어요. [네이버 로그인]을 다시 해 주세요.")
         ref = {"Referer": TREND_URLS[0].format(id=blog_id)}
+        # 어드바이저가 며칠 전 데이터까지 주는지 먼저 잰다 (오래된 날짜는 빈 답을 준다)
+        reach, debug = 0, []
+        for back in (3, 14, 30, 60, 90, 180, 270, 365):
+            day = (today - dt.timedelta(days=back)).isoformat()
+            try:
+                r = page.request.get(CATEGORY_KEYWORDS_API.format(cats=up.quote(topics[0]), date=day), headers=ref, timeout=20000)
+                n = len(parse_trend_json([(topics[0], r.json())])) if r.ok else 0
+                debug.append(f"{day}: HTTP {r.status}, {n}개 | {r.text()[:200]}")
+            except Exception as e:
+                n = 0
+                debug.append(f"{day}: 오류 {e}")
+            if n:
+                reach = back
+        try:
+            (ROOT / "output").mkdir(exist_ok=True)
+            (ROOT / "output" / "recurring_debug.txt").write_text("\n".join(debug), encoding="utf-8")
+        except Exception:
+            pass
+        print(f"  어드바이저 데이터: {'약 ' + str(reach) + '일 전까지 있어요' if reach else '최근 것만 있어요'}")
+        if reach < 330:  # 작년 이맘때까지 못 간다
+            browser.close()
+            return {}, {}
         empty_years = set()
         for back, day in days:
             if back in empty_years:
@@ -141,13 +163,35 @@ def judge(seen: dict, desc: str, cfg: dict) -> list[dict]:
     return [p.model_dump() for p in (res.parsed_output.picks if res.parsed_output else [])]
 
 
+IDEAS = """오늘은 {today}입니다. 이 블로그 주제: {topic}
+오늘부터 4주 안에 '매년 이 시기에 검색이 몰리는' 키워드를 40개 뽑아 주세요.
+- 법·제도로 날짜가 정해진 일정(세금 고지·신고, 지원금 신청·지급, 연말정산 준비, 보험료 정산 등), 계절·날씨 대비, 연례 행사·기념일,
+  매년 바뀌는 기준·요금 발표, 정기 방송·시상식 등. 그해에만 있었던 사건·사람 이야기는 넣지 않습니다.
+- 사람들이 검색창에 칠 짧은 말로, 연도가 들어가면 올해 연도로. source 에는 '연례 일정'이라고 적습니다."""
+
+
+def brainstorm(desc: str, cfg: dict) -> list[dict]:
+    """어드바이저에 작년 데이터가 없을 때: 앞으로 4주에 매년 몰리는 키워드 후보 (데이터랩으로 확인할 것)"""
+    import anthropic
+
+    from generate import _api_key
+    client = anthropic.Anthropic(api_key=_api_key(), max_retries=3)
+    res = client.beta.messages.parse(
+        model=cfg["writing"]["model"], max_tokens=6000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
+        output_format=Picks, messages=[{"role": "user", "content": IDEAS.format(today=dt.date.today().isoformat(), topic=desc)}])
+    return [p.model_dump() for p in (res.parsed_output.picks if res.parsed_output else [])]
+
+
 def season_check(picks: list[dict], keys: dict) -> None:
     """데이터랩 24달: 다시 뜰 달(다음 달 또는 이번 달)이 작년에도 평소보다 높았는지 → r['season'] 설명"""
     from evergreen_keywords import _month_keys, _months, datalab_trends
+    # '2026 종부세'처럼 올해 연도가 붙은 말은 작년·재작년에 검색된 적이 없다 → 연도를 빼고 흐름을 본다
+    base = {r["keyword"]: re.sub(r"20\d\d\s*년?\s*", "", r["keyword"]).strip() or r["keyword"] for r in picks}
     try:
-        series = datalab_trends([r["keyword"] for r in picks], keys)
+        got = datalab_trends(list(dict.fromkeys(base.values())), keys)
     except Exception:
-        series = {}
+        got = {}
+    series = {k: got.get(b) for k, b in base.items()}
     months = _month_keys(_months()[0])
     today = dt.date.today()
     targets = {(today + dt.timedelta(days=d)).month for d in (7, 21)}
@@ -180,11 +224,15 @@ def main():
         print(f"읽기 실패: {str(e).splitlines()[0][:120]}")
         return
     seen = {k: v for k, v in seen.items() if not CONTROVERSY.search(k) and not PRIVATE_LIFE.search(k)}
-    if not seen:
-        print("\n작년 데이터를 읽지 못했어요. (어드바이저가 그 날짜 데이터를 주지 않거나 로그인이 풀렸을 수 있어요)")
-        return
-    print(f"작년 이맘때 검색어 {len(seen)}개 → 매년 다시 뜨는 것만 고르는 중 (Claude)...")
-    picks = judge(seen, desc, cfg)
+    datalab_only = not seen
+    if datalab_only:
+        print("작년 어드바이저 데이터가 없어서, 데이터랩(지난 2년 월별 검색 기록)으로 판단해요.")
+        print("앞으로 4주에 매년 몰리는 키워드 후보 고르는 중 (Claude)...")
+        picks = brainstorm(desc, cfg)
+    else:
+        print(f"작년 이맘때 검색어 {len(seen)}개 → 매년 다시 뜨는 것만 고르는 중 (Claude)...")
+        picks = judge(seen, desc, cfg)
+    picks = [p for p in picks if not CONTROVERSY.search(p["keyword"]) and not PRIVATE_LIFE.search(p["keyword"])]
     have = {r["keyword"].replace(" ", "") for r in load_rows()}
     titles = written_titles(cfg["naver"]["blog_id"])
     picks = [p for p in picks if p["keyword"].replace(" ", "") not in have]
@@ -206,13 +254,19 @@ def main():
             p["volume"], p["comp"] = v
             p["grade"] = grade(p["volume"], None, p["comp"])
     season_check(picks, keys)
+    if datalab_only:  # 데이터랩에서 한 번도 같은 달에 오르지 않은 것은 '매년 반복'의 근거가 없어 뺀다
+        picks = [p for p in picks if p.get("rise_years", 0) >= 1]
+        if not picks:
+            print("데이터랩으로 매년 반복이 확인된 키워드가 없어요.")
+            return
     for p in picks:  # 확실도: 어드바이저에 몇 해 나왔나 + 데이터랩에서 몇 해 같은 달에 올랐나
-        adv = len(seen.get(p["source"], {}).get("years", ())) or 1
+        adv = len(seen.get(p["source"], {}).get("years", ())) or (2 if datalab_only else 1)
         score = adv + p.get("rise_years", 0)
         p["sure"] = "★★★ 거의 확실" if score >= 4 else "★★ 높음" if score >= 3 else "★ 가능성 있음"
     picks.sort(key=lambda p: -len(p["sure"]))
     print(f"\n다시 뜰 키워드 {len(picks)}개 (지금 써 두면 그때 검색에 이미 올라가 있어요)")
-    print("  확실도 = 작년·재작년 어드바이저에 나온 해 수 + 데이터랩에서 같은 달에 오른 해 수 (★★★ = 2년 연속 확인)")
+    print("  확실도 = " + ("데이터랩에서 같은 달에 오른 해 수 (★★★ = 2년 연속, ★★ = 1년)" if datalab_only else
+                          "작년·재작년 어드바이저에 나온 해 수 + 데이터랩에서 같은 달에 오른 해 수 (★★★ = 2년 연속 확인)"))
     for i, p in enumerate(picks, 1):
         vol = f"월 {p['volume']:,}" if p.get("volume") else "검색량 ?"
         print(f"  {i:2d}. [{p['sure']}] {p['keyword']}  — {p['when']} / {vol} / {p.get('season', '')}")

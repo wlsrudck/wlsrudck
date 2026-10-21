@@ -157,8 +157,10 @@ def season_check(picks: list[dict], keys: dict) -> None:
             r["season"] = "흐름 정보 없음"
             continue
         avg = (sum(s) / len(s)) or 0.01
+        r["rise_years"] = 0
         hits = [f"{m[:4]}년 {int(m[5:])}월 {v / avg:.1f}배" for m, v in zip(months, s) if int(m[5:]) in targets and v / avg >= 1.3]
         r["season"] = ("작년에도 올랐음: " + ", ".join(hits)) if hits else "작년엔 뚜렷하지 않음"
+        r["rise_years"] = len({h[:4] for h in hits})
 
 
 def main():
@@ -204,10 +206,16 @@ def main():
             p["volume"], p["comp"] = v
             p["grade"] = grade(p["volume"], None, p["comp"])
     season_check(picks, keys)
-    print(f"\n다시 뜰 키워드 {len(picks)}개 (지금 써 두면 그때 검색에 이미 올라가 있어요):")
+    for p in picks:  # 확실도: 어드바이저에 몇 해 나왔나 + 데이터랩에서 몇 해 같은 달에 올랐나
+        adv = len(seen.get(p["source"], {}).get("years", ())) or 1
+        score = adv + p.get("rise_years", 0)
+        p["sure"] = "★★★ 거의 확실" if score >= 4 else "★★ 높음" if score >= 3 else "★ 가능성 있음"
+    picks.sort(key=lambda p: -len(p["sure"]))
+    print(f"\n다시 뜰 키워드 {len(picks)}개 (지금 써 두면 그때 검색에 이미 올라가 있어요)")
+    print("  확실도 = 작년·재작년 어드바이저에 나온 해 수 + 데이터랩에서 같은 달에 오른 해 수 (★★★ = 2년 연속 확인)")
     for i, p in enumerate(picks, 1):
         vol = f"월 {p['volume']:,}" if p.get("volume") else "검색량 ?"
-        print(f"  {i:2d}. {p['keyword']}  — {p['when']} / {vol} / {p.get('season', '')}")
+        print(f"  {i:2d}. [{p['sure']}] {p['keyword']}  — {p['when']} / {vol} / {p.get('season', '')}")
         print(f"      작년: {p['source']} · {p['why']}")
     ans = input("\nkeywords.csv에 넣을 번호 (예: 1,3,5 / 0 = 넣지 않음): ").strip()
     nums = [int(x) for x in re.findall(r"\d+", ans) if 1 <= int(x) <= len(picks)]

@@ -460,7 +460,8 @@ def refine_main_category(text: str, category: str) -> str:
     for pat, sub in MAIN_SUBCATS:
         if re.search(pat, text) and re.sub(r"\W", "", sub) in have:
             return sub
-    return category
+    # 카테고리가 비어 있으면 생활정보로 (빈 칸이면 블로그 기본 카테고리로 가는데, 그게 비공개 칸일 수 있다)
+    return category or ("생활정보" if "생활정보" in have else category)
 
 
 def load_config() -> dict:

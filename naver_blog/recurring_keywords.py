@@ -34,6 +34,7 @@ class Pick(BaseModel):
     source: str = Field(description="근거가 된 작년 키워드 그대로")
     when: str = Field(description="올해 언제 다시 뜰지 (예: '11월 둘째 주', '수능 전날')")
     why: str = Field(description="매년 반복되는 이유 한 줄 (제도 일정·계절·연례 행사·정기 방송 등)")
+    category: str = Field(description="이 블로그 카테고리 목록 중 가장 맞는 것 하나를 글자 그대로")
 
 
 class Picks(BaseModel):
@@ -43,6 +44,7 @@ class Picks(BaseModel):
 
 PROMPT = """아래는 작년(또는 재작년) 오늘부터 4주 동안 네이버 블로그 검색으로 실제 많이 들어온 검색어들입니다.
 괄호 안은 (몇 번 나왔는지, 몇 해에 나왔는지)입니다. 이 블로그 주제: {topic}
+이 블로그 카테고리: {cats}
 
 이 중에서 '올해도 같은 시기에 사람들이 다시 검색할 것'만 고르세요.
 - 고르는 것: 매년 돌아오는 제도·세금·지원금 일정(연말정산, 근로장려금, 종부세, 건강보험 정산 등), 계절·날씨 대비(김장, 독감 예방접종,
@@ -70,6 +72,19 @@ def blog_topic_setup(cfg: dict) -> tuple[list[str], dict, str]:
     if cfg.get("cs", {}).get("enabled"):
         desc = "고객센터·조회·신청 방법"
     return topics, mapping, desc
+
+
+def blog_categories(cfg: dict) -> list[str]:
+    """글을 넣을 이 블로그 카테고리 이름들 (블로그에서 읽어 둔 목록이 있으면 그것, 없으면 주제 매핑의 이름)"""
+    try:
+        names = list(json.loads((ROOT / "categories.json").read_text(encoding="utf-8")))
+    except Exception:
+        names = []
+    if not names:
+        _, mapping, _ = blog_topic_setup(cfg)
+        names = list(dict.fromkeys(mapping.values()))
+    hide = re.compile(r"연예|게시판|지난|보관") if not cfg.get("broadcast", {}).get("enabled") else re.compile(r"게시판|지난")
+    return [n for n in names if not hide.search(n)]
 
 
 def read_past(blog_id: str, topics: list[str]) -> tuple[dict[str, dict], dict[str, str]]:
@@ -159,11 +174,12 @@ def judge(seen: dict, desc: str, cfg: dict) -> list[dict]:
     res = client.beta.messages.parse(
         model=cfg["writing"]["model"], max_tokens=16000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
         output_format=Picks, messages=[{"role": "user", "content": PROMPT.format(
-            topic=desc, today=dt.date.today().isoformat(), rows=text)}])
+            topic=desc, cats=", ".join(blog_categories(cfg)), today=dt.date.today().isoformat(), rows=text)}])
     return [p.model_dump() for p in (res.parsed_output.picks if res.parsed_output else [])]
 
 
 IDEAS = """오늘은 {today}입니다. 이 블로그 주제: {topic}
+이 블로그 카테고리: {cats} (키워드마다 가장 맞는 것 하나를 category 에)
 오늘부터 4주 안에 '매년 이 시기에 검색이 몰리는' 키워드를 20~25개 뽑아 주세요. why·when 은 짧게(20자 안팎).
 - 법·제도로 날짜가 정해진 일정(세금 고지·신고, 지원금 신청·지급, 연말정산 준비, 보험료 정산 등), 계절·날씨 대비, 연례 행사·기념일,
   매년 바뀌는 기준·요금 발표, 정기 방송·시상식 등. 그해에만 있었던 사건·사람 이야기는 넣지 않습니다.
@@ -178,7 +194,8 @@ def brainstorm(desc: str, cfg: dict) -> list[dict]:
     client = anthropic.Anthropic(api_key=_api_key(), max_retries=3)
     res = client.beta.messages.parse(
         model=cfg["writing"]["model"], max_tokens=16000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
-        output_format=Picks, messages=[{"role": "user", "content": IDEAS.format(today=dt.date.today().isoformat(), topic=desc)}])
+        output_format=Picks, messages=[{"role": "user", "content": IDEAS.format(today=dt.date.today().isoformat(), topic=desc,
+                                                                                         cats=", ".join(blog_categories(cfg)))}])
     return [p.model_dump() for p in (res.parsed_output.picks if res.parsed_output else [])]
 
 
@@ -316,7 +333,8 @@ def main():
     picks = [p for p in picks if p["keyword"].replace(" ", "") not in have]
     for p in picks:
         p["written"] = already_written(p["keyword"], titles)
-        p["category"] = map_category(topic_of.get(p["source"], ""), mapping)
+        cats = blog_categories(cfg)
+        p["category"] = p.get("category") if p.get("category") in cats else map_category(topic_of.get(p["source"], ""), mapping)
     picks = [p for p in picks if not p["written"]]
     if not picks:
         print("다시 뜰 만한 새 키워드가 없어요 (이미 썼거나 목록에 있어요).")

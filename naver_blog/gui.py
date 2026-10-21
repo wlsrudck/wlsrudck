@@ -33,7 +33,7 @@ BUTTONS = [
         ("클립 PC로 올리기 (반자동)", "24_clip_upload.bat", "클립 크리에이터 웹에 영상·설명·해시태그를 채워 둬요. [등록]은 직접 눌러요"),
         ("클립 카톡으로 보내기", "@clip_kakao", "영상·설명을 복사해 카톡 '나와의 채팅'에 붙여 넣게 도와줘요 (휴대폰에서 바로 클립 올리기)"),
         ("글 캡처하기", "17_capture.bat", "글 주소를 넣으면(그냥 엔터는 최근 글) 휴대폰 화면 그대로 길게 찍어요"),
-        ("자매 글 링크 만들기 (딸깍용)", "31_sister_find.bat", "딸깍 글 제목을 넣으면 매인↔고객센터 상대 블로그에서 이어서 볼 글을 찾아, 글 끝에 붙일 링크 문장을 복사해 줘요"),
+        ("함께 볼 글 링크 만들기 (딸깍용)", "31_sister_find.bat", "딸깍 글 제목을 넣으면 '함께 보면 좋은 글' 2~3개와 매인↔고객센터 상대 블로그의 이어 볼 글을 찾아, 글 끝에 붙일 링크를 복사해 줘요"),
         ("딸깍 사진 맞추기", "29_ddalkkak_photos.bat", "상품 페이지를 캡처한 뒤, 딸깍 초안을 복사하고 누르면 소제목마다 맞는 사진을 골라 hero·section 이름으로 넣어 줘요"),
     ]),
     ("키워드 찾기", [
@@ -252,7 +252,7 @@ def open_path(p: Path) -> None:
 
 AUTO_KEYWORD = "(상품명 자동)"
 from shop_categories import SHOP_CATEGORIES  # noqa: E402
-SHOP_HIDDEN = {"31_sister_find.bat", "30_recurring_keywords.bat", "11_trending_keywords.bat", "21_news_keywords.bat", "12_evergreen_keywords.bat", "7_season_keywords.bat", "13_autofill_keywords.bat",
+SHOP_HIDDEN = {"30_recurring_keywords.bat", "11_trending_keywords.bat", "21_news_keywords.bat", "12_evergreen_keywords.bat", "7_season_keywords.bat", "13_autofill_keywords.bat",
                "@google_key", "@pexels_key", "16_ai_image_test.bat"}
 
 

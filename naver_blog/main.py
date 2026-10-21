@@ -814,6 +814,12 @@ def main():
             post.notice = ("이 글은 공개된 공시·기사·증권사 자료를 정리한 참고용이에요. 특정 종목의 매수·매도 추천이 아니니, "
                            "투자 판단과 책임은 본인 기준으로 해 주세요.")
         post.videos = []
+        if mode in ("main", "cs") and not reused and not post.sister_post:
+            try:  # 매인↔고객센터: 같은 제도를 다른 각도로 쓴 자매 글 (끄려면 [cross] sister_link = false)
+                from sister_link import pick_sister_post
+                post.sister_post = pick_sister_post(post, keyword, cfg)
+            except Exception as e:
+                print(f"  (자매 블로그 글 연결 건너뜀: {str(e).splitlines()[0][:60]})")
         if mode == "main" and not reused and not post.shop_post:
             try:  # 같은 상황에 쓰는 내 쇼핑 블로그 글 하나 (홈판 방문자를 수수료로도 받는다, 끄려면 [cross] shop_link = false)
                 from shop_link import pick_shop_post

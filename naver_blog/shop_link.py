@@ -46,7 +46,7 @@ def shop_blog_id(cfg: dict) -> str:
             c = tomllib.loads(f.read_text(encoding="utf-8-sig"))
         except Exception:
             continue
-        if c.get("shopping", {}).get("enabled"):
+        if c.get("shopping", {}).get("enabled") and not c.get("broadcast", {}).get("enabled"):  # 방송 블로그로 바뀐 폴더는 빼고
             return str(c.get("naver", {}).get("blog_id", "")).strip()
     return ""
 

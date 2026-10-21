@@ -443,6 +443,26 @@ def bump_today():
     STATE.write_text(json.dumps({"date": dt.date.today().isoformat(), "count": posted_today() + 1}))
 
 
+# 매인 블로그: 큰 칸(경제·재테크·생활정보)으로 정해진 글을 내용에 맞는 하위 카테고리로 (블로그에 그 칸이 있을 때만)
+MAIN_SUBCATS = [(r"지원금|장려금|수당|바우처|급여|연금|환급|보조금|정책|신청", "지원금·정책"),
+                (r"금리|대출|예금|적금|이자|청약|주담대|전세대출", "금리·대출"),
+                (r"물가|요금|생활비|공과금|가스비|전기세|난방비|장바구니", "물가·생활비"),
+                (r"주식|ETF|상장|배당|코스피|코스닥", "주식·ETF")]
+
+
+def refine_main_category(text: str, category: str) -> str:
+    if category not in ("", "경제·재테크", "생활정보"):
+        return category
+    try:
+        have = {re.sub(r"\W", "", n) for n in json.loads((ROOT / "categories.json").read_text(encoding="utf-8"))}
+    except Exception:
+        return category
+    for pat, sub in MAIN_SUBCATS:
+        if re.search(pat, text) and re.sub(r"\W", "", sub) in have:
+            return sub
+    return category
+
+
 def load_config() -> dict:
     """config.toml을 읽는다. 같은 [칸]이 두 번 들어가 있으면(붙여넣다 겹친 경우) 합쳐서 읽는다."""
     text = (ROOT / "config.toml").read_text(encoding="utf-8-sig")
@@ -908,6 +928,8 @@ def main():
         from publish import LoginRequired, post_to_naver  # dry-run에서는 playwright 없이도 동작하도록
 
         category = (row.get("category") or cfg["naver"].get("category", "")).strip()
+        if mode == "main":
+            category = refine_main_category(f"{keyword} {post.title}", category)
         for attempt in range(2):
             try:
                 post_to_naver(post, photos, media, cfg["naver"]["blog_id"], pub["auto_publish"], pub["headless"], OUTPUT,

@@ -456,7 +456,9 @@ def sibling_blogs() -> list[tuple[Path, str]]:
             return tomllib.loads((folder / "config.toml").read_text(encoding="utf-8-sig"))
         except Exception:
             return {}
-    if conf(here).get("shopping", {}).get("enabled"):
+    # 쇼핑(상품) 블로그는 빼되, 방송·연예 블로그로 바뀐 쇼핑 폴더는 매인의 연예·이슈 글과 겹칠 수 있어 서로 본다
+    shop_only = lambda c: c.get("shopping", {}).get("enabled") and not c.get("broadcast", {}).get("enabled")
+    if shop_only(conf(here)):
         return []
     out = []
     for f in sorted(here.parent.glob("*/config.toml")):
@@ -464,7 +466,7 @@ def sibling_blogs() -> list[tuple[Path, str]]:
             continue
         c = conf(f.parent)
         bid = str(c.get("naver", {}).get("blog_id", "")).strip()
-        if bid and not c.get("shopping", {}).get("enabled"):
+        if bid and not shop_only(c):
             out.append((f.parent, bid))
     return out
 

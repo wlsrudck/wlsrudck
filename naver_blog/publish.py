@@ -1508,10 +1508,25 @@ def _find_categories(page, blog_id: str) -> dict[str, int]:
     return found
 
 
-def _category_no(page, blog_id: str, name: str) -> int | None:
+_NOT_FALLBACK = re.compile(r"낙서|게시판|지난|보관")
+
+
+def _fallback_category(cats: dict, text: str) -> tuple[str, int] | None:
+    """블로그에 없는 카테고리 이름일 때: 글 제목에 이름이 들어 있는 칸 (예: '은행 고객센터' → 고객센터), 없으면 생활정보.
+    기본 카테고리(낙서장 등)로 가면 주제와 상관없는 칸에 쌓이므로 그 전에 한 번 더 맞춘다"""
+    t = _norm_cat(text)
+    usable = [(n, no) for n, no in cats.items() if not _NOT_FALLBACK.search(n)]
+    for n, no in usable:
+        parts = [_norm_cat(x) for x in re.split(r"[·・•,/\s]+", re.sub(r"\(\d+\)\s*$", "", n))]
+        if t and any(len(x) >= 2 and x in t for x in parts):
+            return n, no
+    return next(((n, no) for n, no in usable if _norm_cat(n) == "생활정보"), None)
+
+
+def _category_no(page, blog_id: str, name: str, text: str = "") -> int | None:
     """카테고리 이름 → 번호. 한 번 찾은 목록은 categories.json에 저장해 두고, 없는 이름이면 다시 찾는다"""
     import json
-    if not name:
+    if not name and not text:
         return None
     try:
         cats = json.loads(CATEGORY_CACHE.read_text(encoding="utf-8"))
@@ -1523,8 +1538,8 @@ def _category_no(page, blog_id: str, name: str) -> int | None:
     except Exception:
         pass
     want = _norm_cat(name)
-    hit = next((no for n, no in cats.items() if _norm_cat(n) == want), None)
-    if hit is None:
+    hit = next((no for n, no in cats.items() if want and _norm_cat(n) == want), None)
+    if hit is None and (want or not cats):
         cats = _find_categories(page, blog_id) or cats
         if cats:
             CATEGORY_CACHE.write_text(json.dumps(cats, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -1532,6 +1547,11 @@ def _category_no(page, blog_id: str, name: str) -> int | None:
         if hit is None:  # 하위 카테고리 이름 일부만 적은 경우 (예: "연예" → "연예·이슈 기록")
             part = [no for n, no in cats.items() if want and want in _norm_cat(n)]
             hit = part[0] if len(part) == 1 else None
+    if hit is None and cats:
+        fb = _fallback_category(cats, text)
+        if fb:
+            print(f"  ⚠ 카테고리 '{name or '(비어 있음)'}'가 블로그에 없어서 '{fb[0]}'에 저장해요.")
+            return fb[1]
     if hit is None:
         names = ", ".join(cats) if cats else "목록을 읽지 못함"
         print(f"  ⚠ 카테고리 '{name}'를 찾지 못해 기본 카테고리로 저장해요. (내 카테고리: {names})")
@@ -1566,7 +1586,7 @@ def post_to_naver(post: Post, photos: list[Path], media: dict, blog_id: str, aut
         context = browser.new_context(storage_state=str(STATE_PATH), locale="ko-KR")
         page = context.new_page()
         try:
-            cat_no = _category_no(page, blog_id, category)
+            cat_no = _category_no(page, blog_id, category, post.title)
             if cat_no:
                 print(f"  카테고리: {category} (번호 {cat_no})")
             _open_write_page(page, blog_id, cat_no)

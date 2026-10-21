@@ -337,7 +337,8 @@ def main():
     for p in picks:
         p["written"] = already_written(p["keyword"], titles)
         cats = blog_categories(cfg)
-        p["category"] = p.get("category") if p.get("category") in cats else map_category(topic_of.get(p["source"], ""), mapping)
+        fb = map_category(topic_of.get(p["source"], ""), mapping)
+        p["category"] = p.get("category") if p.get("category") in cats else (fb if fb in cats else "")
     picks = [p for p in picks if not p["written"]]
     if not picks:
         print("다시 뜰 만한 새 키워드가 없어요 (이미 썼거나 목록에 있어요).")

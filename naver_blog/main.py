@@ -469,6 +469,10 @@ def load_config() -> dict:
     text = (ROOT / "config.toml").read_text(encoding="utf-8-sig")
     # 쇼핑 블로그 이름을 바꿨다 (살림 → 생활템 전체). 설정 파일은 업데이트로 덮어쓰지 않으므로 여기서 한 번 고친다
     new = text.replace('blog_name = "혼자 사는 살림노트"', 'blog_name = "생활템 고르는 기준"')
+    # 고객센터 블로그 씨앗에 블로그에 없는 칸('금융·은행', '신청방법')이 있었다 → 있는 칸 이름으로
+    if re.search(r"(?ms)^\[cs\][^\[]*?^enabled\s*=\s*true", new):
+        new = new.replace('"신청방법" = [', '"조회·발급·신청방법" = [') if '"조회·발급·신청방법" = [' not in new else new
+        new = re.sub(r', "금융·은행" = \[([^\]]*)\]', lambda m: "", new)
     # 쇼핑 블로그를 방송·연예 블로그('방송에 나온 그것')로 바꿨다: 방송 정보 글 + 방송에 나온 제품 글
     if re.search(r"(?ms)^\[shopping\][^\[]*?^enabled\s*=\s*true", new) and not re.search(r"(?m)^\[broadcast\]", new):
         new = new.rstrip() + ("\n\n[broadcast]\n# 방송·연예 블로그: 링크가 있는 줄 = 방송 속 제품 글, 없는 줄 = 방송 정보 글 (끄려면 false)\n"

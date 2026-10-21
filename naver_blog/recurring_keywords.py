@@ -70,7 +70,8 @@ def blog_topic_setup(cfg: dict) -> tuple[list[str], dict, str]:
         topics = [t for t in topics if "연예" not in map_category(t, mapping)]
     desc = "방송·드라마·영화 정보" if tcfg.get("map_only") else "생활·돈·제도·IT 정보"
     if cfg.get("cs", {}).get("enabled"):
-        desc = "고객센터·조회·신청 방법"
+        desc = ("고객센터·조회·신청·납부·발급 '방법' 블로그. 매년 이 시기에 '어떻게 신청/조회/납부하나'를 찾는 것만 고른다 "
+                "(예: 연말정산 미리보기 조회, 난방비 지원금 신청, 종부세 납부 방법). 이슈·계절 상식·행사·음식·날씨·방송은 넣지 않는다")
     return topics, mapping, desc
 
 

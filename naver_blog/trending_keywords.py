@@ -494,6 +494,16 @@ def sibling_titles() -> list[str]:
                     titles += [d.get("keyword", ""), d["post"].get("title", "")]
             except Exception:
                 continue
+        try:  # 그 블로그 키워드 목록에 넣어 둔 것(아직 안 쓴 것 포함) — 두 블로그가 같은 키워드를 동시에 쓰지 않게
+            import csv
+            raw = (folder / "keywords.csv").read_bytes()
+            try:
+                text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                text = raw.decode("cp949")
+            titles += [r[0] for r in csv.reader(text.splitlines()) if r and r[0].strip() and r[0].strip() != "keyword"]
+        except Exception:
+            pass
     return titles
 
 

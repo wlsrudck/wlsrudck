@@ -37,6 +37,7 @@ BUTTONS = [
     ]),
     ("키워드 찾기", [
         ("지금 뜨는 키워드", "11_trending_keywords.bat", "크리에이터 어드바이저 인기 유입 검색어 (이슈)"),
+        ("다시 뜰 키워드 (작년 이맘때)", "30_recurring_keywords.bat", "작년·재작년 이맘때 실제로 뜬 검색어 중 매년 다시 뜨는 것만 골라 올해 키워드로 (지금 써 두면 그때 검색에 이미 올라가 있어요)"),
         ("뉴스 화제 키워드", "21_news_keywords.bat", "네이버 뉴스 많이 본·댓글 많은 기사에서 '나랑 관련 있는' 생활·돈 글감을 골라요"),
         ("평생 키워드", "12_evergreen_keywords.bat", "1년 내내 꾸준히 검색되는 키워드 (연금형)"),
         ("주제로 키워드 찾기", "6_keyword_finder.bat", "큰 주제를 넣으면 롱테일 키워드를 찾아요"),
@@ -250,7 +251,7 @@ def open_path(p: Path) -> None:
 
 AUTO_KEYWORD = "(상품명 자동)"
 from shop_categories import SHOP_CATEGORIES  # noqa: E402
-SHOP_HIDDEN = {"11_trending_keywords.bat", "21_news_keywords.bat", "12_evergreen_keywords.bat", "7_season_keywords.bat", "13_autofill_keywords.bat",
+SHOP_HIDDEN = {"30_recurring_keywords.bat", "11_trending_keywords.bat", "21_news_keywords.bat", "12_evergreen_keywords.bat", "7_season_keywords.bat", "13_autofill_keywords.bat",
                "@google_key", "@pexels_key", "16_ai_image_test.bat"}
 
 
@@ -777,7 +778,8 @@ def main():
     cs = is_cs()
     for col, (group, items) in enumerate(BUTTONS):
         if shop:  # 쇼핑 블로그는 이슈·정보 키워드 찾기 버튼을 숨긴다 (방송·연예 블로그는 지금 뜨는 키워드·자동 채우기를 쓴다)
-            hidden = SHOP_HIDDEN - ({"11_trending_keywords.bat", "13_autofill_keywords.bat"} if is_broadcast() else set())
+            hidden = SHOP_HIDDEN - ({"11_trending_keywords.bat", "13_autofill_keywords.bat", "30_recurring_keywords.bat"}
+                                    if is_broadcast() else set())
             items = [it for it in items if it[1] not in hidden]
         else:
             items = [it for it in items if it[1] != "15_find_products.bat"]

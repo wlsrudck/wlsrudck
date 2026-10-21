@@ -647,6 +647,9 @@ def find_trending(cfg: dict) -> list[dict] | None:
         if not tcfg.get("controversy", False) and CONTROVERSY.search(kw):
             dropped.append(kw)
             continue
+        if not tcfg.get("map_only") and not tcfg.get("entertainment", False) and topic \
+                and "연예" in map_category(topic, mapping):  # 매인: 연예는 방송·연예 블로그 몫 (켜려면 [trending] entertainment = true)
+            continue
         if tcfg.get("map_only") and PRIVATE_LIFE.search(kw):  # 방송·연예 블로그: 사생활(결혼·가족·투병 등)은 정보 글감이 아니다
             dropped.append(kw)
             continue

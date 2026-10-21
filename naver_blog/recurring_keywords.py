@@ -157,14 +157,14 @@ def judge(seen: dict, desc: str, cfg: dict) -> list[dict]:
     text = "\n".join(f"- {k} ({v['n']}번, {len(v['years'])}해)" for k, v in rows)
     client = anthropic.Anthropic(api_key=_api_key(), max_retries=3)
     res = client.beta.messages.parse(
-        model=cfg["writing"]["model"], max_tokens=6000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
+        model=cfg["writing"]["model"], max_tokens=16000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
         output_format=Picks, messages=[{"role": "user", "content": PROMPT.format(
             topic=desc, today=dt.date.today().isoformat(), rows=text)}])
     return [p.model_dump() for p in (res.parsed_output.picks if res.parsed_output else [])]
 
 
 IDEAS = """오늘은 {today}입니다. 이 블로그 주제: {topic}
-오늘부터 4주 안에 '매년 이 시기에 검색이 몰리는' 키워드를 40개 뽑아 주세요.
+오늘부터 4주 안에 '매년 이 시기에 검색이 몰리는' 키워드를 20~25개 뽑아 주세요. why·when 은 짧게(20자 안팎).
 - 법·제도로 날짜가 정해진 일정(세금 고지·신고, 지원금 신청·지급, 연말정산 준비, 보험료 정산 등), 계절·날씨 대비, 연례 행사·기념일,
   매년 바뀌는 기준·요금 발표, 정기 방송·시상식 등. 그해에만 있었던 사건·사람 이야기는 넣지 않습니다.
 - 사람들이 검색창에 칠 짧은 말로, 연도가 들어가면 올해 연도로. source 에는 '연례 일정'이라고 적습니다."""
@@ -177,7 +177,7 @@ def brainstorm(desc: str, cfg: dict) -> list[dict]:
     from generate import _api_key
     client = anthropic.Anthropic(api_key=_api_key(), max_retries=3)
     res = client.beta.messages.parse(
-        model=cfg["writing"]["model"], max_tokens=6000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
+        model=cfg["writing"]["model"], max_tokens=16000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
         output_format=Picks, messages=[{"role": "user", "content": IDEAS.format(today=dt.date.today().isoformat(), topic=desc)}])
     return [p.model_dump() for p in (res.parsed_output.picks if res.parsed_output else [])]
 
@@ -209,7 +209,7 @@ def derived(base: str, cfg: dict, keys: dict) -> list[dict]:
     try:
         client = anthropic.Anthropic(api_key=_api_key(), max_retries=3)
         res = client.beta.messages.parse(
-            model=cfg["writing"]["model"], max_tokens=3000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
+            model=cfg["writing"]["model"], max_tokens=8000, betas=["server-side-fallback-2026-07-01"], fallbacks="default",
             output_format=Nexts, messages=[{"role": "user", "content": NEXT.format(base=base, today=dt.date.today())}])
         for n in (res.parsed_output.items if res.parsed_output else []):
             cands.setdefault(n.keyword.strip(), "예상: " + n.why)
@@ -298,10 +298,18 @@ def main():
     if datalab_only:
         print("작년 어드바이저 데이터가 없어서, 데이터랩(지난 2년 월별 검색 기록)으로 판단해요.")
         print("앞으로 4주에 매년 몰리는 키워드 후보 고르는 중 (Claude)...")
-        picks = brainstorm(desc, cfg)
     else:
         print(f"작년 이맘때 검색어 {len(seen)}개 → 매년 다시 뜨는 것만 고르는 중 (Claude)...")
-        picks = judge(seen, desc, cfg)
+    picks = []
+    for attempt in (1, 2):  # 답이 잘리거나 서버가 붐비면 한 번 더
+        try:
+            picks = brainstorm(desc, cfg) if datalab_only else judge(seen, desc, cfg)
+            break
+        except Exception as e:
+            print(f"  (고르기 실패{' — 한 번 더 시도' if attempt == 1 else ''}: {str(e).splitlines()[0][:80]})")
+    if not picks:
+        print("후보를 고르지 못했어요. 잠시 뒤 다시 눌러 주세요.")
+        return
     picks = [p for p in picks if not CONTROVERSY.search(p["keyword"]) and not PRIVATE_LIFE.search(p["keyword"])]
     have = {r["keyword"].replace(" ", "") for r in load_rows()}
     titles = written_titles(cfg["naver"]["blog_id"])

@@ -22,7 +22,7 @@ import urllib.error
 import urllib.request
 
 from keyword_finder import HEADERS, SHOPPING, blog_doc_count, grade, load_keys, monthly_volumes
-from trending_keywords import LYRICS, already_written, written_titles
+from trending_keywords import LYRICS, already_written, kw_key, written_titles
 
 # 카테고리 → 씨앗 키워드. 광고 단가가 높은 주제(돈, 지원금, 보험, 건강, 자격증)를 많이 넣었다.
 # config.toml 의 [evergreen] seeds 로 바꿀 수 있다.
@@ -139,8 +139,9 @@ def find_evergreen(cfg: dict, keys: dict, plan: list[tuple[str, str]]) -> list[d
     from main import load_rows
     # 1) 연관 키워드 모으기
     print("네이버 연관 키워드 모으는 중...")
-    have = {r["keyword"].replace(" ", "") for r in load_rows()}
+    have = {kw_key(r["keyword"]) for r in load_rows()}
     cands: dict[str, dict] = {}
+    seen_keys: set[str] = set()
     for seed, cat in plan:
         try:
             matched, related = monthly_volumes([seed], keys)
@@ -148,10 +149,13 @@ def find_evergreen(cfg: dict, keys: dict, plan: list[tuple[str, str]]) -> list[d
             print(f"  ({seed}: 검색량 확인 실패 {str(e).splitlines()[0][:60]})")
             continue
         for name, vol, comp in related[:150]:
-            if not (800 <= vol <= 200000) or name in have or SHOPPING.search(name) or LYRICS.search(name):
+            if not (800 <= vol <= 200000) or kw_key(name) in have or SHOPPING.search(name) or LYRICS.search(name):
                 continue
             if ISSUE_WORDS.search(name):
                 continue
+            if kw_key(name) in seen_keys and name not in cands:  # 같은 뜻 다른 말(복비 계산기 ↔ 중개수수료 계산기)은 하나만
+                continue
+            seen_keys.add(kw_key(name))
             cands.setdefault(name, {"keyword": name, "volume": vol, "comp": comp, "seed": seed, "category": cat})
     if not cands:
         return []

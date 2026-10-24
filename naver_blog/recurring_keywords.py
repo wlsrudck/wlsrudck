@@ -26,6 +26,7 @@ STEP_DAYS = 3    # 그 기간 안에서 며칠 간격으로 읽을지 (요청 �
 
 
 from generate import STRICT  # noqa: E402
+from trending_keywords import kw_key
 
 
 class Pick(BaseModel):
@@ -331,9 +332,9 @@ def main():
         print("후보를 고르지 못했어요. 잠시 뒤 다시 눌러 주세요.")
         return
     picks = [p for p in picks if not CONTROVERSY.search(p["keyword"]) and not PRIVATE_LIFE.search(p["keyword"])]
-    have = {r["keyword"].replace(" ", "") for r in load_rows()}
+    have = {kw_key(r["keyword"]) for r in load_rows()}
     titles = written_titles(cfg["naver"]["blog_id"])
-    picks = [p for p in picks if p["keyword"].replace(" ", "") not in have]
+    picks = [p for p in picks if kw_key(p["keyword"]) not in have]
     for p in picks:
         p["written"] = already_written(p["keyword"], titles)
         cats = blog_categories(cfg)
@@ -400,10 +401,10 @@ def main():
         if not idx:
             continue
         rows = load_rows()
-        have = {r["keyword"].replace(" ", "") for r in rows}
+        have = {kw_key(r["keyword"]) for r in rows}
         new = [{"keyword": ds[i - 1]["keyword"], "memo": f"{QUESTION_PREFIX} {base} 이후에 몰릴 질문 — {ds[i - 1]['why']}",
                 "status": "", "category": picks[n - 1]["category"]} for i in idx
-               if ds[i - 1]["keyword"].replace(" ", "") not in have]
+               if kw_key(ds[i - 1]["keyword"]) not in have]
         save_rows(rows + new)
         print(f"  선점 키워드 {len(new)}개를 넣었어요.")
 

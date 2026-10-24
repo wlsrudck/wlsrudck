@@ -28,6 +28,7 @@ import anthropic
 from pydantic import BaseModel, Field
 
 from generate import BANNED_WORDS, _api_key
+from trending_keywords import kw_key
 
 ROOT = Path(__file__).parent
 OUTPUT = ROOT / "output"
@@ -334,8 +335,8 @@ def add_to_keywords(chosen: list[str]) -> int:
     """keywords.csv에 없는 키워드만 뒤에 추가한다"""
     from main import load_rows, save_rows  # 같은 파일 형식을 쓰도록 main의 함수를 그대로 사용
     rows = load_rows()
-    have = {r["keyword"].replace(" ", "") for r in rows}
-    new = [k for k in chosen if k.replace(" ", "") not in have]
+    have = {kw_key(r["keyword"]) for r in rows}
+    new = [k for k in chosen if kw_key(k) not in have]
     save_rows(rows + [{"keyword": k, "memo": "", "status": ""} for k in new])
     return len(new)
 
@@ -435,11 +436,11 @@ def main():
         topic, seeds, ask = season_topic(dt.date.today())
         print(f"[1/3] {topic}: 올해 일정 확인하고 후보 뽑는 중... (1~2분)")
         cands = find_candidates(ask, cfg["writing"], blog, mine)
-        have = {c.keyword.replace(" ", "") for c in cands}
+        have = {kw_key(c.keyword) for c in cands}
         for k in seeds:  # 매년 반복되는 기본 후보도 함께 (이미 있으면 건너뜀)
-            if k.replace(" ", "") not in have:
+            if kw_key(k) not in have:
                 cands.append(Candidate(keyword=k, kind="시즌", title="", reason="매년 이 시기에 검색이 몰리는 키워드"))
-                have.add(k.replace(" ", ""))
+                have.add(kw_key(k))
     else:
         print("[1/3] 내 글 전체를 보고 빈틈(다음에 쓸 글) 찾는 중... (1~2분)" if gaps
               else f"[1/3] '{topic}' 최근 소식 확인하고 후보 뽑는 중... (1~2분)")

@@ -550,14 +550,31 @@ _KINDS = {"기본정보": ["배송조회", "배송", "조회", "보내는법", "
                     "고객센터", "전화번호", "대표번호", "콜센터", "상담원", "상담", "운영시간", "연결"]}
 
 
+# 같은 뜻 다른 말 → 한 가지로 (복비 계산 = 중개수수료 계산기 = 같은 글). 위에서부터 차례로 바꾼다
+_SYNONYM = [("중개보수", "중개수수료"), ("복비", "중개수수료"), ("부동산중개수수료", "중개수수료"), ("부동산수수료", "중개수수료"),
+            ("실비보험", "실손보험"), ("국민건강보험", "건강보험"), ("운전면허", "면허"),
+            ("핸드폰", "휴대폰"), ("휴대전화", "휴대폰"), ("등기부등본", "등기부"), ("주민등록등본", "등본"),
+            ("환급금", "환급"), ("예상연금액", "예상수령액"), ("계산기", "계산"), ("확인", "조회")]
+# 붙어도 뜻이 같은 꼬리말 (빼고 남은 게 3글자 이상일 때만 — '조회방법'이 '조회'가 되어 아무 글과 겹치지 않게)
+_DROP = ["하는방법", "하는법", "방법"]
+
+
 def _canon(text: str) -> str:
-    """비교용 글자: 영어 약자 → 한글 소리, 띄어쓰기·기호 빼고, 같은 회사 다른 이름은 하나로"""
+    """비교용 글자: 영어 약자 → 한글 소리, 띄어쓰기·기호 빼고, 같은 회사 다른 이름·같은 뜻 다른 말은 하나로"""
     t = re.sub(r"[A-Za-z]{1,5}", lambda m: "".join(_LETTER.get(c, c) for c in m.group(0).upper())
                if len(m.group(0)) <= 4 or m.group(0).isupper() else m.group(0).lower(), text)
     t = re.sub(r"[^0-9A-Za-z가-힣]", "", t).lower()
-    for a, b in _ALIAS:
+    for a, b in _ALIAS + _SYNONYM:
         t = t.replace(a, b)
+    for w in _DROP:
+        if len(t.replace(w, "")) >= 3:
+            t = t.replace(w, "")
     return t
+
+
+def kw_key(kw: str) -> str:
+    """keywords.csv 에 같은 키워드가 이미 있는지 볼 때 쓰는 열쇠 ('복비 계산기'와 '중개수수료 계산'은 같은 열쇠)"""
+    return _canon(kw) or kw.replace(" ", "")
 
 
 def already_written(kw: str, titles: list[str]) -> str:
@@ -648,11 +665,11 @@ def find_trending(cfg: dict) -> list[dict] | None:
     items = fetch_trending(cfg["naver"]["blog_id"], tcfg.get("topics", CA_TOPICS))
     if not items:
         return None
-    have = {r["keyword"].replace(" ", "") for r in load_rows()}
+    have = {kw_key(r["keyword"]) for r in load_rows()}
     titles = written_titles(cfg["naver"]["blog_id"])
     rows, dropped = [], []
     for topic, kw in items:
-        if kw.replace(" ", "") in have or SHOPPING.search(kw) or LYRICS.search(kw):
+        if kw_key(kw) in have or SHOPPING.search(kw) or LYRICS.search(kw):
             continue
         if not tcfg.get("controversy", False) and CONTROVERSY.search(kw):
             dropped.append(kw)
@@ -663,7 +680,7 @@ def find_trending(cfg: dict) -> list[dict] | None:
         if tcfg.get("map_only") and PRIVATE_LIFE.search(kw):  # 방송·연예 블로그: 사생활(결혼·가족·투병 등)은 정보 글감이 아니다
             dropped.append(kw)
             continue
-        have.add(kw.replace(" ", ""))  # 같은 키워드가 여러 주제에 올라와도 한 번만
+        have.add(kw_key(kw))  # 같은 키워드가 여러 주제에 올라와도 한 번만
         rows.append({"keyword": kw, "topic": topic, "category": map_category(topic, mapping) if topic else "",
                      "written": already_written(kw, titles)})
     known = any(any(t in r["topic"] for t in ALL_TOPICS) for r in rows)

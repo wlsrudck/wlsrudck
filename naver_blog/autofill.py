@@ -13,6 +13,7 @@
 
 from evergreen_keywords import ISSUE_WORDS, find_evergreen, random_plan, seeds_from
 from keyword_finder import load_keys
+from trending_keywords import kw_key
 
 ENTERTAINMENT = "연예"
 
@@ -143,8 +144,8 @@ def hot_issue(cfg: dict) -> str:
         return ""
     from trending_keywords import covered_by_posts
     judged = covered_by_posts([r["keyword"] for r in cands[:10]], cfg)
-    have = {r["keyword"].replace(" ", "") for r in rows}
-    pick = next((r for r in cands if r["keyword"] not in judged and r["keyword"].replace(" ", "") not in have), None)
+    have = {kw_key(r["keyword"]) for r in rows}
+    pick = next((r for r in cands if r["keyword"] not in judged and kw_key(r["keyword"]) not in have), None)
     if not pick:
         return ""
     save_rows([{"keyword": pick["keyword"], "memo": question_memo(pick["keyword"]), "status": "",

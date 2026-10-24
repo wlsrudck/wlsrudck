@@ -15,6 +15,7 @@ import urllib.request
 from pathlib import Path
 
 from pydantic import BaseModel, Field
+from trending_keywords import kw_key
 
 ROOT = Path(__file__).parent
 CACHE = ROOT / "output" / "news_trends.json"
@@ -126,12 +127,12 @@ def find_news(cfg: dict, use_cache: bool = True) -> list[dict]:
             return []
         CACHE.parent.mkdir(exist_ok=True)
         CACHE.write_text(json.dumps({"date": today, "v": CACHE_V, "picks": picks}, ensure_ascii=False), encoding="utf-8")
-    have = {r["keyword"].replace(" ", "") for r in load_rows()}
+    have = {kw_key(r["keyword"]) for r in load_rows()}
     titles_mine = written_titles(cfg["naver"]["blog_id"])
     out = []
     for p in picks:
         kw = p["keyword"].strip()
-        if not kw or kw.replace(" ", "") in have or CONTROVERSY.search(kw) or CONTROVERSY.search(p.get("title", "")):
+        if not kw or kw_key(kw) in have or CONTROVERSY.search(kw) or CONTROVERSY.search(p.get("title", "")):
             continue
         topic = {"경제·재테크": "경제", "IT·AI": "IT"}.get(p.get("category", ""), "생활")
         out.append({**p, "keyword": kw, "category": mapping.get(topic, ""),

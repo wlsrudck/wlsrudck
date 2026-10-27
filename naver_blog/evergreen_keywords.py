@@ -134,6 +134,11 @@ def classify(series: list[float] | None, kw: str) -> tuple[str, str]:
     return "시즌", f"매년 {peak_month}월에 많이 찾음 → {(peak_month - 3) % 12 + 1}월쯤 미리 써 두기"
 
 
+MIN_VOLUME = 300  # 월 검색량 하한. 너무 높이면 넓은 키워드(글이 넘침)만 남는다 — 등급이 경쟁을 따로 걸러 준다
+ENOUGH = 5  # 이만큼 못 찾으면 다른 씨앗으로 알아서 더 찾는다
+MAX_ROUNDS = 4
+
+
 def find_evergreen(cfg: dict, keys: dict, plan: list[tuple[str, str]]) -> list[dict]:
     """씨앗 (키워드, 카테고리) 목록에서 평생 키워드 후보를 모아 흐름·등급을 매긴 목록 (좋은 순)"""
     from main import load_rows
@@ -142,14 +147,17 @@ def find_evergreen(cfg: dict, keys: dict, plan: list[tuple[str, str]]) -> list[d
     have = {kw_key(r["keyword"]) for r in load_rows()}
     cands: dict[str, dict] = {}
     seen_keys: set[str] = set()
+    from generate import naver_suggest
     for seed, cat in plan:
+        # 씨앗 하나만 넣으면 넓은 키워드(이미 글이 넘치는 것)만 온다 → 자동완성 꼬리 키워드도 함께 넣어 좁은 키워드까지 받는다
+        tails = [q for q in naver_suggest(seed, 8) if seed.replace(" ", "") in q.replace(" ", "")][:4]
         try:
-            matched, related = monthly_volumes([seed], keys)
+            matched, related = monthly_volumes([seed] + tails, keys)
         except Exception as e:
             print(f"  ({seed}: 검색량 확인 실패 {str(e).splitlines()[0][:60]})")
             continue
         for name, vol, comp in related[:150]:
-            if not (800 <= vol <= 200000) or kw_key(name) in have or SHOPPING.search(name) or LYRICS.search(name):
+            if not (MIN_VOLUME <= vol <= 200000) or kw_key(name) in have or SHOPPING.search(name) or LYRICS.search(name):
                 continue
             if ISSUE_WORDS.search(name):
                 continue
@@ -173,7 +181,9 @@ def find_evergreen(cfg: dict, keys: dict, plan: list[tuple[str, str]]) -> list[d
         print("  ⚠ 데이터랩(검색어트렌드)을 쓸 수 없어서 말로만 짐작해요. README의 '평생 키워드' 부분을 보고 켜 주세요.")
     for r in rows:
         r["kind"], r["why"] = classify(trends.get(r["keyword"]), r["keyword"])
+    n_all = len(rows)
     rows = [r for r in rows if r["kind"] not in ("식는중", "반짝")]
+    n_fading = n_all - len(rows)
 
     # 3) 등급 + 이미 쓴 글
     titles = written_titles(cfg["naver"]["blog_id"])
@@ -188,6 +198,7 @@ def find_evergreen(cfg: dict, keys: dict, plan: list[tuple[str, str]]) -> list[d
         r["written"] = already_written(r["keyword"], titles)
     kind_order = {"평생": 0, "시즌": 1, "평생?": 2, "?": 3}
     grade_order = {"S": 0, "A": 1, "B": 2, "?": 3, "C": 4}
+    n_crowded = sum(r["grade"] == "C" for r in rows)
     rows = [r for r in rows if r["grade"] != "C"]
     try:  # 글자 규칙이 놓친 것까지 사람처럼 한 번 더 판단
         from trending_keywords import covered_by_posts
@@ -199,8 +210,9 @@ def find_evergreen(cfg: dict, keys: dict, plan: list[tuple[str, str]]) -> list[d
         pass
     dup = [r for r in rows if r["written"]]
     rows = [r for r in rows if not r["written"]]  # 이미 쓴 주제는 목록에서 뺀다 (보여 줘도 고를 일이 없다)
-    if dup:
-        print(f"이미 쓴 글과 겹치는 키워드 {len(dup)}개는 뺐어요 (예: " + ", ".join(r["keyword"] for r in dup[:3]) + ")")
+    print(f"  후보 {n_all}개 → 반짝·식는 키워드 {n_fading}개, 글이 이미 넘치는 키워드 {n_crowded}개, "
+          f"이미 쓴 글과 겹치는 키워드 {len(dup)}개를 빼고 {len(rows)}개 남았어요"
+          + (" (겹친 예: " + ", ".join(r["keyword"] for r in dup[:3]) + ")" if dup else ""))
     if is_cs(cfg):  # 고객센터: 같은 등급 안에서 '상황 + 회사' 키워드를 먼저, '회사+고객센터' 틀은 뒤로
         from keyword_finder import money_rank
         rows.sort(key=lambda r: (grade_order.get(r["grade"], 5), cs_rank(r), money_rank(r["keyword"]),
@@ -247,9 +259,32 @@ def seeds_from(cfg: dict) -> dict[str, list[str]]:
     return seeds
 
 
-def random_plan(seeds: dict[str, list[str]], per_cat: int = 2) -> list[tuple[str, str]]:
+def random_plan(seeds: dict[str, list[str]], per_cat: int = 2, used: set[str] | None = None) -> list[tuple[str, str]]:
     rnd = random.Random()
-    return [(s, c) for c, ss in seeds.items() for s in rnd.sample(ss, min(per_cat, len(ss)))]
+    used = used or set()
+    out = []
+    for c, ss in seeds.items():
+        rest = [x for x in ss if x not in used]
+        out += [(x, c) for x in rnd.sample(rest, min(per_cat, len(rest)))]
+    return out
+
+
+def find_until_enough(cfg: dict, keys: dict, seeds: dict[str, list[str]], plan: list[tuple[str, str]]) -> list[dict]:
+    """찾은 게 적으면 '다른 씨앗으로 해 보세요' 대신 아직 안 쓴 씨앗으로 알아서 몇 번 더 찾는다"""
+    rows: list[dict] = []
+    used: set[str] = set()
+    for n in range(MAX_ROUNDS):
+        if n:
+            plan = random_plan(seeds, used=used)
+            if not plan:
+                break
+            print(f"\n아직 {len(rows)}개뿐이라 다른 씨앗으로 더 찾아요 ({n + 1}/{MAX_ROUNDS}): " + ", ".join(x for x, _ in plan))
+        used |= {x for x, _ in plan}
+        have = {kw_key(r["keyword"]) for r in rows}
+        rows += [r for r in find_evergreen(cfg, keys, plan) if kw_key(r["keyword"]) not in have]
+        if len(rows) >= ENOUGH:
+            break
+    return rows
 
 
 def main():
@@ -272,9 +307,13 @@ def main():
             plan = random_plan(seeds)
     print("씨앗: " + ", ".join(s for s, _ in plan))
 
-    rows = find_evergreen(cfg, keys, plan)
+    own = bool(arg or ans)  # 직접 넣은 씨앗이면 그 주제 안에서만 (다른 주제로 넘어가지 않는다)
+    rows = find_evergreen(cfg, keys, plan) if own else find_until_enough(cfg, keys, seeds, plan)
+    if not rows and own:
+        print("이 씨앗에서는 글이 덜 쓰인 평생 키워드가 없었어요. 엔터(자동)로 하면 여러 주제를 돌아가며 찾아요.")
+        return
     if not rows:
-        print("쓸 만한 평생 키워드를 찾지 못했어요. 다른 씨앗 키워드로 해 보세요.")
+        print("씨앗을 바꿔 가며 찾아도 글이 덜 쓰인 평생 키워드가 없었어요. [다시 뜰 키워드]나 [지금 뜨는 키워드]를 써 보세요.")
         return
 
     print()

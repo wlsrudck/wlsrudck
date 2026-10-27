@@ -11,7 +11,7 @@
 따로 실행: python autofill.py  (13_autofill_keywords.bat)
 """
 
-from evergreen_keywords import ISSUE_WORDS, find_evergreen, random_plan, seeds_from
+from evergreen_keywords import ISSUE_WORDS, find_until_enough, random_plan, seeds_from
 from keyword_finder import load_keys
 from trending_keywords import kw_key
 
@@ -23,9 +23,10 @@ def _ok(r: dict) -> bool:
 
 
 def evergreen_candidates(cfg: dict, keys: dict) -> list[dict]:
-    for _ in range(2):  # 씨앗을 바꿔 가며 두 번까지
+    for _ in range(2):  # 씨앗을 바꿔 가며 (한 번에 여러 차례 더 찾는다)
         try:
-            rows = find_evergreen(cfg, keys, random_plan(seeds_from(cfg)))
+            seeds = seeds_from(cfg)
+            rows = find_until_enough(cfg, keys, seeds, random_plan(seeds))
         except Exception as e:
             print(f"  (평생 키워드 찾기 실패: {str(e).splitlines()[0][:80]})")
             return []

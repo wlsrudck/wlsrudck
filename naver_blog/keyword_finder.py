@@ -295,7 +295,7 @@ def grade(volume: int | None, docs: int | None, comp: str = "") -> str:
         return "S"
     if volume >= 300 and ratio < 3:
         return "A"
-    if ratio < 10:
+    if ratio < 30:  # 글이 꽤 있어도 이 정도면 자리를 잡은 블로그는 올라간다 (검색은 최근 글을 먼저 올린다)
         return "B"
     return "C"
 

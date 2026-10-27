@@ -31,6 +31,12 @@ def evergreen_candidates(cfg: dict, keys: dict) -> list[dict]:
             print(f"  (평생 키워드 찾기 실패: {str(e).splitlines()[0][:80]})")
             return []
         good = [r for r in rows if _ok(r) and r["kind"] in ("평생", "평생?")]
+        if not good:  # S·A 가 없으면 '빈 손' 대신 B 중에서 글이 가장 덜 쓰인 것 (검색 1건당 글 수가 적은 순)
+            good = sorted((r for r in rows if r.get("grade") == "B" and not r.get("written")
+                           and not ISSUE_WORDS.search(r["keyword"]) and r["kind"] in ("평생", "평생?", "시즌")),
+                          key=lambda r: (r.get("docs") or 10 ** 9) / max(r["volume"], 1))[:10]
+            if good:
+                print(f"  S·A 등급이 없어서 B 등급 중 글이 가장 덜 쓰인 {len(good)}개를 후보로 써요")
         if good:
             from evergreen_keywords import cs_rank, is_cs
             if is_cs(cfg):  # 고객센터: '회사+고객센터' 틀은 빼고(이미 넘침), 업종이 번갈아 나오게

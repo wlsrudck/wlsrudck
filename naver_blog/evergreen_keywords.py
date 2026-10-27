@@ -194,7 +194,7 @@ def find_evergreen(cfg: dict, keys: dict, plan: list[tuple[str, str]]) -> list[d
                 docs = blog_doc_count(r["keyword"], keys)
             except Exception:
                 docs = None
-        r["grade"] = grade(r["volume"], docs, r["comp"])
+        r["grade"], r["docs"] = grade(r["volume"], docs, r["comp"]), docs
         r["written"] = already_written(r["keyword"], titles)
     kind_order = {"평생": 0, "시즌": 1, "평생?": 2, "?": 3}
     grade_order = {"S": 0, "A": 1, "B": 2, "?": 3, "C": 4}

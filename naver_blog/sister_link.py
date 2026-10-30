@@ -29,6 +29,8 @@ PROMPT = """아래는 방금 쓴 글과, 같은 운영자의 다른 블로그 �
 
 def sister_blog(cfg: dict) -> tuple[str, str]:
     """(상대 블로그 아이디, 'cs' 또는 'main'). 매인이면 고객센터 블로그를, 고객센터면 매인을 찾는다"""
+    if cfg.get("shopping", {}).get("enabled") or cfg.get("broadcast", {}).get("enabled"):
+        return "", ""  # 방송·쇼핑 블로그는 매인·고객센터와 짝이 아니다 (연예 글 끝에 신청 방법 글이 붙으면 엉뚱하다)
     me_cs = bool(cfg.get("cs", {}).get("enabled"))
     for f in sorted(ROOT.parent.glob("*/config.toml")):
         if f.parent.resolve() == ROOT.resolve():

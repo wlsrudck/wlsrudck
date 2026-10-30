@@ -773,6 +773,17 @@ def _image_block(path: Path) -> dict:
     return {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}}
 
 
+def key_problem(e: Exception) -> str:
+    """Claude 키가 거절됐을 때(401) 어느 키가 문제인지 알려 주는 말. 키 문제가 아니면 빈 문자열"""
+    if "401" not in str(e) and "authentication_error" not in str(e):
+        return ""
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return ("Claude 키가 거절됐어요(401). 이 컴퓨터의 환경변수 ANTHROPIC_API_KEY 에 든 키를 쓰고 있는데 그 키가 틀렸거나 지워졌어요. "
+                "다른 프로그램을 설치하다 생긴 설정일 수 있어요 — 환경변수를 지우거나 올바른 키로 바꿔 주세요.")
+    return (f"Claude 키가 거절됐어요(401). {Path(__file__).parent.name} 폴더의 api_key.txt 키가 틀렸거나 지워졌어요. "
+            "console.anthropic.com 의 API Keys 에서 살아 있는 키를 확인해, 잘 되는 다른 폴더의 api_key.txt 와 같은 키로 넣어 주세요.")
+
+
 def _api_key() -> str | None:
     """환경변수가 없으면 같은 폴더의 api_key.txt에서 읽는다."""
     if os.environ.get("ANTHROPIC_API_KEY"):

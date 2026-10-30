@@ -83,10 +83,20 @@ def main():
             rel = related_block(q, cfg)
         except Exception as e:
             rel = ""
-            print(f"  (함께 보면 좋은 글 찾기 실패: {str(e).splitlines()[0][:60]})")
+            from generate import key_problem
+            print("  ⚠ " + (key_problem(e) or f"함께 보면 좋은 글 찾기 실패: {str(e).splitlines()[0][:60]}"))
+            if key_problem(e):
+                return
         if rel:
             parts.append(rel)
-        got = pick_sister_post(SimpleNamespace(title=q), q, cfg) if bid else ""
+        try:
+            got = pick_sister_post(SimpleNamespace(title=q), q, cfg) if bid else ""
+        except Exception as e:
+            from generate import key_problem
+            print("  ⚠ " + (key_problem(e) or f"상대 블로그 글 찾기 실패: {str(e).splitlines()[0][:80]}"))
+            if key_problem(e):
+                return
+            got = ""
         if got:
             k, _, rest = got.partition("|")
             title, _, url = rest.partition("|")
